@@ -764,7 +764,7 @@ The **synodic period** is how often the Earth-body pair returns to that\n\
 same relative geometry.  Computed from each body's semi-major axis via\n\
 Kepler's third law (`T_years = a^(3/2)`) and\n\
 `synodic = 1 / |1/T_earth − 1/T_body|`.\n\n\
-<div id=\"body-table\">\n\
+<div id=\"body-table\" markdown=\"1\">\n\
 <label>Filter: <input id=\"body-filter\" type=\"search\" placeholder=\"e.g., mars, ceres, 1P…\"></label>\n\n\
 {table}\n\
 </div>\n\n\

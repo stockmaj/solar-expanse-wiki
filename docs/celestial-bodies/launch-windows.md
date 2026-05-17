@@ -55,7 +55,7 @@ same relative geometry.  Computed from each body's semi-major axis via
 Kepler's third law (`T_years = a^(3/2)`) and
 `synodic = 1 / |1/T_earth − 1/T_body|`.
 
-<div id="body-table">
+<div id="body-table" markdown="1">
 <label>Filter: <input id="body-filter" type="search" placeholder="e.g., mars, ceres, 1P…"></label>
 
 | Body | <span title="Average distance from the Sun in astronomical units (1 AU = Earth's distance)">Semi-major axis (AU)</span> | <span title="Time for one orbit around the Sun, derived from a via Kepler's third law">Orbital period</span> | <span title="Interval between consecutive Hohmann-style launch opportunities from Earth — the synodic period">Earth ↔ body window</span> |
