@@ -1,0 +1,24 @@
+title: Solar Expanse Wiki
+description: Unofficial, community-maintained data-first wiki for Solar Expanse.
+baseurl: "/solar-expanse-wiki"
+url: "https://stockmaj.github.io"
+
+# Theme is left blank intentionally — we ship a custom layout in _layouts/
+# and a stylesheet in assets/.  Jekyll's default markdown processor
+# (kramdown) renders the .md files; the layout wraps each page.
+markdown: kramdown
+kramdown:
+  input: GFM
+  hard_wrap: false
+
+# Apply the default layout to every generated page without needing front
+# matter at the top of each .md file.
+defaults:
+  - scope:
+      path: ""
+      type: pages
+    values:
+      layout: default
+
+exclude:
+  - CONTRIBUTING.md

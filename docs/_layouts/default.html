@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ page.title | default: site.title }}</title>
+  <link rel="stylesheet" href="{{ '/assets/css/wiki.css' | relative_url }}">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='10' fill='%23ffb347'/><circle cx='24' cy='12' r='2.5' fill='%2388ccff'/></svg>">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <a class="brand" href="{{ '/' | relative_url }}">Solar Expanse Wiki</a>
+      <nav>
+        {% assign u = page.url | downcase %}
+        <a href="{{ '/celestial-bodies/' | relative_url }}"{% if u contains '/celestial-bodies' %} class="active"{% endif %}>Bodies</a>
+        <a href="{{ '/spacecraft/' | relative_url }}"{% if u contains '/spacecraft' %} class="active"{% endif %}>Spacecraft</a>
+        <a href="{{ '/launch-vehicles/' | relative_url }}"{% if u contains '/launch-vehicles' %} class="active"{% endif %}>Launch Vehicles</a>
+        <a href="{{ '/facilities/' | relative_url }}"{% if u contains '/facilities' %} class="active"{% endif %}>Facilities</a>
+        <a href="{{ '/research/' | relative_url }}"{% if u contains '/research' %} class="active"{% endif %}>Research</a>
+        <a href="{{ '/missions/' | relative_url }}"{% if u contains '/missions' %} class="active"{% endif %}>Missions</a>
+        <a href="{{ '/resources/' | relative_url }}"{% if u contains '/resources' %} class="active"{% endif %}>Resources</a>
+        <a href="{{ '/corporations/' | relative_url }}"{% if u contains '/corporations' %} class="active"{% endif %}>Corporations</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    {{ content }}
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <small>
+        Unofficial fan wiki — <em>Solar Expanse</em> © Maciej Miąsik / TJ Entertainment.
+        Built from the game's own data files; pipeline in
+        <a href="https://github.com/{{ site.github.repository_nwo | default: 'stockmaj/solar-expanse-wiki' }}">stockmaj/solar-expanse-wiki</a>.
+      </small>
+    </div>
+  </footer>
+</body>
+</html>
