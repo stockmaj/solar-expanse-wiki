@@ -256,6 +256,7 @@
         '</div>' +
         '<div class="calc-pane calc-pane-right">' +
           '<div class="calc-pane-header"><h3>Resources needed</h3></div>' +
+          '<div class="calc-crew-picker" id="calc-crew-picker"></div>' +
           '<div id="calc-totals"></div>' +
         '</div>' +
       '</div>';
@@ -269,13 +270,54 @@
       redById: indexBy(data.reductions, 'id'),
     };
 
+    // Default the crew transport selection if none is saved (or the saved id
+    // no longer exists). Pick the first unlocked module.
+    var crewIds = (data.crew_transports || []).reduce(function (m, c) { m[c.id] = c; return m; }, {});
+    if (!ctx.state.crewTransport || !crewIds[ctx.state.crewTransport]) {
+      var def = (data.crew_transports || []).find(function (c) { return !c.is_locked; })
+        || (data.crew_transports || [])[0];
+      ctx.state.crewTransport = def ? def.id : null;
+      saveState(ctx.state);
+    }
+    ctx.crewById = crewIds;
+
     bindReductions(root, ctx);
     bindFacilityList(root, ctx);
     bindPlaced(root, ctx);
     bindReset(root, ctx);
     bindSave(root, ctx);
+    bindCrewPicker(root, ctx);
     setupTooltips(root);
     rerenderAll(root, ctx);
+  }
+
+  function renderCrewPicker(ctx) {
+    var transports = ctx.data.crew_transports || [];
+    if (!transports.length) return '';
+    return '<label>Crew transport: ' +
+      '<select id="calc-crew-select">' +
+      transports.map(function (t) {
+        var sel = t.id === ctx.state.crewTransport ? ' selected' : '';
+        var lockTag = t.is_locked ? ' (locked)' : '';
+        return '<option value="' + escapeHtml(t.id) + '"' + sel + '>' +
+          escapeHtml(t.name) + ' — ' + t.capacity + ' seats, ' + t.mass + ' t' + lockTag +
+          '</option>';
+      }).join('') +
+      '</select></label>';
+  }
+
+  function bindCrewPicker(root, ctx) {
+    var el = root.querySelector('#calc-crew-picker');
+    if (!el) return;
+    el.innerHTML = renderCrewPicker(ctx);
+    var sel = el.querySelector('#calc-crew-select');
+    if (sel) {
+      sel.addEventListener('change', function () {
+        ctx.state.crewTransport = sel.value;
+        saveState(ctx.state);
+        rerenderTotals(root, ctx);
+      });
+    }
   }
 
   function setupTooltips(root) {
@@ -665,7 +707,7 @@
       .filter(Boolean);
 
     var totals = totalResources(placed, checked);
-    var resourceRows = Object.keys(totals)
+    var cargoRows = Object.keys(totals)
       .map(function (rid) {
         return {
           rid: rid,
@@ -673,31 +715,52 @@
           amount: totals[rid],
         };
       })
-      .filter(function (r) { return r.amount > 0; })
-      .sort(function (a, b) { return b.amount - a.amount; });
+      .filter(function (r) { return r.amount > 0; });
 
     var workers = workerTotal(placed, checked);
     var powerNet = powerNetTotal(placed, checked);
 
-    var grand = resourceRows.reduce(function (sum, r) { return sum + r.amount; }, 0);
+    var transport = ctx.crewById && ctx.crewById[ctx.state.crewTransport];
+    var crew = crewTransportMass(workers, transport);
+    if (crew.mass > 0 && transport) {
+      cargoRows.push({
+        rid: 'human',
+        name: transport.name + ' ×' + crew.capsules + ' (' + workers + ' humans)',
+        amount: Math.round(crew.mass),
+      });
+    }
+    cargoRows.sort(function (a, b) { return b.amount - a.amount; });
 
-    var extraRows = [];
-    if (workers > 0) extraRows.push({ rid: 'human', name: 'Humans', amount: workers });
-    if (powerNet !== 0) extraRows.push({ rid: 'energy', name: 'Power (net)', amount: powerNet });
+    var grand = cargoRows.reduce(function (sum, r) { return sum + r.amount; }, 0);
 
-    if (resourceRows.length === 0 && extraRows.length === 0) {
+    var operationalRows = [];
+    if (workers > 0) operationalRows.push({ rid: 'human', name: 'Humans on-site', amount: workers });
+    if (powerNet !== 0) operationalRows.push({ rid: 'energy', name: 'Power (net)', amount: powerNet });
+
+    if (cargoRows.length === 0 && operationalRows.length === 0) {
       return '<p class="calc-empty"><em>All costs reduced to 0.</em></p>';
     }
 
-    return '<table class="calc-totals"><thead><tr><th>Resource</th><th>Amount</th></tr></thead><tbody>' +
-      resourceRows.concat(extraRows).map(function (r) {
-        return '<tr><td>' +
-          '<img class="calc-total-icon" src="' + escapeHtml(iconUrl(r.rid)) + '" alt=""> ' +
-          escapeHtml(r.name) + '</td>' +
-          '<td class="calc-num">' + r.amount.toLocaleString() + '</td></tr>';
-      }).join('') +
-      '</tbody><tfoot><tr><td><strong>Total tons</strong></td>' +
-      '<td class="calc-num"><strong>' + grand.toLocaleString() + '</strong></td></tr></tfoot></table>';
+    function rowHtml(r) {
+      return '<tr><td>' +
+        '<img class="calc-total-icon" src="' + escapeHtml(iconUrl(r.rid)) + '" alt=""> ' +
+        escapeHtml(r.name) + '</td>' +
+        '<td class="calc-num">' + r.amount.toLocaleString() + '</td></tr>';
+    }
+
+    var html = '<table class="calc-totals">';
+    if (cargoRows.length) {
+      html += '<thead><tr><th colspan="2" class="calc-section">Cargo (to ship)</th></tr></thead>' +
+        '<tbody>' + cargoRows.map(rowHtml).join('') + '</tbody>' +
+        '<tfoot><tr><td><strong>Total tons</strong></td>' +
+        '<td class="calc-num"><strong>' + grand.toLocaleString() + '</strong></td></tr></tfoot>';
+    }
+    if (operationalRows.length) {
+      html += '<thead><tr><th colspan="2" class="calc-section">Operational (on-site)</th></tr></thead>' +
+        '<tbody>' + operationalRows.map(rowHtml).join('') + '</tbody>';
+    }
+    html += '</table>';
+    return html;
   }
 
   function rerenderAll(root, ctx) {
