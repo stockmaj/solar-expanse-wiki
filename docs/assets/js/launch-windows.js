@@ -33,6 +33,11 @@
   }
 
   function nextWindow(body, fromDate) {
+    // A "launch window" here = the time when an idealized minimum-energy
+    // Hohmann transfer launched from Earth's orbit would arrive at the target
+    // body just as the body reaches the transfer's aphelion (for outer) or
+    // perihelion (for inner).  In phase-space terms: the relative angle
+    // (theta_body - theta_earth) at launch must equal `required` below.
     var daysSinceEpoch = (fromDate.getTime() - EPOCH_MS) / DAY_MS;
     var n_body = TWO_PI / Math.pow(body.a, 1.5);
     var theta_earth = angleAt(earth.longitude, n_earth, daysSinceEpoch);
@@ -41,13 +46,16 @@
     var t_transfer_years = 0.5 * Math.pow((earth.a + body.a) / 2, 1.5);
     var required = Math.PI - n_body * t_transfer_years;
     required = ((required % TWO_PI) + TWO_PI) % TWO_PI;
+    // rel changes at rate R = n_body - n_earth per year.  For outer bodies
+    // R < 0 (Earth laps the target); for inner bodies R > 0.  Solve
+    //    rel + R * t  ≡  required  (mod 2π)
+    // for smallest positive t.  This is equivalent to t = (rel - required) /
+    // (n_earth - n_body), with wrap-around to keep t in [0, synodic).
     var omega = n_earth - n_body;
-    // Earth completes a "lap" every 2π / |omega| time; we want positive wait time.
-    var delta = (required - rel) / omega;
-    if (omega < 0) delta = delta;  // sign already correct
-    // Normalize to a positive time-to-next-window.
     var synodic_years = TWO_PI / Math.abs(omega);
+    var delta = (rel - required) / omega;
     while (delta < 0) delta += synodic_years;
+    while (delta >= synodic_years) delta -= synodic_years;
     var waitDays = delta * YEAR_DAYS;
     return new Date(fromDate.getTime() + waitDays * DAY_MS);
   }

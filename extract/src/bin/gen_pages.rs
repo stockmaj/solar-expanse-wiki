@@ -729,10 +729,21 @@ fn page_launch_windows(ctx: &WikiCtx) -> String {
 > perturbations and your spacecraft's specific Δv budget, so the dates and\n\
 > intervals here are a **planning approximation** — the porkchop plot is\n\
 > the source of truth at launch time.\n\n\
-The **synodic period** is how often a given Earth-body pair returns to the\n\
-same relative geometry.  After each synodic period, the same Hohmann-style\n\
-launch opportunity comes around again.  Computed from each body's\n\
-semi-major axis via Kepler's third law (`T_years = a^(3/2)`) and\n\
+## What counts as a launch window\n\n\
+A *launch window* here is the moment when an idealized **Hohmann transfer**\n\
+launched from Earth's orbit will arrive at the target body just as that body\n\
+reaches the transfer ellipse's far side.  Concretely, at the moment of\n\
+launch the target has to lead (for outer bodies) or trail (for inner bodies)\n\
+Earth by a specific phase angle so that body and spacecraft meet on arrival.\n\
+Earth–Mars windows recur every ~26 months (synodic period); the most recent\n\
+real-world ones were 2020-07, 2022-09, 2024-10.\n\n\
+This is a single idealised window per synodic period — *not* a multi-day\n\
+porkchop plot.  In practice the in-game planner gives you a range of days\n\
+on either side at slightly higher Δv cost; the table here is the centre of\n\
+that range.\n\n\
+The **synodic period** is how often the Earth-body pair returns to that\n\
+same relative geometry.  Computed from each body's semi-major axis via\n\
+Kepler's third law (`T_years = a^(3/2)`) and\n\
 `synodic = 1 / |1/T_earth − 1/T_body|`.\n\n\
 {table}\n\
 ## Practical reading\n\n\

@@ -7,10 +7,24 @@
 > intervals here are a **planning approximation** — the porkchop plot is
 > the source of truth at launch time.
 
-The **synodic period** is how often a given Earth-body pair returns to the
-same relative geometry.  After each synodic period, the same Hohmann-style
-launch opportunity comes around again.  Computed from each body's
-semi-major axis via Kepler's third law (`T_years = a^(3/2)`) and
+## What counts as a launch window
+
+A *launch window* here is the moment when an idealized **Hohmann transfer**
+launched from Earth's orbit will arrive at the target body just as that body
+reaches the transfer ellipse's far side.  Concretely, at the moment of
+launch the target has to lead (for outer bodies) or trail (for inner bodies)
+Earth by a specific phase angle so that body and spacecraft meet on arrival.
+Earth–Mars windows recur every ~26 months (synodic period); the most recent
+real-world ones were 2020-07, 2022-09, 2024-10.
+
+This is a single idealised window per synodic period — *not* a multi-day
+porkchop plot.  In practice the in-game planner gives you a range of days
+on either side at slightly higher Δv cost; the table here is the centre of
+that range.
+
+The **synodic period** is how often the Earth-body pair returns to that
+same relative geometry.  Computed from each body's semi-major axis via
+Kepler's third law (`T_years = a^(3/2)`) and
 `synodic = 1 / |1/T_earth − 1/T_body|`.
 
 | Body | <span title="Average distance from the Sun in astronomical units (1 AU = Earth's distance)">Semi-major axis (AU)</span> | <span title="Time for one orbit around the Sun, derived from a via Kepler's third law">Orbital period</span> | <span title="Interval between consecutive Hohmann-style launch opportunities from Earth — the synodic period">Earth ↔ body window</span> |
