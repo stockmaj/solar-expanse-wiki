@@ -151,12 +151,23 @@ main table th, main table td {
   vertical-align: top;
   text-align: left;
 }
+/* Sticky table headers.
+ *
+ * Expected behavior: column names stay visible while scrolling long tables.
+ * The site-header is `position: sticky; top: 0; z-index: 10` (~50px tall).
+ * If table th had no z-index, it would slide UNDER the page nav on scroll.
+ * We set z-index: 5 (below site-header's 10) so headers stay above their
+ * own rows but never overlap the nav. `top: 0` is correct because tables
+ * are inside their own scroll container (main table { overflow-x: auto })
+ * — the sticky context is the table, not the viewport.
+ */
 main table th {
   font-weight: 600;
   color: var(--accent);
   white-space: nowrap;
   position: sticky;
   top: 0;
+  z-index: 5;
   background: var(--bg-elev);
 }
 main table tbody tr:nth-child(odd) { background: var(--bg-row-alt); }
@@ -241,10 +252,123 @@ main hr {
   vertical-align: -2px;
 }
 
+/* ---------- Calculator forms (launch-windows, corporations) ---------- */
+
+/* `.calc` wraps interactive form controls (labels + inputs + buttons +
+ * results) on calculator pages. Without styling, labels stack with raw
+ * browser defaults — inputs collide and the row reads as a blob.
+ *
+ * Expected behavior:
+ *  - Children lay out horizontally, wrapping gracefully when narrow.
+ *  - Labels read as `Label: <input>` on one line each.
+ *  - Inputs/selects share the dark code-bg fill used by .body-filters
+ *    so the calculator visually belongs to the page.
+ *  - Buttons use the orange accent so the primary action stands out.
+ *  - Result containers (#calc-result, #corp-comparison, etc.) break to
+ *    their own full-width row by having flex-basis 100%.
+ */
+.calc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: center;
+  margin: 10px 0 16px;
+  padding: 10px 12px;
+  background: var(--bg-elev);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+}
+.calc label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+.calc input[type="text"],
+.calc input[type="search"],
+.calc input[type="date"],
+.calc input:not([type]),
+.calc select {
+  background: var(--code-bg);
+  color: var(--fg);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 13px;
+}
+.calc input:focus,
+.calc select:focus {
+  outline: none;
+  border-color: var(--accent-dim);
+  box-shadow: 0 0 0 2px rgba(255,179,71,0.15);
+}
+.calc button {
+  background: var(--accent-dim);
+  color: #1a1208;
+  border: 1px solid var(--accent-dim);
+  border-radius: 4px;
+  padding: 4px 14px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.calc button:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.calc > div[id] {
+  flex: 1 0 100%;
+  margin-top: 4px;
+}
+
 @media (max-width: 720px) {
   .container { padding: 0 12px; }
   main h1 { font-size: 22px; }
   main h2 { font-size: 17px; }
   main table { font-size: 12px; }
   main table th, main table td { padding: 4px 6px; }
+
+  /* Stack calculator + filter controls vertically on phones.
+   * Expected behavior: each label/input occupies a full row so users can
+   * tap inputs without overflow scrolling, and dropdowns get usable width.
+   */
+  .calc,
+  .body-filters {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .calc label,
+  .body-filters label {
+    width: 100%;
+  }
+  .calc input,
+  .calc select,
+  .body-filters input[type="search"] {
+    width: 100%;
+  }
+  .calc button {
+    width: 100%;
+  }
+
+  /* Contracts/Missions table: 6 wide columns (Order, Contract, Prereq,
+   * Requirements, Rewards, Premise). Even with overflow-x: auto on the
+   * scroller, six columns of long-text content at 720px is unusable —
+   * the user side-scrolls forever to read one row.
+   *
+   * Trade-off: Premise is the longest text column and is supplementary
+   * (it's narrative flavor; mechanics live in Requirements/Rewards). We
+   * hide it on phones so the five mechanically-important columns fit.
+   * Desktop users see the full table. The data is still in the DOM, so
+   * search/copy-paste/screen-readers are unaffected.
+   *
+   * The selector targets the 6th column (Premise) of any table that
+   * has 6 columns in its header — currently just contracts + missions.
+   */
+  main table thead tr > th:nth-child(6):last-child,
+  main table tbody tr > td:nth-child(6):last-child {
+    display: none;
+  }
 }
