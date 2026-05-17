@@ -106,3 +106,99 @@ test('bestTrajectory: returns dates in correct order and within window', () => {
   assert.ok(traj.flybyMs > traj.launchMs);
   assert.ok(traj.arriveMs > traj.flybyMs);
 });
+
+// --- findBestFlybys -------------------------------------------------------
+// Real-world (J2000) elements for the test pool.  Sun has a=0 so the solver
+// must special-case it (perihelion-Oberth model) rather than try to compute
+// an orbit at zero radius.
+const MERCURY = { a: 0.387098, longitude: 252.25, name: 'Mercury' };
+const JUPITER = { a: 5.2026,   longitude: 34.40,  name: 'Jupiter' };
+const SATURN  = { a: 9.5549,   longitude: 50.08,  name: 'Saturn' };
+const URANUS  = { a: 19.2184,  longitude: 314.06, name: 'Uranus' };
+const NEPTUNE = { a: 30.1104,  longitude: 304.35, name: 'Neptune' };
+const PLUTO   = { a: 39.482,   longitude: 238.93, name: 'Pluto' };
+const SUN     = { a: 0,        longitude: 0,      name: 'Sun' };
+
+const POOL = [MERCURY, VENUS, EARTH, MARS, CERES, JUPITER, SATURN, URANUS, NEPTUNE, PLUTO, SUN];
+
+test('findBestFlybys: always returns a direct result even if nothing helps', () => {
+  var startMs = Date.UTC(2020, 0, 1);
+  var endMs = startMs + 2 * YEAR_DAYS * DAY;
+  var res = ga.findBestFlybys({
+    from: EARTH, to: MARS, bodies: POOL,
+    fromDateMs: startMs, toDateMs: endMs, epochMs: J2000_MS,
+  });
+  assert.ok(res, 'returned a result object');
+  assert.ok(res.direct, 'direct trajectory present');
+  assert.ok(typeof res.direct.totalDvKms === 'number');
+  assert.ok(Array.isArray(res.flybys));
+});
+
+test('findBestFlybys: Earth → Jupiter (5 yr window) finds a flyby beating direct', () => {
+  var startMs = Date.UTC(2020, 0, 1);
+  var endMs = startMs + 5 * YEAR_DAYS * DAY;
+  var res = ga.findBestFlybys({
+    from: EARTH, to: JUPITER, bodies: POOL,
+    fromDateMs: startMs, toDateMs: endMs, epochMs: J2000_MS,
+  });
+  assert.ok(res && res.direct);
+  // Top flyby (if present) should save Δv vs direct.
+  if (res.flybys.length > 0) {
+    assert.ok(res.flybys[0].savedDv > 0,
+      `top flyby (${res.flybys[0].flybyName}) should save Δv, got ${res.flybys[0].savedDv.toFixed(2)} km/s`);
+  } else {
+    // If we found nothing, that's still a valid outcome — but for Earth →
+    // Jupiter on a 5-year window we expect *something* helpful.
+    assert.fail('expected at least one viable flyby for Earth → Jupiter');
+  }
+});
+
+test('findBestFlybys: Earth → Pluto (10 yr window) top-5 includes Jupiter', () => {
+  var startMs = Date.UTC(2020, 0, 1);
+  var endMs = startMs + 10 * YEAR_DAYS * DAY;
+  var res = ga.findBestFlybys({
+    from: EARTH, to: PLUTO, bodies: POOL,
+    fromDateMs: startMs, toDateMs: endMs, epochMs: J2000_MS,
+  });
+  assert.ok(res && res.direct);
+  var names = res.flybys.map(function (f) { return f.flybyName; });
+  assert.ok(names.indexOf('Jupiter') >= 0,
+    `expected Jupiter in top flyby list, got: ${names.join(', ')}`);
+});
+
+test('findBestFlybys: Earth → Pluto via Sun returns a non-null result', () => {
+  var startMs = Date.UTC(2020, 0, 1);
+  var endMs = startMs + 10 * YEAR_DAYS * DAY;
+  var res = ga.findBestFlybys({
+    from: EARTH, to: PLUTO, bodies: POOL,
+    fromDateMs: startMs, toDateMs: endMs, epochMs: J2000_MS,
+  });
+  assert.ok(res);
+  var sun = res.flybys.find(function (f) { return f.flybyName === 'Sun'; });
+  // The Sun flyby may or may not be in the top-5, but bestTrajectory called
+  // directly with Sun should produce numerics, not crash.  Test that path:
+  var traj = ga.bestTrajectory({
+    earth: EARTH, flybyBody: SUN, target: PLUTO,
+    fromDateMs: startMs, toDateMs: endMs, epochMs: J2000_MS,
+  });
+  assert.ok(traj, 'Sun flyby trajectory should produce a result');
+  assert.ok(isFinite(traj.totalDvKms), 'Sun flyby Δv should be finite');
+  // If sun happens to be in the top-5 keep us honest:
+  if (sun) {
+    assert.ok(isFinite(sun.totalDvKms), 'Sun-flyby total Δv finite in ranked list');
+  }
+});
+
+test('findBestFlybys: Mercury → Venus short window has no helpful flyby', () => {
+  var startMs = Date.UTC(2020, 0, 1);
+  var endMs = startMs + 1 * YEAR_DAYS * DAY;
+  var res = ga.findBestFlybys({
+    from: MERCURY, to: VENUS, bodies: POOL,
+    fromDateMs: startMs, toDateMs: endMs, epochMs: J2000_MS,
+  });
+  assert.ok(res && res.direct);
+  // Either no flybys, or every flyby has negative savedDv (i.e. worse than direct).
+  var helpful = res.flybys.filter(function (f) { return f.savedDv > 0; });
+  assert.equal(helpful.length, 0,
+    `expected no helpful flyby for Mercury→Venus; got: ${helpful.map(f => f.flybyName + ' (+' + f.savedDv.toFixed(2) + ')').join(', ')}`);
+});

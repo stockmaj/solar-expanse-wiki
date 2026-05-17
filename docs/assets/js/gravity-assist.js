@@ -27,7 +27,13 @@
   // --- position at date (circular coplanar, same convention as launch-windows.js)
   // body = {a, longitude}  where longitude is degrees at epochMs.
   // Returns {r: [x, y] in AU, v: [vx, vy] in AU/yr} for a circular orbit.
+  // Special case: a body with a = 0 (e.g. the Sun itself) sits at the origin
+  // with zero velocity — the bestTrajectory path special-cases this so the
+  // Lambert legs use a near-Sun perihelion point instead of the origin.
   function positionAt(body, dateMs, epochMs) {
+    if (!body.a || body.a <= 0) {
+      return { r: [0, 0], v: [0, 0], theta: 0 };
+    }
     var daysSinceEpoch = (dateMs - epochMs) / DAY_MS;
     var n = TWO_PI / Math.pow(body.a, 1.5);       // mean motion (rad/yr)
     var theta = body.longitude * DEG + n * (daysSinceEpoch / YEAR_DAYS);
@@ -141,6 +147,7 @@
     var fromMs = args.fromDateMs;
     var toMs = args.toDateMs;
     var epoch = args.epochMs;
+    var isSunFlyby = !flyby.a || flyby.a <= 0;
 
     // Coarse grid: launch dates every 15 days, flyby dates spanning a
     // reasonable range.  Step sizes scale up with leg length so outer-planet
@@ -149,13 +156,19 @@
     // grid to ~200 steps per dimension.
     var LAUNCH_STEP_DAYS = 15;
     var MAX_STEPS_PER_DIM = 200;
+    // For a Sun flyby (a=0) we model the spacecraft dipping to a small
+    // perihelion ~0.2 AU between launch and target — close enough for an
+    // Oberth boost but far enough that the Lambert solver doesn't fight a
+    // near-singular geometry.
+    var SUN_PERIHELION_AU = 0.2;
     // First-leg time: bracket the Hohmann time between Earth and flyby body
     // by [0.4×, 1.8×] to allow shorter/longer-than-Hohmann arcs.
-    var hohmann1 = 0.5 * Math.pow((earth.a + flyby.a) / 2, 1.5) * YEAR_DAYS;
+    var flybyA = isSunFlyby ? SUN_PERIHELION_AU : flyby.a;
+    var hohmann1 = 0.5 * Math.pow((earth.a + flybyA) / 2, 1.5) * YEAR_DAYS;
     var leg1Min = Math.max(40, hohmann1 * 0.4);
     var leg1Max = hohmann1 * 1.8;
     var leg1Step = Math.max(15, Math.ceil((leg1Max - leg1Min) / MAX_STEPS_PER_DIM));
-    var hohmann2 = 0.5 * Math.pow((flyby.a + target.a) / 2, 1.5) * YEAR_DAYS;
+    var hohmann2 = 0.5 * Math.pow((flybyA + target.a) / 2, 1.5) * YEAR_DAYS;
     var leg2Min = Math.max(60, hohmann2 * 0.4);
     var leg2Max = hohmann2 * 1.8;
     var leg2Step = Math.max(15, Math.ceil((leg2Max - leg2Min) / MAX_STEPS_PER_DIM));
@@ -165,7 +178,35 @@
       var earthPos = positionAt(earth, lMs, epoch);
       for (var leg1 = leg1Min; leg1 <= leg1Max; leg1 += leg1Step) {
         var fMs = lMs + leg1 * DAY_MS;
-        var flybyPos = positionAt(flyby, fMs, epoch);
+        // Sun flyby: perihelion is on the chord between launch and target
+        // at flyby time.  We position the "Sun flyby point" at
+        // SUN_PERIHELION_AU along the bisector between earthPos and
+        // targetPos-at-flyby-time so both legs are short, low-eccentricity
+        // arcs.  The Sun's gravity is the assist body, so v_sun = 0.
+        var flybyPos;
+        if (isSunFlyby) {
+          // Anticipate roughly where target will be at end of leg-2 to set
+          // a sensible perihelion direction.  Use Hohmann midpoint as proxy.
+          var midMs = fMs + (leg2Min + leg2Max) / 2 * DAY_MS;
+          var tposPreview = positionAt(target, midMs, epoch);
+          // Direction = average of unit(earthPos.r) and unit(target.r) at
+          // flyby time; if those are opposite we just take launch direction.
+          var ex = earthPos.r[0], ey = earthPos.r[1];
+          var em = Math.sqrt(ex*ex + ey*ey) || 1;
+          var tx = tposPreview.r[0], ty = tposPreview.r[1];
+          var tm = Math.sqrt(tx*tx + ty*ty) || 1;
+          var dx = ex / em + tx / tm;
+          var dy = ey / em + ty / tm;
+          var dm = Math.sqrt(dx*dx + dy*dy);
+          if (dm < 1e-6) { dx = ex / em; dy = ey / em; dm = 1; }
+          flybyPos = {
+            r: [SUN_PERIHELION_AU * dx / dm, SUN_PERIHELION_AU * dy / dm],
+            v: [0, 0],
+            theta: 0,
+          };
+        } else {
+          flybyPos = positionAt(flyby, fMs, epoch);
+        }
         var lam1 = lambert(earthPos.r, flybyPos.r, leg1 / YEAR_DAYS, true);
         if (!lam1) continue;
         var vInfLaunch = vmag(vsub(lam1.v1, earthPos.v));
@@ -178,6 +219,7 @@
           // Free-rotation flyby: no mismatch term.  Cost = launch C3 +
           // arrival v_inf (in AU/yr; converted for the report).
           var cost = vInfLaunch + vInfArrive;
+          if (!isFinite(cost)) continue;
           if (!best || cost < best.cost) {
             best = {
               cost: cost,
@@ -222,6 +264,64 @@
     return best;
   }
 
+  // --- Notes describing a candidate flyby body ----------------------------
+  // Used in the rendered results table.  Sun gets its own Oberth-flavoured
+  // note; everything else gets a generic body-type tag.
+  function flybyNote(body) {
+    if (!body) return '';
+    if (!body.a || body.a <= 0) return 'Solar Oberth maneuver — deep dip past the Sun';
+    if (body.a < 1) return 'Inner-system flyby';
+    if (body.a < 5) return 'Mid-system flyby';
+    if (body.a < 30) return 'Outer-planet flyby';
+    return 'Deep outer-system flyby';
+  }
+
+  // --- Multi-flyby search: scan every candidate body, rank top 5 ----------
+  // Synchronous variant for tests; the DOM driver wraps this in a setTimeout
+  // chain so the page stays responsive while ~60 bodies are scanned.
+  function findBestFlybys(args) {
+    var from = args.from, to = args.to;
+    var bodies = args.bodies || [];
+    var fromMs = args.fromDateMs, toMs = args.toDateMs, epoch = args.epochMs;
+    var topN = args.topN || 5;
+
+    var direct = bestDirect({
+      earth: from, target: to,
+      fromDateMs: fromMs, toDateMs: toMs, epochMs: epoch,
+    });
+
+    var rows = [];
+    for (var i = 0; i < bodies.length; i++) {
+      var b = bodies[i];
+      if (!b) continue;
+      if (b === from || b === to) continue;
+      if (b.name === from.name || b.name === to.name) continue;
+      var ga = bestTrajectory({
+        earth: from, flybyBody: b, target: to,
+        fromDateMs: fromMs, toDateMs: toMs, epochMs: epoch,
+      });
+      if (!ga) continue;
+      if (!isFinite(ga.totalDvKms)) continue;
+      var saved = direct ? direct.totalDvKms - ga.totalDvKms : 0;
+      rows.push({
+        flybyName: b.name,
+        flybyBody: b,
+        launchMs: ga.launchMs,
+        flybyMs: ga.flybyMs,
+        arriveMs: ga.arriveMs,
+        vInfLaunchKms: ga.vInfLaunchKms,
+        vInfArriveKms: ga.vInfArriveKms,
+        totalDvKms: ga.totalDvKms,
+        savedDv: saved,
+        note: flybyNote(b),
+      });
+    }
+    // Sort by saved Δv descending and trim to topN entries that beat direct.
+    rows.sort(function (a, b) { return b.savedDv - a.savedDv; });
+    var helpful = rows.filter(function (r) { return r.savedDv > 0; }).slice(0, topN);
+    return { direct: direct, flybys: helpful };
+  }
+
   // --- DOM binding --------------------------------------------------------
   function fmtDate(ms) { return new Date(ms).toISOString().slice(0, 10); }
 
@@ -229,12 +329,11 @@
     var bodies = root.LAUNCH_WINDOW_ALL_BODIES;
     if (!bodies) return;
     var fromInput = document.getElementById('ga-from');
-    var flybyInput = document.getElementById('ga-flyby');
     var toInput = document.getElementById('ga-to');
     var dateInput = document.getElementById('ga-date');
     var submitBtn = document.getElementById('ga-submit');
     var resultBox = document.getElementById('ga-result');
-    if (!fromInput || !flybyInput || !toInput || !dateInput || !submitBtn || !resultBox) return;
+    if (!fromInput || !toInput || !dateInput || !submitBtn || !resultBox) return;
 
     // Use the same shared datalist as the launch-window calculator
     // (`calc-bodies`).  If the page only has the GA calculator, build a
@@ -251,7 +350,7 @@
       });
       document.body.appendChild(dl);
     }
-    [fromInput, flybyInput, toInput].forEach(function (inp) {
+    [fromInput, toInput].forEach(function (inp) {
       inp.setAttribute('list', 'calc-bodies');
     });
 
@@ -264,198 +363,147 @@
       return null;
     }
 
+    function renderResults(from, to, res) {
+      var html = '<table><thead><tr>' +
+        '<th>Route</th>' +
+        '<th>Launch</th>' +
+        '<th>Arrival</th>' +
+        '<th>v∞ launch</th>' +
+        '<th>v∞ arrival</th>' +
+        '<th>Total Δv proxy</th>' +
+        '<th>Δv saved</th>' +
+        '<th>Notes</th>' +
+        '</tr></thead><tbody>';
+      if (res.direct) {
+        html += '<tr>' +
+          '<td><strong>' + from.name + ' → ' + to.name + '</strong> (direct)</td>' +
+          '<td>' + fmtDate(res.direct.launchMs) + '</td>' +
+          '<td>' + fmtDate(res.direct.arriveMs) + '</td>' +
+          '<td>—</td>' +
+          '<td>—</td>' +
+          '<td>' + res.direct.totalDvKms.toFixed(2) + ' km/s</td>' +
+          '<td>—</td>' +
+          '<td>baseline (no flyby)</td>' +
+          '</tr>';
+      } else {
+        html += '<tr><td colspan="8"><em>No direct trajectory found in window.</em></td></tr>';
+      }
+      res.flybys.forEach(function (r) {
+        html += '<tr>' +
+          '<td><strong>' + from.name + ' → ' + r.flybyName + ' → ' + to.name + '</strong></td>' +
+          '<td>' + fmtDate(r.launchMs) + '</td>' +
+          '<td>' + fmtDate(r.arriveMs) + '</td>' +
+          '<td>' + r.vInfLaunchKms.toFixed(2) + ' km/s</td>' +
+          '<td>' + r.vInfArriveKms.toFixed(2) + ' km/s</td>' +
+          '<td>' + r.totalDvKms.toFixed(2) + ' km/s</td>' +
+          '<td style="color:#7fd17f"><strong>+' + r.savedDv.toFixed(2) + ' km/s</strong></td>' +
+          '<td>' + r.note + '</td>' +
+          '</tr>';
+      });
+      if (res.flybys.length === 0) {
+        html += '<tr><td colspan="8"><em>No gravity-assist option beats direct in this window.</em></td></tr>';
+      }
+      html += '</tbody></table>';
+      resultBox.innerHTML = html;
+    }
+
+    // Async scan: ~60 bodies × ~50 ms each ≈ 3 s.  We yield with
+    // setTimeout(0) between bodies so the page stays responsive and we can
+    // stream a progress count into the result box.
     function update() {
       var v = dateInput.value;
       if (!v) return;
       var startMs = new Date(v + 'T00:00:00Z').getTime();
       if (isNaN(startMs)) return;
       var from = findBody(fromInput.value);
-      var flyby = findBody(flybyInput.value);
       var target = findBody(toInput.value);
-      if (!from || !flyby || !target) {
-        resultBox.innerHTML = '<em>Pick valid From, Flyby, and To bodies from the suggestions.</em>';
+      if (!from || !target) {
+        resultBox.innerHTML = '<em>Pick valid From and To bodies from the suggestions.</em>';
+        return;
+      }
+      if (from === target) {
+        resultBox.innerHTML = '<em>From and To must be different bodies.</em>';
         return;
       }
       var epoch = Date.UTC(1959, 0, 1);
-      var endMs = startMs + 5 * YEAR_MS;
+      var endMs = startMs + 10 * YEAR_MS;
 
-      resultBox.innerHTML = '<em>Searching…</em>';
-      // Defer to next tick so the "searching" message paints first.
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Calculating…';
+
+      var direct = null;
+      var rows = [];
+      var idx = 0;
+
+      function done() {
+        rows.sort(function (a, b) { return b.savedDv - a.savedDv; });
+        var helpful = rows.filter(function (r) { return r.savedDv > 0; }).slice(0, 5);
+        renderResults(from, target, { direct: direct, flybys: helpful });
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Recalculate';
+      }
+
+      // First compute direct, then stream candidate flybys.
+      resultBox.innerHTML = '<em>Computing direct trajectory…</em>';
       setTimeout(function () {
-        var ga = bestTrajectory({
-          earth: from, flybyBody: flyby, target: target,
-          fromDateMs: startMs, toDateMs: endMs, epochMs: epoch,
-        });
-        var direct = bestDirect({
+        direct = bestDirect({
           earth: from, target: target,
           fromDateMs: startMs, toDateMs: endMs, epochMs: epoch,
         });
-        if (!ga) {
-          resultBox.innerHTML = '<em>No trajectory found in window.</em>';
-          return;
+        function step() {
+          if (idx >= bodies.length) { done(); return; }
+          var b = bodies[idx++];
+          if (!b || b === from || b === target ||
+              b.name === from.name || b.name === target.name) {
+            resultBox.innerHTML = '<em>Scanning flyby candidates… ' +
+              idx + ' / ' + bodies.length + '</em>';
+            setTimeout(step, 0);
+            return;
+          }
+          var ga = bestTrajectory({
+            earth: from, flybyBody: b, target: target,
+            fromDateMs: startMs, toDateMs: endMs, epochMs: epoch,
+          });
+          if (ga && isFinite(ga.totalDvKms)) {
+            rows.push({
+              flybyName: b.name,
+              flybyBody: b,
+              launchMs: ga.launchMs,
+              flybyMs: ga.flybyMs,
+              arriveMs: ga.arriveMs,
+              vInfLaunchKms: ga.vInfLaunchKms,
+              vInfArriveKms: ga.vInfArriveKms,
+              totalDvKms: ga.totalDvKms,
+              savedDv: direct ? direct.totalDvKms - ga.totalDvKms : 0,
+              note: flybyNote(b),
+            });
+          }
+          resultBox.innerHTML = '<em>Scanning flyby candidates… ' +
+            idx + ' / ' + bodies.length + '</em>';
+          setTimeout(step, 0);
         }
-        var html = '<p><strong>' + from.name + ' → ' + flyby.name +
-          ' → ' + target.name + '</strong></p>' +
-          '<table><tbody>' +
-          '<tr><td>Launch</td><td>' + fmtDate(ga.launchMs) + '</td></tr>' +
-          '<tr><td>Flyby (' + flyby.name + ')</td><td>' + fmtDate(ga.flybyMs) + '</td></tr>' +
-          '<tr><td>Arrival</td><td>' + fmtDate(ga.arriveMs) + '</td></tr>' +
-          '<tr><td>v∞ at launch</td><td>' + ga.vInfLaunchKms.toFixed(2) + ' km/s</td></tr>' +
-          '<tr><td>v∞ at arrival</td><td>' + ga.vInfArriveKms.toFixed(2) + ' km/s</td></tr>' +
-          '<tr><td><strong>Total Δv proxy</strong></td><td><strong>' +
-            ga.totalDvKms.toFixed(2) + ' km/s</strong></td></tr>' +
-          '</tbody></table>';
-        if (direct) {
-          var saved = direct.totalDvKms - ga.totalDvKms;
-          html += '<p>Direct ' + from.name + ' → ' + target.name +
-            ' Δv proxy: <strong>' + direct.totalDvKms.toFixed(2) +
-            ' km/s</strong> (' + (saved >= 0 ? 'saves ' : 'costs extra ') +
-            Math.abs(saved).toFixed(2) + ' km/s vs. flyby).</p>';
-        }
-        resultBox.innerHTML = html;
+        step();
       }, 0);
     }
 
-    // Grid search is ~200 ms, so don't auto-fire on every keystroke.
-    // Submit button only.  Enter inside any field also triggers it.
     submitBtn.addEventListener('click', update);
-    [fromInput, flybyInput, toInput, dateInput].forEach(function (inp) {
+    [fromInput, toInput, dateInput].forEach(function (inp) {
       inp.addEventListener('keydown', function (e) {
         if (e.key === 'Enter') { e.preventDefault(); update(); }
       });
     });
     // Select-all on focus so the user can replace the default body name
     // with a single keystroke instead of backspacing the old value out.
-    [fromInput, flybyInput, toInput].forEach(function (inp) {
+    [fromInput, toInput].forEach(function (inp) {
       inp.addEventListener('focus', function () {
         setTimeout(function () { inp.select(); }, 0);
       });
     });
   }
 
-  // --- Curated suggested trajectories ------------------------------------
-  // Historically interesting / practically advantageous single-flyby routes.
-  // Computed on page load and rendered into `#ga-suggestions`.
-  var SUGGESTED_ROUTES = [
-    { from: 'Earth', flyby: 'Venus',   to: 'Mercury', note: 'BepiColombo-style inner-system flyby' },
-    { from: 'Earth', flyby: 'Venus',   to: 'Jupiter', note: 'Galileo-style: Venus first, then onward' },
-    { from: 'Earth', flyby: 'Mars',    to: 'Jupiter', note: 'Alternative outer-bound route' },
-    { from: 'Earth', flyby: 'Jupiter', to: 'Saturn',  note: 'Voyager-style, Jupiter sling outward' },
-    { from: 'Earth', flyby: 'Jupiter', to: 'Uranus',  note: 'Outer-planet bound via Jupiter' },
-    { from: 'Earth', flyby: 'Jupiter', to: 'Neptune', note: 'Deep outer-system' },
-    { from: 'Earth', flyby: 'Venus',   to: 'Saturn',  note: 'Inner-system slingshot to far target' },
-    { from: 'Earth', flyby: 'Saturn',  to: 'Pluto',   note: 'Cold and slow, but the only realistic Pluto shot' },
-  ];
-
-  function renderSuggestions() {
-    var container = document.getElementById('ga-suggestions');
-    if (!container) return;
-    var bodies = root.LAUNCH_WINDOW_ALL_BODIES;
-    if (!bodies) { container.innerHTML = ''; return; }
-    function findBody(name) {
-      for (var i = 0; i < bodies.length; i++) {
-        if (bodies[i].name === name) return bodies[i];
-      }
-      return null;
-    }
-    var startMs = Date.UTC(2020, 0, 1);
-    // 10-year window so far-target routes can find their first viable launch.
-    var endMs = startMs + 10 * YEAR_MS;
-    var epoch = Date.UTC(1959, 0, 1);
-
-    // Compute each route off the main thread (well, off the next paint) so
-    // the page is interactive while the grid scans run.  setTimeout(0)
-    // between routes gives the browser a chance to paint between rows.
-    var results = [];
-    function step(i) {
-      if (i >= SUGGESTED_ROUTES.length) {
-        renderTable(results, container);
-        return;
-      }
-      var r = SUGGESTED_ROUTES[i];
-      var from = findBody(r.from), flyby = findBody(r.flyby), target = findBody(r.to);
-      var row = { route: r, ok: false };
-      if (from && flyby && target && from !== flyby && flyby !== target && from !== target) {
-        var ga = bestTrajectory({
-          earth: from, flybyBody: flyby, target: target,
-          fromDateMs: startMs, toDateMs: endMs, epochMs: epoch,
-        });
-        var direct = bestDirect({
-          earth: from, target: target,
-          fromDateMs: startMs, toDateMs: endMs, epochMs: epoch,
-        });
-        if (ga && direct) {
-          row.ok = true;
-          row.launchMs = ga.launchMs;
-          row.arriveMs = ga.arriveMs;
-          row.gaDv = ga.totalDvKms;
-          row.directDv = direct.totalDvKms;
-          row.savedDv = direct.totalDvKms - ga.totalDvKms;
-        }
-      }
-      results.push(row);
-      setTimeout(function () { step(i + 1); }, 0);
-    }
-    step(0);
-  }
-
-  function renderTable(results, container) {
-    function fmt(ms) { return new Date(ms).toISOString().slice(0, 10); }
-    var html = '<table><thead><tr>' +
-      '<th>From → Flyby → To</th>' +
-      '<th>Launch</th>' +
-      '<th>Arrival</th>' +
-      '<th>Direct Δv</th>' +
-      '<th>Flyby Δv</th>' +
-      '<th>Δv saved</th>' +
-      '<th>Notes</th>' +
-      '</tr></thead><tbody>';
-    results.forEach(function (r) {
-      var label = r.route.from + ' → ' + r.route.flyby + ' → ' + r.route.to;
-      if (!r.ok) {
-        html += '<tr><td>' + label + '</td>' +
-          '<td colspan="5"><em>no viable trajectory found</em></td>' +
-          '<td>' + r.route.note + '</td></tr>';
-        return;
-      }
-      var savedClass = r.savedDv > 0 ? 'style="color:#7fd17f"' : 'style="color:#d17f7f"';
-      html += '<tr>' +
-        '<td><strong>' + label + '</strong></td>' +
-        '<td>' + fmt(r.launchMs) + '</td>' +
-        '<td>' + fmt(r.arriveMs) + '</td>' +
-        '<td>' + r.directDv.toFixed(2) + ' km/s</td>' +
-        '<td>' + r.gaDv.toFixed(2) + ' km/s</td>' +
-        '<td ' + savedClass + '><strong>' + (r.savedDv >= 0 ? '+' : '') + r.savedDv.toFixed(2) + ' km/s</strong></td>' +
-        '<td>' + r.route.note + '</td>' +
-        '</tr>';
-    });
-    html += '</tbody></table>';
-    container.innerHTML = html;
-  }
-
-  // Wire up the "Calculate suggestions" button — explicit opt-in only,
-  // because even with the step-cap a long route is a noticeable freeze.
-  function bindSuggestionsButton() {
-    var btn = document.getElementById('ga-suggest-btn');
-    var container = document.getElementById('ga-suggestions');
-    if (!btn || !container) return;
-    btn.addEventListener('click', function () {
-      btn.disabled = true;
-      btn.textContent = 'Calculating…';
-      container.innerHTML = '<em>Searching trajectories — this may take 10–20 seconds for outer-planet routes.</em>';
-      // Defer one frame so the disabled state paints before we block.
-      setTimeout(function () {
-        renderSuggestions();
-        btn.disabled = false;
-        btn.textContent = 'Recalculate';
-      }, 50);
-    });
-  }
-
   if (typeof document !== 'undefined') {
     document.addEventListener('DOMContentLoaded', function () {
       bindDom();
-      bindSuggestionsButton();
     });
   }
 
@@ -464,6 +512,7 @@
     positionAt: positionAt,
     bestTrajectory: bestTrajectory,
     bestDirect: bestDirect,
+    findBestFlybys: findBestFlybys,
     MU: MU,
     AU_PER_YR_TO_KM_S: AU_PER_YR_TO_KM_S,
   };
