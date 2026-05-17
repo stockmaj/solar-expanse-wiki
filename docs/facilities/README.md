@@ -13,6 +13,10 @@ may need atmospheric conditions to function.
 - **Orbital modules** attach to a space station or shipyard in orbit. They
 don't need a habitable surface, but you have to build the station first.
 
+<div class="facility-filter">
+<label>Filter: <input id="facility-filter" type="search" placeholder="facility name…" autocomplete="off"></label>
+</div>
+
 ## Ground facilities
 
 | Facility | <span title="Facility category — Production / Mining / Power / Habitation / …">Type</span> | <span title="Resources required to construct">Build cost</span> | <span title="Days required to construct">Time</span> | <span title="Primary on-site role and its magnitude (crew capacity, research rate, mining rate, etc.)">Role</span> | <span title="On-site population required for full output">Workers</span> | <span title="Energy consumed per day">Energy</span> | <span title="Daily maintenance cost">Maint</span> | <span title="Bonus granted to launches that originate here">Launch bonus</span> | <span title="Per-day deltas applied to the planet's habitability parameters">Terraforming</span> | <span title="Research that unlocks this facility">Prereq</span> | Description |
@@ -138,3 +142,5 @@ don't need a habitable surface, but you have to build the station first.
 - **Launch bonus** appears only for launch facilities — it describes the discount or capacity gain applied to launches that originate from this facility.
 - **Terraforming** lists the per-day deltas the facility applies to a body's habitability parameters (temperature, atmosphere, gravity, radiation, magnetic field). Empty for everything except a handful of dedicated terraforming structures.
 - **Research prereq** is the research that unlocks construction; `—` means it's available from the start (or the prereq lives outside the standard `lockByHelpNotUse` field, which a few specialist facilities use).
+
+<script src="{{ '/assets/js/facilities.js' | relative_url }}?v={{ site.github.build_revision | default: 'dev' }}" defer></script>

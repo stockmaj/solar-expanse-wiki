@@ -248,6 +248,31 @@ main hr {
   margin: 24px 0;
 }
 
+/* ---------- Facility-table filter (facilities page) ---------- */
+
+.facility-filter {
+  margin: 12px 0 4px;
+}
+.facility-filter label {
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+.facility-filter input[type="search"] {
+  background: var(--code-bg);
+  color: var(--fg);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 13px;
+  margin-left: 4px;
+  min-width: 240px;
+}
+.facility-filter input[type="search"]:focus {
+  outline: none;
+  border-color: var(--accent-dim);
+}
+
 /* ---------- Body-table filter (launch-windows page) ---------- */
 
 .body-filters {

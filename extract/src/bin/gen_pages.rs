@@ -3239,6 +3239,9 @@ Facilities are split into two families:\n\n\
   may need atmospheric conditions to function.\n\
 - **Orbital modules** attach to a space station or shipyard in orbit. They\n\
   don't need a habitable surface, but you have to build the station first.\n\n\
+<div class=\"facility-filter\">\n\
+<label>Filter: <input id=\"facility-filter\" type=\"search\" placeholder=\"facility name…\" autocomplete=\"off\"></label>\n\
+</div>\n\n\
 ## Ground facilities\n\n\
 {ground_table}\n\
 ## Orbital modules\n\n\
@@ -3252,7 +3255,8 @@ Facilities are split into two families:\n\n\
 - **Maintenance** is the per-day cash upkeep while the facility is active.\n\
 - **Launch bonus** appears only for launch facilities — it describes the discount or capacity gain applied to launches that originate from this facility.\n\
 - **Terraforming** lists the per-day deltas the facility applies to a body's habitability parameters (temperature, atmosphere, gravity, radiation, magnetic field). Empty for everything except a handful of dedicated terraforming structures.\n\
-- **Research prereq** is the research that unlocks construction; `—` means it's available from the start (or the prereq lives outside the standard `lockByHelpNotUse` field, which a few specialist facilities use).\n"
+- **Research prereq** is the research that unlocks construction; `—` means it's available from the start (or the prereq lives outside the standard `lockByHelpNotUse` field, which a few specialist facilities use).\n\n\
+<script src=\"{{{{ '/assets/js/facilities.js' | relative_url }}}}?v={{{{ site.github.build_revision | default: 'dev' }}}}\" defer></script>\n"
     )
 }
 
