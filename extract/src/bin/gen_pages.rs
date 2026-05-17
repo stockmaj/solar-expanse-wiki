@@ -2318,14 +2318,163 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
         );
     }
 
-    // Display order: by topological depth (roots first), then by display name.
-    entries.sort_by(|a, b| {
-        let da = depth.get(a.id.as_str()).copied().unwrap_or(0);
-        let db = depth.get(b.id.as_str()).copied().unwrap_or(0);
-        let name_a = contract_name.get(a.id.as_str()).copied().unwrap_or(a.id.as_str());
-        let name_b = contract_name.get(b.id.as_str()).copied().unwrap_or(b.id.as_str());
-        da.cmp(&db).then_with(|| name_a.cmp(name_b))
+    // Display order: chain-DFS traversal so each campaign chain reads
+    // top-to-bottom as a progression instead of getting flattened by depth.
+    //
+    // Roots (depth-0 contracts) come first; among roots, tutorials lead, sorted
+    // by chain length (longest chain first) so the main campaign opens the
+    // table.  Non-tutorial roots follow, alphabetically.  For every node, we
+    // visit its children (and their subtrees) in (depth, name) order.
+    //
+    // A `visited` set guarantees that a contract reachable from multiple roots
+    // still emits exactly once — first visit wins its position.
+    //
+    // The Order column still shows topological depth (computed above); only
+    // the *row order* changes.
+
+    // Forward map: parent contract id → its child contract ids.
+    let mut children: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    let entry_ids: std::collections::BTreeSet<&str> =
+        entries.iter().map(|c| c.id.as_str()).collect();
+    for c in &sirenix.contracts {
+        if !entry_ids.contains(c.id.as_str()) {
+            continue;
+        }
+        for u in &c.unlock_rewards {
+            if u.starts_with("contract_") && entry_ids.contains(u.as_str()) {
+                children.entry(c.id.as_str()).or_default().push(u.as_str());
+            }
+        }
+    }
+
+    // Order children of every node by (depth ascending, display-name ascending).
+    for kids in children.values_mut() {
+        kids.sort_by(|a, b| {
+            let da = depth.get(*a).copied().unwrap_or(0);
+            let db = depth.get(*b).copied().unwrap_or(0);
+            let na = contract_name.get(*a).copied().unwrap_or(*a);
+            let nb = contract_name.get(*b).copied().unwrap_or(*b);
+            da.cmp(&db).then_with(|| na.cmp(nb))
+        });
+        kids.dedup();
+    }
+
+    // Chain length (in nodes) reachable from a root following unlock edges.
+    // Used to rank tutorial roots so the longest campaign chain leads.
+    fn chain_length<'a>(
+        id: &'a str,
+        children: &BTreeMap<&'a str, Vec<&'a str>>,
+        memo: &mut BTreeMap<&'a str, usize>,
+        visiting: &mut std::collections::BTreeSet<&'a str>,
+    ) -> usize {
+        if let Some(&n) = memo.get(id) {
+            return n;
+        }
+        if !visiting.insert(id) {
+            return 0;
+        }
+        let n = match children.get(id) {
+            None => 1,
+            Some(kids) if kids.is_empty() => 1,
+            Some(kids) => 1 + kids
+                .iter()
+                .map(|k| chain_length(k, children, memo, visiting))
+                .max()
+                .unwrap_or(0),
+        };
+        visiting.remove(id);
+        memo.insert(id, n);
+        n
+    }
+
+    // Collect roots (depth-0 entries) and split into tutorial vs non-tutorial.
+    let mut tutorial_roots: Vec<&str> = Vec::new();
+    let mut other_roots: Vec<&str> = Vec::new();
+    for c in &entries {
+        let d = depth.get(c.id.as_str()).copied().unwrap_or(0);
+        if d != 0 {
+            continue;
+        }
+        if c.id.contains("_tutorial_") {
+            tutorial_roots.push(c.id.as_str());
+        } else {
+            other_roots.push(c.id.as_str());
+        }
+    }
+    let mut chain_len_memo: BTreeMap<&str, usize> = BTreeMap::new();
+    tutorial_roots.sort_by(|a, b| {
+        let mut va: std::collections::BTreeSet<&str> = Default::default();
+        let mut vb: std::collections::BTreeSet<&str> = Default::default();
+        let la = chain_length(a, &children, &mut chain_len_memo, &mut va);
+        let lb = chain_length(b, &children, &mut chain_len_memo, &mut vb);
+        let na = contract_name.get(*a).copied().unwrap_or(*a);
+        let nb = contract_name.get(*b).copied().unwrap_or(*b);
+        // Longest chain first; alphabetical tiebreak on display name.
+        lb.cmp(&la).then_with(|| na.cmp(nb))
     });
+    other_roots.sort_by(|a, b| {
+        let na = contract_name.get(*a).copied().unwrap_or(*a);
+        let nb = contract_name.get(*b).copied().unwrap_or(*b);
+        na.cmp(nb)
+    });
+
+    let root_order: Vec<&str> = tutorial_roots
+        .into_iter()
+        .chain(other_roots.into_iter())
+        .collect();
+
+    // DFS-emit order from each root.  `visited` guards against double-visits
+    // when a node is reachable from multiple parents/roots.
+    let mut emit_order: Vec<&str> = Vec::with_capacity(entries.len());
+    let mut visited: std::collections::BTreeSet<&str> = Default::default();
+    fn dfs_emit<'a>(
+        id: &'a str,
+        children: &BTreeMap<&'a str, Vec<&'a str>>,
+        visited: &mut std::collections::BTreeSet<&'a str>,
+        out: &mut Vec<&'a str>,
+    ) {
+        if !visited.insert(id) {
+            return;
+        }
+        out.push(id);
+        if let Some(kids) = children.get(id) {
+            for k in kids {
+                dfs_emit(k, children, visited, out);
+            }
+        }
+    }
+    for root in &root_order {
+        dfs_emit(root, &children, &mut visited, &mut emit_order);
+    }
+    // Safety net: any contract not yet emitted (e.g., orphan whose only
+    // unlockers are filtered-out _test contracts so it never showed up as a
+    // depth-0 root but also has no live parent) goes at the end, in
+    // (depth, name) order — matching the legacy sort for those leftovers.
+    let mut leftovers: Vec<&str> = entries
+        .iter()
+        .map(|c| c.id.as_str())
+        .filter(|id| !visited.contains(id))
+        .collect();
+    leftovers.sort_by(|a, b| {
+        let da = depth.get(*a).copied().unwrap_or(0);
+        let db = depth.get(*b).copied().unwrap_or(0);
+        let na = contract_name.get(*a).copied().unwrap_or(*a);
+        let nb = contract_name.get(*b).copied().unwrap_or(*b);
+        da.cmp(&db).then_with(|| na.cmp(nb))
+    });
+    for id in leftovers {
+        if visited.insert(id) {
+            emit_order.push(id);
+        }
+    }
+
+    // Reorder `entries` to match `emit_order`.
+    let position: BTreeMap<&str, usize> = emit_order
+        .iter()
+        .enumerate()
+        .map(|(i, id)| (*id, i))
+        .collect();
+    entries.sort_by_key(|c| position.get(c.id.as_str()).copied().unwrap_or(usize::MAX));
 
     let rows: Vec<Vec<String>> = entries
         .iter()
@@ -2464,7 +2613,7 @@ the next link in a chain (Mars Phase 1 → Mars Phase 2 → …), a new spacecra
 or a new launch vehicle.\n\n\
 {table}\n\
 ## Reading the table\n\n\
-- Rows are sorted by **Order** — the contract's dependency depth in the unlock DAG. Order 0 contracts are roots with no prerequisite; Order 1 is unlocked by an Order 0 contract; and so on. Ties break alphabetically.\n\
+- The **Order** column is the contract's dependency depth in the unlock DAG (0 = no prereq, N = unlocked after an Order N-1 contract). Rows are sorted by **campaign chain** — each starting contract is followed by its full follow-up chain (depth-first), so a tutorial or campaign reads top-to-bottom as a progression instead of jumping around by depth. Tutorial chains come first; non-tutorial roots follow alphabetically.\n\
 - A contract marked **(final)** ends a campaign chain.\n\
 - **Requirements**: the objectives you have to complete to claim the payout. Body-specific objectives (\"deliver 100 t to Mars\") list the *what* but not the destination — the premise text describes the target.\n\
 - **Rewards**: cash, resources, facility / spacecraft / launch-vehicle unlocks, and the next contract in the chain.\n\
@@ -3360,6 +3509,51 @@ mod tests {
                     id: "contract_downstream".into(),
                     name: "Downstream Contract".into(),
                     description: "Downstream of the test contract.".into(),
+                },
+                NameDesc {
+                    id: "contract_tutorial_firstorbit".into(),
+                    name: "First Orbit".into(),
+                    description: "First orbit.".into(),
+                },
+                NameDesc {
+                    id: "contract_tutorial_moonorbit".into(),
+                    name: "Explore Luna".into(),
+                    description: "Explore Luna.".into(),
+                },
+                NameDesc {
+                    id: "contract_tutorial_marsorbit".into(),
+                    name: "Explore Mars".into(),
+                    description: "Explore Mars.".into(),
+                },
+                NameDesc {
+                    id: "contract_tutorial_spacedock".into(),
+                    name: "Space Dock".into(),
+                    description: "Space Dock.".into(),
+                },
+                NameDesc {
+                    id: "contract_asteroid_sample".into(),
+                    name: "Asteroid Sample".into(),
+                    description: "Sample asteroid.".into(),
+                },
+                NameDesc {
+                    id: "contract_asteroid_mining".into(),
+                    name: "Asteroid Mining".into(),
+                    description: "Mine asteroid.".into(),
+                },
+                NameDesc {
+                    id: "contract_multi_parent".into(),
+                    name: "Multi Parent".into(),
+                    description: "Reached from two roots.".into(),
+                },
+                NameDesc {
+                    id: "contract_root_a".into(),
+                    name: "Root Alpha".into(),
+                    description: "Non-tutorial root A.".into(),
+                },
+                NameDesc {
+                    id: "contract_root_b".into(),
+                    name: "Root Beta".into(),
+                    description: "Non-tutorial root B.".into(),
                 },
             ],
             resources: vec![],
@@ -4280,6 +4474,136 @@ mod tests {
         assert!(
             !row.contains("None"),
             "raw role enum leaked: {row}"
+        );
+    }
+
+    // ---------- Contract row ordering: chain-DFS, tutorials first ----------
+
+    /// Return the 0-based index of `display`'s row inside the contracts table.
+    /// Only data rows count — the header row carries `<span title=` (not a
+    /// `**name**` cell) and the separator row is `| --- | …`, so both are
+    /// filtered out by requiring a `**…**` bold cell.
+    fn contract_row_index(page: &str, display: &str) -> usize {
+        page.lines()
+            .filter(|l| l.starts_with("| ") && l.contains("**"))
+            .position(|l| l.contains(&format!("**{display}**")))
+            .unwrap_or_else(|| panic!("contract row `{display}` not found in:\n{page}"))
+    }
+
+    #[test]
+    fn contracts_render_in_chain_dfs_order() {
+        // Two roots: a tutorial chain (First Orbit → Explore Luna → Lunar
+        // Landing) and a non-tutorial chain (Asteroid Sample → Asteroid Mining).
+        // The tutorial root must lead and its full chain must emit contiguously
+        // before the non-tutorial root appears.
+        let locale = contracts_fixture_locale();
+        let sirenix = Sirenix {
+            contracts: vec![
+                make_contract(
+                    "contract_tutorial_firstorbit",
+                    vec![],
+                    vec!["contract_tutorial_moonorbit".into()],
+                ),
+                make_contract(
+                    "contract_tutorial_moonorbit",
+                    vec![],
+                    vec!["contract_tutorial_moonlanding".into()],
+                ),
+                make_contract("contract_tutorial_moonlanding", vec![], vec![]),
+                make_contract(
+                    "contract_asteroid_sample",
+                    vec![],
+                    vec!["contract_asteroid_mining".into()],
+                ),
+                make_contract("contract_asteroid_mining", vec![], vec![]),
+            ],
+            ..Default::default()
+        };
+        let page = page_contracts(&locale, &sirenix);
+        let names = [
+            "First Orbit",
+            "Explore Luna",
+            "Lunar Landing",
+            "Asteroid Sample",
+            "Asteroid Mining",
+        ];
+        let indices: Vec<usize> = names.iter().map(|n| contract_row_index(&page, n)).collect();
+        assert_eq!(
+            indices,
+            (0..names.len()).collect::<Vec<_>>(),
+            "expected chain-DFS order First Orbit, Explore Luna, Lunar Landing, Asteroid Sample, Asteroid Mining; got indices {indices:?}\npage:\n{page}"
+        );
+    }
+
+    #[test]
+    fn contracts_dfs_visits_branching_children_in_depth_then_alphabetical_order() {
+        // Lunar Landing has two direct children at the same depth: Explore Mars
+        // and Space Dock.  At equal depth, alphabetical wins — Explore Mars
+        // (and its subtree) before Space Dock.
+        let locale = contracts_fixture_locale();
+        let sirenix = Sirenix {
+            contracts: vec![
+                make_contract(
+                    "contract_tutorial_firstorbit",
+                    vec![],
+                    vec!["contract_tutorial_moonorbit".into()],
+                ),
+                make_contract(
+                    "contract_tutorial_moonorbit",
+                    vec![],
+                    vec!["contract_tutorial_moonlanding".into()],
+                ),
+                make_contract(
+                    "contract_tutorial_moonlanding",
+                    vec![],
+                    vec![
+                        "contract_tutorial_marsorbit".into(),
+                        "contract_tutorial_spacedock".into(),
+                    ],
+                ),
+                make_contract("contract_tutorial_marsorbit", vec![], vec![]),
+                make_contract("contract_tutorial_spacedock", vec![], vec![]),
+            ],
+            ..Default::default()
+        };
+        let page = page_contracts(&locale, &sirenix);
+        let mars_idx = contract_row_index(&page, "Explore Mars");
+        let dock_idx = contract_row_index(&page, "Space Dock");
+        assert!(
+            mars_idx < dock_idx,
+            "Explore Mars (idx {mars_idx}) should render before Space Dock (idx {dock_idx}); same-depth tie should be alphabetical\npage:\n{page}"
+        );
+    }
+
+    #[test]
+    fn contracts_dfs_does_not_double_visit() {
+        // `contract_multi_parent` is reachable from BOTH non-tutorial roots
+        // (Root Alpha, Root Beta).  It must render exactly once.
+        let locale = contracts_fixture_locale();
+        let sirenix = Sirenix {
+            contracts: vec![
+                make_contract(
+                    "contract_root_a",
+                    vec![],
+                    vec!["contract_multi_parent".into()],
+                ),
+                make_contract(
+                    "contract_root_b",
+                    vec![],
+                    vec!["contract_multi_parent".into()],
+                ),
+                make_contract("contract_multi_parent", vec![], vec![]),
+            ],
+            ..Default::default()
+        };
+        let page = page_contracts(&locale, &sirenix);
+        let occurrences = page
+            .lines()
+            .filter(|l| l.starts_with("| ") && l.contains("**Multi Parent**"))
+            .count();
+        assert_eq!(
+            occurrences, 1,
+            "Multi Parent should render exactly once even with multiple parents; got {occurrences}\npage:\n{page}"
         );
     }
 }
