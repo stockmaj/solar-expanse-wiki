@@ -7,7 +7,23 @@ research, funding, and fleet. Difficulty further scales starting money
 and ongoing costs.
 
 _Prelude and Early-Exploration scenarios are procedural and not listed
-here — they have no pre-built save data._
+in the comparison table — they have no pre-built save data, but they
+do appear in the epoch timeline below._
+
+## Epoch / Timeline
+
+Solar Expanse ships five start epochs, each with its own in-game
+start year and roster of playable corporations. The Prelude and Early
+Exploration epochs are procedural (no pre-built save); the later three
+ship the comparison saves below.
+
+| Epoch | Start year | Playable corporations | Notes |
+| --- | --- | --- | --- |
+| **Prelude** | 1960 | Solex | Procedural; no pre-built save |
+| **Early Exploration** | 2000 | CNSA, ESA, NASA, Roscosmos, Solex | Procedural; no pre-built save |
+| **Colonization Era** | 2100 | CNSA, ESA, NASA, Roscosmos, Solex | Locked behind story progression |
+| **The Expansion** | 2100 | CNSA, ESA, NASA, Roscosmos, Solex | Locked behind story progression |
+| **Race Beyond** | 2300 | CNSA, ESA, NASA, Roscosmos, Solex | Locked behind story progression |
 
 Difficulty also scales ongoing upkeep (Explorer ×0.5, Pioneer ×1, Veteran ×1.5) and supply usage by the same factors — not reflected in the table below, which only shows starting state.
 

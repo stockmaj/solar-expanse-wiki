@@ -166,6 +166,35 @@ struct Contract {
     spacecraft_grants: Vec<String>,
     launch_vehicle_grants: Vec<String>,
     resource_grants: Vec<ResourceCost>,
+    /// In-game date string when this contract first becomes offerable.
+    /// Format in the dump is `MM/DD/YYYY` (e.g. `01/01/2050`). Empty in the
+    /// dump means "always available from game start"; we normalize that to
+    /// `None`.
+    date_start_active: Option<String>,
+    /// Duration (in years) the contract remains offerable before it
+    /// disappears. `0` means "never expires".
+    years_to_expire: f64,
+}
+
+/// One row from the dump's `StartGameEpoch` table. Each entry pins down the
+/// starting date and roster of playable companies for one of the game's five
+/// pre-set timelines (Prelude / Early Exploration / Colonization / The
+/// Expansion / Race Beyond). Companion data — per-corp starting research
+/// and fleet — lives in `StartGameData` (see `ScenarioStart`).
+#[derive(Serialize, Debug, Default, PartialEq)]
+struct Epoch {
+    /// Raw scene id, e.g. `StartGameEpoch_Colonization`. Display names are
+    /// hand-mapped in `gen_pages.rs` because no locale strings exist.
+    id: String,
+    /// Raw date string, formatted `DD.MM.YYYY HH:MM:SS`. Year extraction is
+    /// done at render time.
+    start_date_string: String,
+    /// `true` for the three "future" epochs that the player has to unlock
+    /// via story progression in a Prelude/Early-Exploration save.
+    is_locked: bool,
+    /// Corp ids (e.g. `NASA`, `Solex`) the player may choose at this epoch.
+    /// Matches `CompanyDefinition.id`.
+    possible_player_companies: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -178,6 +207,7 @@ struct Sirenix {
     resources: Vec<Resource>,
     contracts: Vec<Contract>,
     scenario_starts: Vec<ScenarioStart>,
+    epochs: Vec<Epoch>,
 }
 
 fn parse_spacecraft(v: &Value) -> Option<Spacecraft> {
@@ -685,6 +715,18 @@ fn parse_contract(v: &Value) -> Option<Contract> {
         }
     }
 
+    // dateStartActive: "MM/DD/YYYY" — empty string means "always available",
+    // which we normalize to None so the renderer can show a "—" cell.
+    let date_start_active = v
+        .get("dateStartActive")
+        .and_then(|x| x.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+    let years_to_expire = v
+        .get("yearsToExpire")
+        .and_then(|x| x.as_f64())
+        .unwrap_or(0.0);
+
     Some(Contract {
         id,
         is_locked: lookup_bool(v, &["isLocked"]).unwrap_or(false),
@@ -696,6 +738,41 @@ fn parse_contract(v: &Value) -> Option<Contract> {
         spacecraft_grants,
         launch_vehicle_grants,
         resource_grants,
+        date_start_active,
+        years_to_expire,
+    })
+}
+
+/// Parse a single `StartGameEpoch` entry. The dump has five entries — one
+/// per epoch — and each is keyed by `id` (e.g. `StartGameEpoch_Colonization`).
+/// We extract just the player-relevant fields; the `startDate` ticks integer
+/// and serializationData blob aren't needed because `startDateString` already
+/// carries the human-readable date.
+fn parse_epoch(v: &Value) -> Option<Epoch> {
+    let id = v.get("id")?.as_str()?.to_string();
+    if !id.starts_with("StartGameEpoch_") {
+        return None;
+    }
+    let start_date_string = v
+        .get("startDateString")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
+    let is_locked = lookup_bool(v, &["isLocked"]).unwrap_or(false);
+    let possible_player_companies: Vec<String> = v
+        .get("possiblePlayerCompanies")
+        .and_then(|x| x.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|c| c.get("name").and_then(|n| n.as_str()).map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    Some(Epoch {
+        id,
+        start_date_string,
+        is_locked,
+        possible_player_companies,
     })
 }
 
@@ -1006,6 +1083,26 @@ fn main() -> Result<()> {
     };
     scenario_starts.sort_by_key(timeline);
 
+    // StartGameEpoch entries pin start dates and playable corps per epoch
+    // (Prelude / Early Exploration / Colonization / The Expansion / Race
+    // Beyond). Five entries total.
+    let mut epochs: Vec<Epoch> = raw
+        .get("StartGameEpoch")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(parse_epoch).collect())
+        .unwrap_or_default();
+    let epoch_order = |e: &Epoch| -> u8 {
+        match e.id.as_str() {
+            "StartGameEpoch_Prelude" => 0,
+            "StartGameEpoch_EarlyExploration" => 1,
+            "StartGameEpoch_Colonization" => 2,
+            "StartGameEpoch_TheExpansion" => 3,
+            "StartGameEpoch_RaceBeyond" => 4,
+            _ => 99,
+        }
+    };
+    epochs.sort_by_key(epoch_order);
+
     let out = Sirenix {
         spacecraft,
         launch_vehicles,
@@ -1015,10 +1112,11 @@ fn main() -> Result<()> {
         resources,
         contracts,
         scenario_starts,
+        epochs,
     };
     serde_json::to_writer_pretty(fs::File::create(&output)?, &out)?;
     eprintln!(
-        "wrote {} ({} spacecraft, {} LVs, {} research, {} facilities, {} components, {} resources, {} contracts, {} scenarios)",
+        "wrote {} ({} spacecraft, {} LVs, {} research, {} facilities, {} components, {} resources, {} contracts, {} scenarios, {} epochs)",
         output.display(),
         out.spacecraft.len(),
         out.launch_vehicles.len(),
@@ -1028,6 +1126,7 @@ fn main() -> Result<()> {
         out.resources.len(),
         out.contracts.len(),
         out.scenario_starts.len(),
+        out.epochs.len(),
     );
     Ok(())
 }
@@ -1443,6 +1542,70 @@ mod tests {
         let f = parse_facility(&v, "Ground").expect("parses");
         let consumed_ids: Vec<&str> = f.consumes.iter().map(|c| c.resource_id.as_str()).collect();
         assert!(consumed_ids.contains(&"hel3"), "got {:?}", consumed_ids);
+    }
+
+    #[test]
+    fn parses_contract_timing_fields() {
+        // ContractDefinition entries carry dateStartActive ("MM/DD/YYYY") and
+        // yearsToExpire (numeric, in years). Both are surfaced verbatim.
+        let v = serde_json::json!({
+            "id": "contract_mars_outpost",
+            "isLocked": false,
+            "isFinalContract": false,
+            "dateStartActive": "01/01/2050",
+            "yearsToExpire": 5,
+            "objectives": [],
+            "rewards": []
+        });
+        let c = parse_contract(&v).expect("contract should parse");
+        assert_eq!(c.date_start_active.as_deref(), Some("01/01/2050"));
+        assert_eq!(c.years_to_expire, 5.0);
+    }
+
+    #[test]
+    fn parses_contract_with_empty_date_and_zero_expiry() {
+        // Many contracts have dateStartActive="" and yearsToExpire=0 in the
+        // dump (always-available, never expires). Both should parse cleanly.
+        let v = serde_json::json!({
+            "id": "contract_anytime",
+            "isLocked": false,
+            "isFinalContract": false,
+            "dateStartActive": "",
+            "yearsToExpire": 0,
+            "objectives": [],
+            "rewards": []
+        });
+        let c = parse_contract(&v).expect("contract should parse");
+        assert!(c.date_start_active.is_none() || c.date_start_active.as_deref() == Some(""));
+        assert_eq!(c.years_to_expire, 0.0);
+    }
+
+    fn epoch_fixture() -> Value {
+        // Trimmed real StartGameEpoch entry from the Sirenix dump.
+        serde_json::json!({
+            "$name": "StartGameEpoch_Colonization",
+            "$type": "StartGameEpoch",
+            "translationKeyPrefix": "Game.UI.CustomizationScreen.StartDateSettings.Item4",
+            "startDateString": "01.01.2100 00:00:00",
+            "isLocked": true,
+            "possiblePlayerCompanies": [
+                { "$ref": true, "type": "CompanyDefinition", "name": "CNSA" },
+                { "$ref": true, "type": "CompanyDefinition", "name": "ESA" },
+                { "$ref": true, "type": "CompanyDefinition", "name": "NASA" },
+                { "$ref": true, "type": "CompanyDefinition", "name": "Roscosmos" }
+            ],
+            "id": "StartGameEpoch_Colonization"
+        })
+    }
+
+    #[test]
+    fn parses_epoch_fields() {
+        let e = parse_epoch(&epoch_fixture()).expect("colonization epoch should parse");
+        assert_eq!(e.id, "StartGameEpoch_Colonization");
+        assert_eq!(e.start_date_string, "01.01.2100 00:00:00");
+        assert!(e.is_locked);
+        assert_eq!(e.possible_player_companies.len(), 4);
+        assert!(e.possible_player_companies.contains(&"NASA".to_string()));
     }
 
     #[test]
