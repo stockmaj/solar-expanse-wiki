@@ -3152,6 +3152,69 @@ fn fmt_work_hours(h: f64) -> String {
     }
 }
 
+/// Convert a snake_case id fragment into Title Case words.
+fn humanize_id_fragment(s: &str) -> String {
+    let cleaned = s.replace('_', " ");
+    let mut out = String::with_capacity(cleaned.len());
+    let mut cap_next = true;
+    for c in cleaned.chars() {
+        if c.is_whitespace() {
+            out.push(c);
+            cap_next = true;
+        } else if cap_next && c.is_alphabetic() {
+            for u in c.to_uppercase() { out.push(u); }
+            cap_next = false;
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Resolve a single UnlockBonus `bonus_components` token to a player-facing label.
+/// `build_*` → facility display name; `id_Rocket_*` / `lv_*` → LV name;
+/// `spacecraft_*` → spacecraft name; `module_*` / `eng_*` / `cargo_*` →
+/// humanized fragment; sentinel "All"/"Facility"/"LV" → readable label.
+fn resolve_bonus_component(
+    target: &str,
+    facility_name: &BTreeMap<&str, &str>,
+    spacecraft_name: &BTreeMap<&str, &str>,
+    lv_name: &BTreeMap<&str, &str>,
+) -> String {
+    if let Some(key) = target.strip_prefix("build_") {
+        let name = facility_name.get(key).copied().unwrap_or(key);
+        return smart_title_case(name);
+    }
+    if target.starts_with("id_Rocket_") || target.starts_with("lv_") {
+        if let Some(name) = lv_name.get(target).copied() {
+            return smart_title_case(name);
+        }
+        let frag = target
+            .strip_prefix("id_Rocket_")
+            .or_else(|| target.strip_prefix("lv_"))
+            .unwrap_or(target);
+        return humanize_id_fragment(frag);
+    }
+    if target.starts_with("spacecraft_") {
+        if let Some(name) = spacecraft_name.get(target).copied() {
+            return smart_title_case(name);
+        }
+        let frag = target.strip_prefix("spacecraft_").unwrap_or(target);
+        return humanize_id_fragment(frag);
+    }
+    for prefix in &["module_", "eng_", "cargo_"] {
+        if let Some(frag) = target.strip_prefix(prefix) {
+            return humanize_id_fragment(frag);
+        }
+    }
+    match target {
+        "All" => "(all)".to_string(),
+        "Facility" => "(all facilities)".to_string(),
+        "LV" => "(all launch vehicles)".to_string(),
+        other => humanize_id_fragment(other),
+    }
+}
+
 fn fmt_research_unlock(
     r: &ResearchStat,
     facility_name: &BTreeMap<&str, &str>,
@@ -3207,9 +3270,16 @@ fn fmt_research_unlock(
                 let comps = if r.bonus_components.is_empty() {
                     "".to_string()
                 } else {
-                    format!(" on {}", r.bonus_components.join(", "))
+                    let names: Vec<String> = r
+                        .bonus_components
+                        .iter()
+                        .map(|t| resolve_bonus_component(t, facility_name, spacecraft_name, lv_name))
+                        .collect();
+                    format!(" on {}", names.join(", "))
                 };
-                format!("+{} {}{}", fmt_amount(r.bonus_amount), b, comps)
+                // fmt_amount emits a leading `-` for negatives; only prepend `+` for non-negatives.
+                let sign = if r.bonus_amount < 0.0 { "" } else { "+" };
+                format!("{sign}{} {}{}", fmt_amount(r.bonus_amount), b, comps)
             }
             None => "Bonus".into(),
         },
