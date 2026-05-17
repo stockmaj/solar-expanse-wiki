@@ -124,8 +124,17 @@ run_pipeline() {
     log "extract-icons"
     "$bindir/extract-icons" "$CACHE/project/ExportedProject" "$WIKI_ROOT/docs/images/resources"
 
+    local proj_settings="$CACHE/project/ExportedProject/ProjectSettings/ProjectSettings.asset"
+    local game_version="unknown"
+    if [[ -f "$proj_settings" ]]; then
+        # Unity stores the game version as `  bundleVersion: 0.26.5.15.14 BETA`.
+        game_version="$(awk -F': ' '/^[[:space:]]*bundleVersion:/{print $2; exit}' "$proj_settings")"
+        [[ -z "$game_version" ]] && game_version="unknown"
+    fi
+    log "game version: $game_version"
+
     log "gen-pages"
-    "$bindir/gen-pages" "$CACHE/locale.json" "$CACHE/stats.json" "$CACHE/sirenix.json" "$WIKI_ROOT/docs"
+    "$bindir/gen-pages" "$CACHE/locale.json" "$CACHE/stats.json" "$CACHE/sirenix.json" "$WIKI_ROOT/docs" "$game_version"
 
     log "done"
 }

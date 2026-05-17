@@ -1,6 +1,6 @@
 # Launch Windows
 
-**Jump to:** [Calculate a window](#window-calculator) · [Filter the body list](#body-table)
+**Jump to:** [Body table](#body-table) · [Gravity-assist trajectory](#gravity-assist)
 
 > **Heads-up:** these numbers are computed by the wiki from the orbital
 > elements the game ships, *not* read from the game itself.  The in-game
@@ -9,15 +9,41 @@
 > intervals here are a **planning approximation** — the porkchop plot is
 > the source of truth at launch time.
 
+## Window calculator
+
+<a id="window-calculator"></a>
+
+Pick a *from* body, *to* body, and a start date.  The calculator lists the
+next five Hohmann-transfer launch windows from that pair, plus the arrival
+date for each (transfer time = `0.5 × ((a_from + a_to) / 2)^1.5` years).
+
+The start date defaults to **2020-01-01** — the game starts in 1959 but the
+real-world J2000 orbital elements used here are most accurate around the
+year 2000, and the launch-window math is mostly useful for planning a few
+years out.
+
+<div class="calc">
+<label>From: <select id="calc-from"></select></label>
+<label>To: <select id="calc-to"></select></label>
+<label>Start date: <input type="date" id="calc-date" value="2020-01-01"></label>
+<div id="calc-result"></div>
+</div>
+
+<script>
+window.LAUNCH_WINDOW_ALL_BODIES = [{"name":"Earth","a":1.000001,"longitude":168},{"name":"Mercury","a":0.3870993,"longitude":252.25032},{"name":"Venus","a":0.7233357,"longitude":181.9791},{"name":"EX0-99 Extinctor","a":0.73211825,"longitude":70},{"name":"99942 Apophis","a":0.9227,"longitude":100},{"name":"3753 Cruithne","a":0.99774,"longitude":84},{"name":"469219 Kamoʻoalewa","a":1.00094,"longitude":190},{"name":"101955 Bennu","a":1.1264,"longitude":84},{"name":"25143 Itokawa","a":1.3241,"longitude":84},{"name":"Mars","a":1.52371,"longitude":0},{"name":"098-Y Peppin","a":1.8,"longitude":20},{"name":"2495 Noviomagum","a":1.9176,"longitude":125},{"name":"5426 Sharp","a":1.95,"longitude":137},{"name":"2048 Dwornik","a":1.953737,"longitude":256},{"name":"7088 Ishtar","a":1.9804,"longitude":127},{"name":"UT7-55 Kutno","a":2.13,"longitude":305},{"name":"8 Flora","a":2.2015843,"longitude":303},{"name":"2P Encke","a":2.215132,"longitude":0},{"name":"12 Victoria","a":2.33,"longitude":75},{"name":"4 Vesta","a":2.3619132,"longitude":314},{"name":"7 Iris","a":2.3858037,"longitude":29},{"name":"9 Metis","a":2.3865738,"longitude":0},{"name":"6 Hebe","a":2.4260397,"longitude":207},{"name":"11 Parthenope","a":2.45,"longitude":299},{"name":"TJ66-2145","a":2.45,"longitude":102},{"name":"5 Astraea","a":2.57348,"longitude":167},{"name":"13 Egeria","a":2.58,"longitude":150},{"name":"KH7-23 Geraldino","a":2.64,"longitude":355},{"name":"1036 Ganymed","a":2.6629,"longitude":285},{"name":"3 Juno","a":2.67,"longitude":350},{"name":"FL8-09 Varsoviom","a":2.75,"longitude":255},{"name":"1 Ceres","a":2.7679725,"longitude":0},{"name":"2 Pallas","a":2.7696,"longitude":357},{"name":"267 Tirza","a":2.77458,"longitude":305},{"name":"PC0-01 Kurai","a":2.801,"longitude":5},{"name":"PW4-13 Rider","a":3.01,"longitude":77},{"name":"368 Haidea","a":3.07,"longitude":305},{"name":"10 Hygiea","a":3.1415,"longitude":15},{"name":"AB2-38 Dover","a":3.22,"longitude":1},{"name":"BG1-65 Usher","a":3.33,"longitude":333},{"name":"MP3-87 Nosfer","a":3.45,"longitude":123},{"name":"TT-9025","a":3.54,"longitude":84},{"name":"ZZ9-01 Nebulavsky","a":3.67,"longitude":245},{"name":"4P Faye","a":3.838159,"longitude":0},{"name":"KB5-98 Kris","a":3.91,"longitude":91},{"name":"2312 Duboshin","a":3.97,"longitude":305},{"name":"DE8-42 Sunset","a":4,"longitude":334},{"name":"279 Thule","a":4.26,"longitude":111},{"name":"659 Nestor","a":5.1702,"longitude":288.33},{"name":"Jupiter","a":5.202887,"longitude":34.396442},{"name":"617 Patroclus","a":5.209,"longitude":323.7},{"name":"588 Achilles","a":5.2091,"longitude":205.11},{"name":"1172 Aneas","a":5.2182,"longitude":238.69},{"name":"3317 Paris","a":5.2223,"longitude":287.65},{"name":"624 Hektor","a":5.2571,"longitude":128.09},{"name":"911 Agamemnon","a":5.2766,"longitude":136.09},{"name":"Saturn","a":9.536676,"longitude":49.954243},{"name":"1P Halley","a":17.83416,"longitude":0},{"name":"Uranus","a":19.18917,"longitude":313.2381},{"name":"Neptune","a":30.06992,"longitude":0},{"name":"Pluto","a":39.48212,"longitude":238.92903}];
+window.LAUNCH_WINDOW_EARTH = {"a":1.000001,"longitude":168};
+</script>
+<script src="{{ '/assets/js/launch-windows.js' | relative_url }}"></script>
+
 ## What counts as a launch window
 
 A *launch window* here is the moment when an idealized **Hohmann transfer**
-launched from Earth's orbit will arrive at the target body just as that body
-reaches the transfer ellipse's far side.  Concretely, at the moment of
+launched from one body's orbit will arrive at the target body just as that
+body reaches the transfer ellipse's far side.  Concretely, at the moment of
 launch the target has to lead (for outer bodies) or trail (for inner bodies)
-Earth by a specific phase angle so that body and spacecraft meet on arrival.
-Earth–Mars windows recur every ~26 months (synodic period); the most recent
-real-world ones were 2020-07, 2022-09, 2024-10.
+the origin by a specific phase angle so that body and spacecraft meet on
+arrival.  Earth–Mars windows recur every ~26 months (synodic period); the
+most recent real-world ones were 2020-07, 2022-09, 2024-10.
 
 This is a single idealised window per synodic period — *not* a multi-day
 porkchop plot.  In practice the in-game planner gives you a range of days
@@ -112,31 +138,44 @@ Moons aren't here — launching from Earth to the Moon (or Phobos, Europa, etc.)
 doesn't have a useful synodic period; you wait for your spacecraft to be
 ready and the in-game flight planner handles phasing.
 
-## Window calculator
+## Gravity-assist trajectory
 
-<a id="window-calculator"></a>
+<a id="gravity-assist"></a>
 
-Pick a *from* body, *to* body, and a start date.  The calculator lists the
-next five Hohmann-transfer launch windows from that pair, plus the arrival
-date for each (transfer time = `0.5 × ((a_from + a_to) / 2)^1.5` years).
+For outer-system targets a *gravity assist* — a deep flyby of an intermediate
+body that bends the spacecraft's trajectory at no propellant cost — can cut
+the launch Δv dramatically.  Pick any *from*, *flyby*, and *to* body and the
+calculator searches a coarse grid of launch and flyby dates, returning the
+lowest-cost single-flyby trajectory it can find.
 
-Same caveat as the table above: this is a Keplerian approximation anchored
-at the game's earliest contract epoch (1959-01-01).  Spacing between windows
-is reliable; absolute dates may drift from the in-game porkchop plot by days
-to weeks.
+**Important caveats:**
+
+- This is a **single** gravity assist (one intermediate body).  Real
+outer-planet missions usually chain several — Cassini did Venus-Venus-Earth-Jupiter,
+for example — and those aren't modelled here.
+- It's a **patched-conic** approximation: each leg is a heliocentric Kepler
+arc and the flyby itself is treated as an instantaneous rotation of the
+v∞ vector.  In particular, the flyby is assumed capable of bending v∞ by
+any angle for free (the actual maximum bend depends on flyby altitude
+and the body's mass).
+- Bodies are assumed to move on **circular coplanar** orbits anchored at
+the game's epoch — same Keplerian approximation the window calculator
+above uses.
+
+Treat this as a **planning tool**, not a precise trajectory.  The reported
+"Δv proxy" is `|v_spacecraft − v_Earth|` at launch plus
+`|v_spacecraft − v_target|` at arrival, both expressed in km/s; it
+ignores escape Δv from low Earth orbit and capture Δv at the target.
 
 <div class="calc">
-<label>From: <select id="calc-from"></select></label>
-<label>To: <select id="calc-to"></select></label>
-<label>Start date: <input type="date" id="calc-date" value="2020-01-01"></label>
-<div id="calc-result"></div>
+<label>From: <select id="ga-from"></select></label>
+<label>Flyby: <select id="ga-flyby"></select></label>
+<label>To: <select id="ga-to"></select></label>
+<label>Search from: <input type="date" id="ga-date" value="2020-01-01"></label>
+<div id="ga-result"></div>
 </div>
 
-<script>
-window.LAUNCH_WINDOW_ALL_BODIES = [{"name":"Earth","a":1.000001,"longitude":168},{"name":"Mercury","a":0.3870993,"longitude":252.25032},{"name":"Venus","a":0.7233357,"longitude":181.9791},{"name":"EX0-99 Extinctor","a":0.73211825,"longitude":70},{"name":"99942 Apophis","a":0.9227,"longitude":100},{"name":"3753 Cruithne","a":0.99774,"longitude":84},{"name":"469219 Kamoʻoalewa","a":1.00094,"longitude":190},{"name":"101955 Bennu","a":1.1264,"longitude":84},{"name":"25143 Itokawa","a":1.3241,"longitude":84},{"name":"Mars","a":1.52371,"longitude":0},{"name":"098-Y Peppin","a":1.8,"longitude":20},{"name":"2495 Noviomagum","a":1.9176,"longitude":125},{"name":"5426 Sharp","a":1.95,"longitude":137},{"name":"2048 Dwornik","a":1.953737,"longitude":256},{"name":"7088 Ishtar","a":1.9804,"longitude":127},{"name":"UT7-55 Kutno","a":2.13,"longitude":305},{"name":"8 Flora","a":2.2015843,"longitude":303},{"name":"2P Encke","a":2.215132,"longitude":0},{"name":"12 Victoria","a":2.33,"longitude":75},{"name":"4 Vesta","a":2.3619132,"longitude":314},{"name":"7 Iris","a":2.3858037,"longitude":29},{"name":"9 Metis","a":2.3865738,"longitude":0},{"name":"6 Hebe","a":2.4260397,"longitude":207},{"name":"11 Parthenope","a":2.45,"longitude":299},{"name":"TJ66-2145","a":2.45,"longitude":102},{"name":"5 Astraea","a":2.57348,"longitude":167},{"name":"13 Egeria","a":2.58,"longitude":150},{"name":"KH7-23 Geraldino","a":2.64,"longitude":355},{"name":"1036 Ganymed","a":2.6629,"longitude":285},{"name":"3 Juno","a":2.67,"longitude":350},{"name":"FL8-09 Varsoviom","a":2.75,"longitude":255},{"name":"1 Ceres","a":2.7679725,"longitude":0},{"name":"2 Pallas","a":2.7696,"longitude":357},{"name":"267 Tirza","a":2.77458,"longitude":305},{"name":"PC0-01 Kurai","a":2.801,"longitude":5},{"name":"PW4-13 Rider","a":3.01,"longitude":77},{"name":"368 Haidea","a":3.07,"longitude":305},{"name":"10 Hygiea","a":3.1415,"longitude":15},{"name":"AB2-38 Dover","a":3.22,"longitude":1},{"name":"BG1-65 Usher","a":3.33,"longitude":333},{"name":"MP3-87 Nosfer","a":3.45,"longitude":123},{"name":"TT-9025","a":3.54,"longitude":84},{"name":"ZZ9-01 Nebulavsky","a":3.67,"longitude":245},{"name":"4P Faye","a":3.838159,"longitude":0},{"name":"KB5-98 Kris","a":3.91,"longitude":91},{"name":"2312 Duboshin","a":3.97,"longitude":305},{"name":"DE8-42 Sunset","a":4,"longitude":334},{"name":"279 Thule","a":4.26,"longitude":111},{"name":"659 Nestor","a":5.1702,"longitude":288.33},{"name":"Jupiter","a":5.202887,"longitude":34.396442},{"name":"617 Patroclus","a":5.209,"longitude":323.7},{"name":"588 Achilles","a":5.2091,"longitude":205.11},{"name":"1172 Aneas","a":5.2182,"longitude":238.69},{"name":"3317 Paris","a":5.2223,"longitude":287.65},{"name":"624 Hektor","a":5.2571,"longitude":128.09},{"name":"911 Agamemnon","a":5.2766,"longitude":136.09},{"name":"Saturn","a":9.536676,"longitude":49.954243},{"name":"1P Halley","a":17.83416,"longitude":0},{"name":"Uranus","a":19.18917,"longitude":313.2381},{"name":"Neptune","a":30.06992,"longitude":0},{"name":"Pluto","a":39.48212,"longitude":238.92903}];
-window.LAUNCH_WINDOW_EARTH = {"a":1.000001,"longitude":168};
-</script>
-<script src="{{ '/assets/js/launch-windows.js' | relative_url }}"></script>
+<script src="{{ '/assets/js/gravity-assist.js' | relative_url }}"></script>
 
 ## See also
 

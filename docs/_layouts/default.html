@@ -111,6 +111,9 @@
         Unofficial fan wiki — <em>Solar Expanse</em> © Maciej Miąsik / TJ Entertainment.
         Built from the game's own data files; pipeline in
         <a href="https://github.com/{{ site.github.repository_nwo | default: 'stockmaj/solar-expanse-wiki' }}">stockmaj/solar-expanse-wiki</a>.
+        {% if site.data.wiki %}
+        <br>Data from <em>Solar Expanse</em> v{{ site.data.wiki.game_version }} (generated {{ site.data.wiki.generated_at }}).
+        {% endif %}
       </small>
     </div>
   </footer>
