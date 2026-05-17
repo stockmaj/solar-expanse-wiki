@@ -2347,6 +2347,76 @@ fn fmt_work_hours(h: f64) -> String {
     }
 }
 
+/// Convert a snake_case-ish id fragment into Title Case words.
+/// e.g. "crew_compartment" → "Crew Compartment", "chemhelios" → "Chemhelios".
+fn humanize_id_fragment(s: &str) -> String {
+    let cleaned = s.replace('_', " ");
+    let mut out = String::with_capacity(cleaned.len());
+    let mut cap_next = true;
+    for c in cleaned.chars() {
+        if c.is_whitespace() {
+            out.push(c);
+            cap_next = true;
+        } else if cap_next && c.is_alphabetic() {
+            for u in c.to_uppercase() {
+                out.push(u);
+            }
+            cap_next = false;
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Render a single `bonus_components` entry as a human-readable label.
+/// Resolution order:
+///   `build_<id>`             → facility display name (locale)
+///   `id_Rocket_*` / `lv_*`   → launch-vehicle display name (locale)
+///   `spacecraft_*`           → spacecraft display name (locale)
+///   `module_*` / `eng_*` / `cargo_*` / etc. → humanized fragment (no locale entry available)
+fn resolve_bonus_component(
+    target: &str,
+    facility_name: &BTreeMap<&str, &str>,
+    spacecraft_name: &BTreeMap<&str, &str>,
+    lv_name: &BTreeMap<&str, &str>,
+) -> String {
+    if let Some(key) = target.strip_prefix("build_") {
+        let name = facility_name.get(key).copied().unwrap_or(key);
+        return smart_title_case(name);
+    }
+    if target.starts_with("id_Rocket_") || target.starts_with("lv_") {
+        if let Some(name) = lv_name.get(target).copied() {
+            return smart_title_case(name);
+        }
+        let frag = target
+            .strip_prefix("id_Rocket_")
+            .or_else(|| target.strip_prefix("lv_"))
+            .unwrap_or(target);
+        return humanize_id_fragment(frag);
+    }
+    if target.starts_with("spacecraft_") {
+        if let Some(name) = spacecraft_name.get(target).copied() {
+            return smart_title_case(name);
+        }
+        let frag = target.strip_prefix("spacecraft_").unwrap_or(target);
+        return humanize_id_fragment(frag);
+    }
+    // module_*, eng_*, cargo_*, etc. — no locale entry; humanize the fragment.
+    for prefix in &["module_", "eng_", "cargo_"] {
+        if let Some(frag) = target.strip_prefix(prefix) {
+            return humanize_id_fragment(frag);
+        }
+    }
+    // Sentinel values used by the game data for "applies to everything in a class".
+    match target {
+        "All" => "(all)".to_string(),
+        "Facility" => "(all facilities)".to_string(),
+        "LV" => "(all launch vehicles)".to_string(),
+        other => humanize_id_fragment(other),
+    }
+}
+
 fn fmt_research_unlock(
     r: &ResearchStat,
     facility_name: &BTreeMap<&str, &str>,
@@ -2358,8 +2428,17 @@ fn fmt_research_unlock(
             let target = r.unlock_target.as_deref().unwrap_or("");
             // Facility unlock targets are full ids like "build_outpost"; locale ids are bare ("outpost").
             let key = target.strip_prefix("build_").unwrap_or(target);
-            let pretty = smart_title_case(facility_name.get(key).copied().unwrap_or(key));
-            let link = link_cross_page("facilities", "facility", key, &format!("**{pretty}**"));
+            // Some unlocks point at spacecraft modules (module_crew_compartment, …) that
+            // don't appear in `locale.facilities`.  Humanize the fragment as a fallback so we
+            // don't leak the internal id into the page.
+            let display = if let Some(name) = facility_name.get(key).copied() {
+                smart_title_case(name)
+            } else if let Some(frag) = key.strip_prefix("module_") {
+                humanize_id_fragment(frag)
+            } else {
+                humanize_id_fragment(key)
+            };
+            let link = link_cross_page("facilities", "facility", key, &format!("**{display}**"));
             format!("Builds {link}")
         }
         "UnlockSpacecraftType" => {
@@ -2379,9 +2458,16 @@ fn fmt_research_unlock(
                 let comps = if r.bonus_components.is_empty() {
                     "".to_string()
                 } else {
-                    format!(" on {}", r.bonus_components.join(", "))
+                    let names: Vec<String> = r
+                        .bonus_components
+                        .iter()
+                        .map(|t| resolve_bonus_component(t, facility_name, spacecraft_name, lv_name))
+                        .collect();
+                    format!(" on {}", names.join(", "))
                 };
-                format!("+{} {}{}", fmt_amount(r.bonus_amount), b, comps)
+                // fmt_amount already emits a leading `-` for negatives; only prepend `+` for non-negatives.
+                let sign = if r.bonus_amount < 0.0 { "" } else { "+" };
+                format!("{sign}{} {}{}", fmt_amount(r.bonus_amount), b, comps)
             }
             None => "Bonus".into(),
         },
@@ -2743,6 +2829,199 @@ mod tests {
             body_type: None,
             orbit_data_source: None,
         }
+    }
+
+    fn name_map<'a>(pairs: &[(&'a str, &'a str)]) -> BTreeMap<&'a str, &'a str> {
+        pairs.iter().copied().collect()
+    }
+
+    fn research_bonus(kind: &str, amount: f64, components: &[&str]) -> ResearchStat {
+        ResearchStat {
+            id: "test".into(),
+            work_hours: 0.0,
+            branch: "".into(),
+            subbranch: "".into(),
+            prereqs: vec![],
+            action: "UnlockBonus".into(),
+            unlock_target: None,
+            bonus_kind: Some(kind.into()),
+            bonus_amount: amount,
+            bonus_components: components.iter().map(|s| s.to_string()).collect(),
+            show_in_tree: true,
+            contract_unlocks: vec![],
+        }
+    }
+
+    #[test]
+    fn fmt_research_unlock_resolves_build_facility_to_display_name() {
+        let facilities = name_map(&[("farm", "HYDROPONIC FARM")]);
+        let spacecraft = name_map(&[]);
+        let lv = name_map(&[]);
+        let r = research_bonus("ProductionEfficiency", 10.0, &["build_farm"]);
+        let out = fmt_research_unlock(&r, &facilities, &spacecraft, &lv);
+        assert!(
+            out.contains("Farm") && !out.contains("build_farm"),
+            "got {out:?}"
+        );
+    }
+
+    #[test]
+    fn fmt_research_unlock_joins_multiple_build_ids_as_display_names() {
+        let facilities = name_map(&[
+            ("outpost", "Outpost"),
+            ("habitat", "Habitat"),
+            ("habitatdome", "Habitat Dome"),
+            ("habitatcity", "Habitat City"),
+        ]);
+        let spacecraft = name_map(&[]);
+        let lv = name_map(&[]);
+        let r = research_bonus(
+            "BuildCost",
+            -35.0,
+            &[
+                "build_outpost",
+                "build_habitat",
+                "build_habitatdome",
+                "build_habitatcity",
+            ],
+        );
+        let out = fmt_research_unlock(&r, &facilities, &spacecraft, &lv);
+        assert!(out.contains("Outpost"), "got {out:?}");
+        assert!(out.contains("Habitat"), "got {out:?}");
+        assert!(out.contains("Habitat Dome"), "got {out:?}");
+        assert!(out.contains("Habitat City"), "got {out:?}");
+        assert!(!out.contains("build_"), "leaked build_ id: {out:?}");
+    }
+
+    #[test]
+    fn fmt_research_unlock_negative_amount_does_not_double_sign() {
+        let facilities = name_map(&[("outpost", "Outpost")]);
+        let spacecraft = name_map(&[]);
+        let lv = name_map(&[]);
+        let r = research_bonus("BuildCost", -35.0, &["build_outpost"]);
+        let out = fmt_research_unlock(&r, &facilities, &spacecraft, &lv);
+        assert!(!out.contains("+-"), "double-signed: {out:?}");
+        assert!(out.contains("-35"), "missing -35: {out:?}");
+    }
+
+    #[test]
+    fn fmt_research_unlock_humanizes_engine_component_id() {
+        let facilities = name_map(&[]);
+        let spacecraft = name_map(&[]);
+        let lv = name_map(&[]);
+        let r = research_bonus(
+            "ComponentExhaustV",
+            20.0,
+            &["eng_chem", "eng_chemsmall", "eng_chemhelios", "eng_chemorion"],
+        );
+        let out = fmt_research_unlock(&r, &facilities, &spacecraft, &lv);
+        assert!(!out.contains("eng_chem"), "raw eng_ id leaked: {out:?}");
+        assert!(!out.contains("eng_"), "raw eng_ prefix leaked: {out:?}");
+        // Humanized form should contain something recognizable.
+        assert!(
+            out.to_lowercase().contains("chem"),
+            "missing humanized 'chem' fragment: {out:?}"
+        );
+    }
+
+    #[test]
+    fn fmt_research_unlock_resolves_id_rocket_to_lv_name() {
+        let facilities = name_map(&[]);
+        let spacecraft = name_map(&[]);
+        let lv = name_map(&[
+            ("id_Rocket_RocketType3", "Falcon"),
+            ("id_Rocket_RocketType4", "Eagle"),
+        ]);
+        let r = research_bonus(
+            "BuildCost",
+            25.0,
+            &["id_Rocket_RocketType3", "id_Rocket_RocketType4"],
+        );
+        let out = fmt_research_unlock(&r, &facilities, &spacecraft, &lv);
+        assert!(out.contains("Falcon"), "got {out:?}");
+        assert!(out.contains("Eagle"), "got {out:?}");
+        assert!(
+            !out.contains("id_Rocket_"),
+            "raw rocket id leaked: {out:?}"
+        );
+    }
+
+    #[test]
+    fn fmt_research_unlock_resolves_spacecraft_id_to_display_name() {
+        let facilities = name_map(&[]);
+        let spacecraft = name_map(&[
+            ("spacecraft_chem_mid2", "Selene"),
+            ("spacecraft_chem_large", "Stratos"),
+        ]);
+        let lv = name_map(&[]);
+        let r = research_bonus(
+            "SCCargoCapacityBase",
+            50.0,
+            &["spacecraft_chem_mid2", "spacecraft_chem_large"],
+        );
+        let out = fmt_research_unlock(&r, &facilities, &spacecraft, &lv);
+        assert!(out.contains("Selene"), "got {out:?}");
+        assert!(out.contains("Stratos"), "got {out:?}");
+        assert!(
+            !out.contains("spacecraft_chem"),
+            "raw spacecraft id leaked: {out:?}"
+        );
+    }
+
+    #[test]
+    fn fmt_research_unlock_humanizes_module_id_without_locale_entry() {
+        let facilities = name_map(&[]);
+        let spacecraft = name_map(&[]);
+        let lv = name_map(&[]);
+        let r = ResearchStat {
+            id: "test".into(),
+            work_hours: 0.0,
+            branch: "".into(),
+            subbranch: "".into(),
+            prereqs: vec![],
+            action: "UnlockFacility".into(),
+            unlock_target: Some("module_crew_compartment".into()),
+            bonus_kind: None,
+            bonus_amount: 0.0,
+            bonus_components: vec![],
+            show_in_tree: true,
+            contract_unlocks: vec![],
+        };
+        let out = fmt_research_unlock(&r, &facilities, &spacecraft, &lv);
+        assert!(
+            out.contains("Crew Compartment"),
+            "expected humanized name 'Crew Compartment', got {out:?}"
+        );
+        assert!(
+            !out.contains("module_"),
+            "raw module_ id leaked: {out:?}"
+        );
+    }
+
+    #[test]
+    fn fmt_research_unlock_all_sentinel_renders_readable_with_facility_kind() {
+        let facilities = name_map(&[]);
+        let spacecraft = name_map(&[]);
+        let lv = name_map(&[]);
+        let r = research_bonus("BuildSpeed", 25.0, &["Facility"]);
+        let out = fmt_research_unlock(&r, &facilities, &spacecraft, &lv);
+        assert!(
+            out.contains("all facilities"),
+            "expected 'all facilities' phrasing, got {out:?}"
+        );
+    }
+
+    #[test]
+    fn fmt_research_unlock_lv_sentinel_renders_all_launch_vehicles() {
+        let facilities = name_map(&[]);
+        let spacecraft = name_map(&[]);
+        let lv = name_map(&[]);
+        let r = research_bonus("LaunchCost", 20.0, &["LV"]);
+        let out = fmt_research_unlock(&r, &facilities, &spacecraft, &lv);
+        assert!(
+            out.contains("all launch vehicles"),
+            "expected 'all launch vehicles' phrasing, got {out:?}"
+        );
     }
 
     #[test]
