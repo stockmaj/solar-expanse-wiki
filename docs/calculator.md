@@ -14,4 +14,4 @@ Your selection is saved in this browser, so reloading keeps your plan.
 
 <div id="calc-root"></div>
 
-<script src="{{ '/assets/js/calculator.js' | relative_url }}?v={{ site.data.wiki.generated_at }}" defer></script>
+<script src="{{ '/assets/js/calculator.js' | relative_url }}?v={{ site.github.build_revision | default: 'dev' }}" defer></script>
