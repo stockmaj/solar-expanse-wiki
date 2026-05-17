@@ -324,6 +324,13 @@
         if (e.key === 'Enter') { e.preventDefault(); update(); }
       });
     });
+    // Select-all on focus so the user can replace the default body name
+    // with a single keystroke instead of backspacing the old value out.
+    [fromInput, flybyInput, toInput].forEach(function (inp) {
+      inp.addEventListener('focus', function () {
+        setTimeout(function () { inp.select(); }, 0);
+      });
+    });
   }
 
   // --- Curated suggested trajectories ------------------------------------

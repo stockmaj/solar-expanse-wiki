@@ -173,6 +173,29 @@ main table th {
 main table tbody tr:nth-child(odd) { background: var(--bg-row-alt); }
 main table tbody tr:hover { background: rgba(255,179,71,0.05); }
 
+/* Sortable column headers — clickable, with a visual indicator. The
+ * `.sort` class is added by the layout's inline JS to any TH whose
+ * column is sortable (numeric or short text).  Active sort direction
+ * adds `.sort-asc` or `.sort-desc`. */
+main table th.sort { padding-right: 22px; position: relative; }
+main table th.sort::after {
+  content: "⇅";
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--fg-muted);
+  font-size: 11px;
+  opacity: 0.6;
+}
+main table th.sort-asc::after  { content: "↑"; color: var(--accent); opacity: 1; }
+main table th.sort-desc::after { content: "↓"; color: var(--accent); opacity: 1; }
+
+/* Typeahead/datalist inputs (calc-from, calc-to, ga-from, etc.) select
+ * their entire value on focus so the user can type a new body name
+ * without manually deleting the old one. */
+input[list]:focus { outline: 1px solid var(--accent); }
+
 /* Resource icons sit on the text baseline. */
 main table img[src*="/images/resources/"] {
   width: 16px;

@@ -143,6 +143,14 @@
         if (e.key === 'Enter') { e.preventDefault(); update(); }
       });
     });
+    // Select-all on focus so the user can replace "Earth" → "Mars" with
+    // a single keystroke instead of backspacing.  Defer one tick because
+    // some browsers re-set selection after the focus handler runs.
+    [fromInput, toInput].forEach(function (inp) {
+      inp.addEventListener('focus', function () {
+        setTimeout(function () { inp.select(); }, 0);
+      });
+    });
     // Run once on load so the default Earth → Mars result is visible.
     update();
   }
