@@ -1,0 +1,34 @@
+[package]
+name = "solar-expanse-extract"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+csv = "1.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+
+[dev-dependencies]
+tempfile = "3"
+
+[[bin]]
+name = "parse-locale"
+path = "src/bin/parse_locale.rs"
+
+[[bin]]
+name = "parse-stats"
+path = "src/bin/parse_stats.rs"
+
+[[bin]]
+name = "parse-sirenix"
+path = "src/bin/parse_sirenix.rs"
+
+[[bin]]
+name = "gen-pages"
+path = "src/bin/gen_pages.rs"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

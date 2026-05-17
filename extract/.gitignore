@@ -1,0 +1,9 @@
+/target/
+/tools/AssetRipper*
+/tools/lib*.dylib
+/tools/compile_time.txt
+/cache/
+/output/
+*.log
+/bepinex-mod/bin/
+/bepinex-mod/obj/
