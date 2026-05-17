@@ -1378,23 +1378,184 @@ research and built as facilities at the launch site:\n\n\
     )
 }
 
-fn page_corporations(locale: &Locale) -> String {
+// DifficultyConfig multipliers — sourced from
+// `Assets/MonoBehaviour/DifficultyConfig.asset` in the AssetRipper export.
+// The asset stores three (EGameDifficulty → BaseMultipliers) entries:
+//
+//   key 0 → startMoney 1.25, upkeep 0.5, supplyUsage 0.5  (Explorer)
+//   key 1 → startMoney 1.0,  upkeep 1.0, supplyUsage 1.0  (Pioneer)
+//   key 2 → startMoney 0.75, upkeep 1.5, supplyUsage 1.5  (Veteran)
+//
+// The base `money` value baked into each StartGameData save is the Pioneer
+// (key 1) figure; we multiply it for the other two tiers.
+const DIFFICULTY_NAMES: &[&str] = &["Explorer", "Pioneer", "Veteran"];
+const DIFFICULTY_MONEY_MULT: &[f64] = &[1.25, 1.0, 0.75];
+const DIFFICULTY_UPKEEP_MULT: &[f64] = &[0.5, 1.0, 1.5];
+const DIFFICULTY_SUPPLY_MULT: &[f64] = &[0.5, 1.0, 1.5];
+
+fn scenario_display_name(scenario_id: &str) -> String {
+    // Maps StartGameData.$name → the human-facing name from the New Game
+    // customization screen (Game.UI.CustomizationScreen.StartDateSettings.*).
+    match scenario_id {
+        "StartGameColonization" => "Colonization Era".to_string(),
+        "StartGameExpansion" => "The Expansion".to_string(),
+        "StartGameRaceBeyond" => "Race Beyond".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn page_corporations(locale: &Locale, sirenix: &Sirenix) -> String {
+    // Build research id → display name lookup from locale (e.g.
+    // "research_nukeprop_2" → "Solid-core nuclear-thermal engines").
+    let research_name: BTreeMap<&str, &str> = locale
+        .research
+        .iter()
+        .map(|r| (r.id.as_str(), r.name.as_str()))
+        .collect();
+
     let mut out = String::from(
         "# Corporations\n\n\
-The five playable starting factions in Solar Expanse. Each opens with a\n\
-different research head start and corporate flavor.\n\n",
+The five playable starting factions in Solar Expanse. Each scenario\n\
+(Colonization Era / The Expansion / Race Beyond) ships a different\n\
+pre-built save where every corporation starts with its own completed\n\
+research, funding, and fleet. Difficulty further scales starting money\n\
+and ongoing costs.\n\n",
     );
+
+    // ── Global difficulty table — same multipliers across all corps. ──
+    out.push_str("## Difficulty\n\n");
+    out.push_str("Selecting a difficulty on the New Game screen scales the corporation's pre-built starting state before play begins, and modifies upkeep / supply usage for the rest of the run.\n\n");
+    let diff_rows: Vec<Vec<String>> = (0..DIFFICULTY_NAMES.len())
+        .map(|i| {
+            vec![
+                format!("**{}**", DIFFICULTY_NAMES[i]),
+                format!("×{}", DIFFICULTY_MONEY_MULT[i]),
+                format!("×{}", DIFFICULTY_UPKEEP_MULT[i]),
+                format!("×{}", DIFFICULTY_SUPPLY_MULT[i]),
+            ]
+        })
+        .collect();
+    out.push_str(&md_table(
+        &["Difficulty", "Starting money", "Upkeep cost", "Supply usage"],
+        &diff_rows,
+    ));
+    out.push('\n');
+
+    // ── Per-corporation sections. ──
+    // Iterate in locale order (SoleX, NASA, ESA, CNSA, Roscosmos) so the
+    // page matches the in-game customization screen.
     for c in &locale.corporations {
         out.push_str(&format!("## {}\n\n{}\n\n", c.name, c.description));
+
         let traits = c.traits.replace("\\n", "\n");
         let traits = traits.trim();
         if !traits.is_empty() {
-            out.push_str("**Traits:**\n");
+            out.push_str("**Flavor traits (from new-game screen):**\n");
             out.push_str(traits);
             out.push_str("\n\n");
         }
+
+        // For each scenario, find this corp's CorpStartStat. CompanyDefinition
+        // ids ("Solex", "NASA", …) are matched case-insensitively against
+        // the locale name because the locale spells "SoleX" with capital X
+        // but the CompanyDefinition is "Solex".
+        let scenarios: Vec<(&ScenarioStartStat, &CorpStartStat)> = sirenix
+            .scenario_starts
+            .iter()
+            .filter_map(|s| {
+                s.corp_starts
+                    .iter()
+                    .find(|cs| cs.company_id.eq_ignore_ascii_case(&c.name))
+                    .map(|cs| (s, cs))
+            })
+            .collect();
+
+        if scenarios.is_empty() {
+            // Should not happen — every locale corp has CompanyDefinition data.
+            out.push_str("_No pre-built starting state found in StartGameData._\n\n");
+            continue;
+        }
+
+        // Starting funding table: rows = scenarios, columns = difficulties.
+        out.push_str("**Starting funding** (Pioneer base × difficulty multiplier):\n\n");
+        let money_rows: Vec<Vec<String>> = scenarios
+            .iter()
+            .map(|(s, cs)| {
+                let mut row = vec![format!("**{}**", scenario_display_name(&s.scenario_id))];
+                for &mult in DIFFICULTY_MONEY_MULT {
+                    row.push(format!("${}", fmt_abbrev(cs.starting_money * mult)));
+                }
+                row
+            })
+            .collect();
+        let headers = {
+            let mut h = vec!["Scenario"];
+            for n in DIFFICULTY_NAMES {
+                h.push(*n);
+            }
+            h
+        };
+        out.push_str(&md_table(&headers, &money_rows));
+        out.push('\n');
+
+        // Starting fleet table: rows = scenarios.
+        out.push_str("**Starting fleet & research count:**\n\n");
+        let fleet_rows: Vec<Vec<String>> = scenarios
+            .iter()
+            .map(|(s, cs)| {
+                vec![
+                    format!("**{}**", scenario_display_name(&s.scenario_id)),
+                    cs.starting_launch_vehicles.to_string(),
+                    cs.starting_spacecraft.to_string(),
+                    cs.completed_research.len().to_string(),
+                ]
+            })
+            .collect();
+        out.push_str(&md_table(
+            &[
+                "Scenario",
+                "Launch vehicles",
+                "Spacecraft",
+                "Research completed",
+            ],
+            &fleet_rows,
+        ));
+        out.push('\n');
+
+        // Per-scenario completed research lists.
+        for (s, cs) in &scenarios {
+            out.push_str(&format!(
+                "**Completed research — {}:**\n\n",
+                scenario_display_name(&s.scenario_id)
+            ));
+            if cs.completed_research.is_empty() {
+                out.push_str("_None._\n\n");
+                continue;
+            }
+            // Sort by display name — keeps the list stable across scenarios
+            // and easy to diff visually. The raw id ordering in the save
+            // is by tech-tree insertion which is confusing to a reader.
+            let mut names: Vec<String> = cs
+                .completed_research
+                .iter()
+                .filter_map(|rid| {
+                    // Skip category nodes (research_category_*) — they're
+                    // tree-structure rather than player-visible tech.
+                    if rid.starts_with("research_category_") {
+                        return None;
+                    }
+                    let nm = research_name.get(rid.as_str()).copied().unwrap_or(rid.as_str());
+                    Some(nm.to_string())
+                })
+                .collect();
+            names.sort();
+            names.dedup();
+            out.push_str(&names.iter().map(|n| format!("- {}", n)).collect::<Vec<_>>().join("\n"));
+            out.push_str("\n\n");
+        }
     }
-    out.push_str("## See also\n\n- [Research](../research/) — starting research differs by corporation\n");
+
+    out.push_str("## See also\n\n- [Research](../research/) — full tech tree across all branches\n");
     out
 }
 
@@ -2558,7 +2719,7 @@ fn main() -> Result<()> {
     write_file(&wiki_root, "spacecraft/README.md", &page_spacecraft(&locale, &sirenix))?;
     write_file(&wiki_root, "launch-vehicles/README.md", &page_launch_vehicles(&locale, &sirenix))?;
     write_file(&wiki_root, "facilities/README.md", &page_facilities(&locale, &sirenix))?;
-    write_file(&wiki_root, "corporations/README.md", &page_corporations(&locale))?;
+    write_file(&wiki_root, "corporations/README.md", &page_corporations(&locale, &sirenix))?;
     write_file(&wiki_root, "resources/README.md", &page_resources(&locale, &sirenix))?;
     write_file(&wiki_root, "contracts/README.md", &page_contracts(&locale, &sirenix))?;
     write_file(&wiki_root, "research/README.md", &page_research(&locale, &sirenix))?;
