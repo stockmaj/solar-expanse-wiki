@@ -1,0 +1,1693 @@
+{
+  "facilities": [
+    {
+      "id": "build_alloymine",
+      "name": "Exotic Alloy Extractor",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 125.0
+        }
+      ]
+    },
+    {
+      "id": "build_alloysmelting",
+      "name": "Alloy Smelting",
+      "category": "Production",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 300.0
+        }
+      ]
+    },
+    {
+      "id": "build_alloysmelting_big",
+      "name": "Alloy Smelting",
+      "category": "Production",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 300000.0
+        }
+      ]
+    },
+    {
+      "id": "build_carbon_deposition",
+      "name": "Carbon Release Station",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 125.0
+        }
+      ]
+    },
+    {
+      "id": "build_carbonmine",
+      "name": "Carbon Mine",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 125.0
+        }
+      ]
+    },
+    {
+      "id": "build_carbonmine_big",
+      "name": "Carbon Mine",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 1250.0
+        }
+      ]
+    },
+    {
+      "id": "build_co2_deposition",
+      "name": "CO2 Release Station",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 125.0
+        }
+      ]
+    },
+    {
+      "id": "build_co2_splitting",
+      "name": "Co2 Electrolysis",
+      "category": "Production",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 50.0
+        }
+      ]
+    },
+    {
+      "id": "build_co2mine",
+      "name": "Carbon Dioxide Extractor",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 125.0
+        }
+      ]
+    },
+    {
+      "id": "build_consumergoods_big",
+      "name": "Consumer Goods Factory",
+      "category": "Production",
+      "build_cost": [
+        {
+          "resource": "steel",
+          "amount": 200000.0
+        },
+        {
+          "resource": "chips",
+          "amount": 10000.0
+        },
+        {
+          "resource": "plastic",
+          "amount": 40000.0
+        }
+      ]
+    },
+    {
+      "id": "build_earthfarm",
+      "name": "Agriculture Complex",
+      "category": "Production",
+      "build_cost": [
+        {
+          "resource": "steel",
+          "amount": 200.0
+        },
+        {
+          "resource": "chips",
+          "amount": 50.0
+        },
+        {
+          "resource": "glass",
+          "amount": 100.0
+        },
+        {
+          "resource": "plastic",
+          "amount": 200.0
+        }
+      ]
+    },
+    {
+      "id": "build_earthhe3",
+      "name": "Helium-3 Factory",
+      "category": "Other",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 200.0
+        },
+        {
+          "resource": "chips",
+          "amount": 20.0
+        },
+        {
+          "resource": "uran",
+          "amount": 20.0
+        }
+      ]
+    },
+    {
+      "id": "build_earthmine",
+      "name": "Mining Facility",
+      "category": "Other",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 100.0
+        },
+        {
+          "resource": "chips",
+          "amount": 10.0
+        }
+      ]
+    },
+    {
+      "id": "build_earthnuke",
+      "name": "Fissile Extraction Facility",
+      "category": "Other",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 200.0
+        },
+        {
+          "resource": "chips",
+          "amount": 20.0
+        }
+      ]
+    },
+    {
+      "id": "build_electrolysis",
+      "name": "Electrolysis Plant",
+      "category": "Production",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 50.0
+        }
+      ]
+    },
+    {
+      "id": "build_electrolysis_big",
+      "name": "Electrolysis Plant",
+      "category": "Production",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 50000.0
+        }
+      ]
+    },
+    {
+      "id": "build_electronicsfactory",
+      "name": "Electronics Factory",
+      "category": "Production",
+      "build_cost": [
+        {
+          "resource": "steel",
+          "amount": 200.0
+        },
+        {
+          "resource": "chips",
+          "amount": 10.0
+        }
+      ]
+    },
+    {
+      "id": "build_electronicsfactory_big",
+      "name": "Electronics Factory",
+      "category": "Production",
+      "build_cost": [
+        {
+          "resource": "steel",
+          "amount": 200000.0
+        },
+        {
+          "resource": "chips",
+          "amount": 10000.0
+        }
+      ]
+    },
+    {
+      "id": "build_electronicsmine",
+      "name": "Electronics Extractor",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 125.0
+        }
+      ]
+    },
+    {
+      "id": "build_exoticalloy",
+      "name": "Exotic Alloy Production",
+      "category": "Production",
+      "build_cost": [
+        {
+          "resource": "steel",
+          "amount": 300.0
+        },
+        {
+          "resource": "chips",
+          "amount": 20.0
+        },
+        {
+          "resource": "raremetal",
+          "amount": 50.0
+        }
+      ]
+    },
+    {
+      "id": "build_exoticalloy_big",
+      "name": "Exotic Alloy Production",
+      "category": "Production",
+      "build_cost": [
+        {
+          "resource": "steel",
+          "amount": 300000.0
+        },
+        {
+          "resource": "chips",
+          "amount": 20000.0
+        },
+        {
+          "resource": "raremetal",
+          "amount": 50000.0
+        }
+      ]
+    },
+    {
+      "id": "build_farm",
+      "name": "Hydroponic Farm",
+      "category": "Production",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 50.0
+        }
+      ]
+    },
+    {
+      "id": "build_fuel",
+      "name": "Fuel Refinery",
+      "category": "Production",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 50.0
+        },
+        {
+          "resource": "raremetal",
+          "amount": 10.0
+        }
+      ]
+    },
+    {
+      "id": "build_fuel_big",
+      "name": "Fuel Refinery",
+      "category": "Production",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 50000.0
+        },
+        {
+          "resource": "raremetal",
+          "amount": 10000.0
+        }
+      ]
+    },
+    {
+      "id": "build_fuelmine",
+      "name": "Fuel Extractor",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 125.0
+        }
+      ]
+    },
+    {
+      "id": "build_fuelmine_big",
+      "name": "Fuel Mine",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 1250.0
+        }
+      ]
+    },
+    {
+      "id": "build_glass",
+      "name": "Glass Kiln",
+      "category": "Production",
+      "build_cost": [
+        {
+          "resource": "steel",
+          "amount": 300.0
+        }
+      ]
+    },
+    {
+      "id": "build_glass_big",
+      "name": "Glass Kiln",
+      "category": "Production",
+      "build_cost": [
+        {
+          "resource": "steel",
+          "amount": 300000.0
+        }
+      ]
+    },
+    {
+      "id": "build_glassmine",
+      "name": "Glass Extractor",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 125.0
+        }
+      ]
+    },
+    {
+      "id": "build_habitat",
+      "name": "Habitat",
+      "category": "Habitation",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 100.0
+        },
+        {
+          "resource": "supply",
+          "amount": 20.0
+        }
+      ]
+    },
+    {
+      "id": "build_habitatcity",
+      "name": "City",
+      "category": "Habitation",
+      "build_cost": [
+        {
+          "resource": "steel",
+          "amount": 500.0
+        },
+        {
+          "resource": "glass",
+          "amount": 500.0
+        },
+        {
+          "resource": "supply",
+          "amount": 100.0
+        }
+      ]
+    },
+    {
+      "id": "build_habitatdome",
+      "name": "Dome Habitat",
+      "category": "Habitation",
+      "build_cost": [
+        {
+          "resource": "steel",
+          "amount": 200.0
+        },
+        {
+          "resource": "glass",
+          "amount": 100.0
+        },
+        {
+          "resource": "supply",
+          "amount": 40.0
+        }
+      ]
+    },
+    {
+      "id": "build_habitatunder",
+      "name": "Underground Habitat",
+      "category": "Habitation",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 20.0
+        },
+        {
+          "resource": "supply",
+          "amount": 20.0
+        }
+      ]
+    },
+    {
+      "id": "build_he3mine",
+      "name": "Helium-3 Extractor",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 125.0
+        }
+      ]
+    },
+    {
+      "id": "build_hel3_deposition",
+      "name": "HEL 3 Release Station",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 125.0
+        }
+      ]
+    },
+    {
+      "id": "build_hq",
+      "name": "Headquarters",
+      "category": "Other",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 1000.0
+        }
+      ]
+    },
+    {
+      "id": "build_hydrogen_deposition",
+      "name": "Hydrogen Release Station",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 125.0
+        }
+      ]
+    },
+    {
+      "id": "build_hydrogenmine",
+      "name": "Hydrogen Extractor",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 125.0
+        }
+      ]
+    },
+    {
+      "id": "build_icemine",
+      "name": "Water Ice Extractor",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 125.0
+        }
+      ]
+    },
+    {
+      "id": "build_icemine_big",
+      "name": "Water Ice Extractor",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 1250.0
+        }
+      ]
+    },
+    {
+      "id": "build_lab",
+      "name": "Research Laboratory",
+      "category": "Other",
+      "build_cost": [
+        {
+          "resource": "steel",
+          "amount": 100.0
+        },
+        {
+          "resource": "raremetal",
+          "amount": 10.0
+        },
+        {
+          "resource": "chips",
+          "amount": 10.0
+        },
+        {
+          "resource": "glass",
+          "amount": 10.0
+        }
+      ]
+    },
+    {
+      "id": "build_launch_elevator",
+      "name": "Space Elevator",
+      "category": "LaunchFacility",
+      "build_cost": [
+        {
+          "resource": "plastic",
+          "amount": 100000.0
+        },
+        {
+          "resource": "alloy",
+          "amount": 10000.0
+        },
+        {
+          "resource": "steel",
+          "amount": 40000.0
+        }
+      ]
+    },
+    {
+      "id": "build_launch_magnetic_catapult",
+      "name": "Electromagnetic Catapult",
+      "category": "LaunchFacility",
+      "build_cost": [
+        {
+          "resource": "steel",
+          "amount": 500.0
+        },
+        {
+          "resource": "chips",
+          "amount": 100.0
+        },
+        {
+          "resource": "raremetal",
+          "amount": 300.0
+        }
+      ]
+    },
+    {
+      "id": "build_launch_magrails",
+      "name": "Magnetic Launch Rails",
+      "category": "LaunchFacility",
+      "build_cost": [
+        {
+          "resource": "steel",
+          "amount": 300.0
+        },
+        {
+          "resource": "chips",
+          "amount": 200.0
+        },
+        {
+          "resource": "raremetal",
+          "amount": 100.0
+        }
+      ]
+    },
+    {
+      "id": "build_launch_massdriver",
+      "name": "Stationary Mass Driver",
+      "category": "LaunchFacility",
+      "build_cost": [
+        {
+          "resource": "steel",
+          "amount": 300.0
+        },
+        {
+          "resource": "chips",
+          "amount": 40.0
+        },
+        {
+          "resource": "raremetal",
+          "amount": 50.0
+        }
+      ]
+    },
+    {
+      "id": "build_launch_pad",
+      "name": "Launch Pad",
+      "category": "LaunchFacility",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 120.0
+        }
+      ]
+    },
+    {
+      "id": "build_launch_spin",
+      "name": "Rotary Launcher",
+      "category": "LaunchFacility",
+      "build_cost": [
+        {
+          "resource": "steel",
+          "amount": 300.0
+        },
+        {
+          "resource": "chips",
+          "amount": 20.0
+        }
+      ]
+    },
+    {
+      "id": "build_metal_deposition",
+      "name": "Metal Release Station",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 125.0
+        }
+      ]
+    },
+    {
+      "id": "build_metalmine",
+      "name": "Metal Mining Base",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 125.0
+        }
+      ]
+    },
+    {
+      "id": "build_metalmine_big",
+      "name": "Metal Mining Base",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 125.0
+        }
+      ]
+    },
+    {
+      "id": "build_nitrogen_deposition",
+      "name": "Nitrogen Release Station",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 125.0
+        }
+      ]
+    },
+    {
+      "id": "build_nitrogenmine",
+      "name": "Nitrogen Extractor",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 125.0
+        }
+      ]
+    },
+    {
+      "id": "build_noblegas_deposition",
+      "name": "Noble Gas Release Station",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 125.0
+        }
+      ]
+    },
+    {
+      "id": "build_noblegasmine",
+      "name": "Noble Gas Extractor",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 125.0
+        }
+      ]
+    },
+    {
+      "id": "build_noblegasmine_big",
+      "name": "Noble Gas Extractor",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 125.0
+        }
+      ]
+    },
+    {
+      "id": "build_observatory",
+      "name": "Observatory ",
+      "category": "Other",
+      "build_cost": [
+        {
+          "resource": "steel",
+          "amount": 40.0
+        },
+        {
+          "resource": "glass",
+          "amount": 50.0
+        },
+        {
+          "resource": "chips",
+          "amount": 10.0
+        }
+      ]
+    },
+    {
+      "id": "build_outpost",
+      "name": "Outpost",
+      "category": "Habitation",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 40.0
+        },
+        {
+          "resource": "supply",
+          "amount": 10.0
+        }
+      ]
+    },
+    {
+      "id": "build_oxygen_deposition",
+      "name": "Oxygen Release Station",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 125.0
+        }
+      ]
+    },
+    {
+      "id": "build_oxygenmine",
+      "name": "Oxygen Extractor",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 125.0
+        }
+      ]
+    },
+    {
+      "id": "build_plasticmine",
+      "name": "Polymers Extractor",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 125.0
+        }
+      ]
+    },
+    {
+      "id": "build_polymerproduction",
+      "name": "Polymers Production",
+      "category": "Production",
+      "build_cost": [
+        {
+          "resource": "steel",
+          "amount": 200.0
+        }
+      ]
+    },
+    {
+      "id": "build_polymerproduction_big",
+      "name": "Polymers Factory",
+      "category": "Production",
+      "build_cost": [
+        {
+          "resource": "steel",
+          "amount": 200.0
+        }
+      ]
+    },
+    {
+      "id": "build_power_battery",
+      "name": "Batteries",
+      "category": "Power",
+      "build_cost": [
+        {
+          "resource": "raremetal",
+          "amount": 40.0
+        },
+        {
+          "resource": "steel",
+          "amount": 30.0
+        },
+        {
+          "resource": "chips",
+          "amount": 10.0
+        }
+      ]
+    },
+    {
+      "id": "build_power_carbon",
+      "name": "Carbon Power Plant",
+      "category": "Power",
+      "build_cost": [
+        {
+          "resource": "steel",
+          "amount": 730.0
+        },
+        {
+          "resource": "alloy",
+          "amount": 70.0
+        }
+      ]
+    },
+    {
+      "id": "build_power_chemical",
+      "name": "Chemical Reactor",
+      "category": "Power",
+      "build_cost": [
+        {
+          "resource": "steel",
+          "amount": 400.0
+        },
+        {
+          "resource": "alloy",
+          "amount": 300.0
+        },
+        {
+          "resource": "chips",
+          "amount": 50.0
+        }
+      ]
+    },
+    {
+      "id": "build_power_fuel_big",
+      "name": "Power Plant",
+      "category": "Power",
+      "build_cost": [
+        {
+          "resource": "steel",
+          "amount": 200000.0
+        }
+      ]
+    },
+    {
+      "id": "build_power_fusion",
+      "name": "Fusion Reactor",
+      "category": "Power",
+      "build_cost": [
+        {
+          "resource": "steel",
+          "amount": 300.0
+        },
+        {
+          "resource": "alloy",
+          "amount": 550.0
+        },
+        {
+          "resource": "chips",
+          "amount": 300.0
+        }
+      ]
+    },
+    {
+      "id": "build_power_geothermal",
+      "name": "Geothermal Power",
+      "category": "Power",
+      "build_cost": [
+        {
+          "resource": "steel",
+          "amount": 400.0
+        },
+        {
+          "resource": "alloy",
+          "amount": 250.0
+        },
+        {
+          "resource": "chips",
+          "amount": 100.0
+        }
+      ]
+    },
+    {
+      "id": "build_power_geothermal_big",
+      "name": "Geothermal Power",
+      "category": "Power",
+      "build_cost": [
+        {
+          "resource": "steel",
+          "amount": 200000.0
+        }
+      ]
+    },
+    {
+      "id": "build_power_hydrogen",
+      "name": "Hydrogen Power Plant",
+      "category": "Power",
+      "build_cost": [
+        {
+          "resource": "steel",
+          "amount": 500.0
+        },
+        {
+          "resource": "alloy",
+          "amount": 50.0
+        },
+        {
+          "resource": "chips",
+          "amount": 70.0
+        }
+      ]
+    },
+    {
+      "id": "build_power_nuke",
+      "name": "Nuclear Reactor",
+      "category": "Power",
+      "build_cost": [
+        {
+          "resource": "steel",
+          "amount": 1300.0
+        },
+        {
+          "resource": "alloy",
+          "amount": 200.0
+        },
+        {
+          "resource": "chips",
+          "amount": 100.0
+        }
+      ]
+    },
+    {
+      "id": "build_power_nuke_big",
+      "name": "Nuclear Reactor",
+      "category": "Power",
+      "build_cost": [
+        {
+          "resource": "steel",
+          "amount": 100000.0
+        },
+        {
+          "resource": "raremetal",
+          "amount": 50000.0
+        },
+        {
+          "resource": "chips",
+          "amount": 50000.0
+        }
+      ]
+    },
+    {
+      "id": "build_power_receiver",
+      "name": "Remote Power Receiver",
+      "category": "Power",
+      "build_cost": [
+        {
+          "resource": "glass",
+          "amount": 130.0
+        },
+        {
+          "resource": "steel",
+          "amount": 50.0
+        },
+        {
+          "resource": "raremetal",
+          "amount": 20.0
+        }
+      ]
+    },
+    {
+      "id": "build_power_receiver_orbit",
+      "name": "Orbital Power Receiver",
+      "category": "Power",
+      "build_cost": [
+        {
+          "resource": "glass",
+          "amount": 130.0
+        },
+        {
+          "resource": "steel",
+          "amount": 50.0
+        },
+        {
+          "resource": "raremetal",
+          "amount": 20.0
+        }
+      ]
+    },
+    {
+      "id": "build_power_solar",
+      "name": "Solar Array",
+      "category": "Power",
+      "build_cost": [
+        {
+          "resource": "glass",
+          "amount": 50.0
+        },
+        {
+          "resource": "steel",
+          "amount": 10.0
+        }
+      ]
+    },
+    {
+      "id": "build_power_solar_big",
+      "name": "Solar Array",
+      "category": "Power",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 50000.0
+        },
+        {
+          "resource": "silicon",
+          "amount": 20000.0
+        }
+      ]
+    },
+    {
+      "id": "build_power_transfer",
+      "name": "Remote Power Emitter",
+      "category": "Power",
+      "build_cost": [
+        {
+          "resource": "glass",
+          "amount": 100.0
+        },
+        {
+          "resource": "chips",
+          "amount": 20.0
+        },
+        {
+          "resource": "alloy",
+          "amount": 80.0
+        },
+        {
+          "resource": "steel",
+          "amount": 150.0
+        }
+      ]
+    },
+    {
+      "id": "build_power_transfer_orbit",
+      "name": "Orbital Power Station",
+      "category": "Power",
+      "build_cost": [
+        {
+          "resource": "glass",
+          "amount": 120.0
+        },
+        {
+          "resource": "steel",
+          "amount": 30.0
+        }
+      ]
+    },
+    {
+      "id": "build_power_wind",
+      "name": "Wind Power",
+      "category": "Power",
+      "build_cost": [
+        {
+          "resource": "steel",
+          "amount": 80.0
+        }
+      ]
+    },
+    {
+      "id": "build_power_wind_big",
+      "name": "Wind Power",
+      "category": "Power",
+      "build_cost": [
+        {
+          "resource": "steel",
+          "amount": 60000.0
+        }
+      ]
+    },
+    {
+      "id": "build_raremetal_deposition",
+      "name": "Rare Metal Release Station",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 125.0
+        }
+      ]
+    },
+    {
+      "id": "build_raremine",
+      "name": "Rare Metal Extractors",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 125.0
+        }
+      ]
+    },
+    {
+      "id": "build_raremine_big",
+      "name": "Rare Metal Extractors",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 1250.0
+        }
+      ]
+    },
+    {
+      "id": "build_silicon_deposition",
+      "name": "Silicon Release Station",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 125.0
+        }
+      ]
+    },
+    {
+      "id": "build_siliconmine",
+      "name": "Silicon Mine",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 125.0
+        }
+      ]
+    },
+    {
+      "id": "build_siliconmine_big",
+      "name": "Silicon Mine",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 1250.0
+        }
+      ]
+    },
+    {
+      "id": "build_space_0gcity",
+      "name": "City Station",
+      "category": "Habitation",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 1000.0
+        },
+        {
+          "resource": "raremetal",
+          "amount": 200.0
+        },
+        {
+          "resource": "supply",
+          "amount": 100.0
+        },
+        {
+          "resource": "glass",
+          "amount": 400.0
+        }
+      ]
+    },
+    {
+      "id": "build_space_0gcolony",
+      "name": "Rotating Habitat",
+      "category": "Habitation",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 200.0
+        },
+        {
+          "resource": "raremetal",
+          "amount": 50.0
+        },
+        {
+          "resource": "supply",
+          "amount": 20.0
+        }
+      ]
+    },
+    {
+      "id": "build_space_0gdome",
+      "name": "Rotating Station",
+      "category": "Habitation",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 400.0
+        },
+        {
+          "resource": "raremetal",
+          "amount": 100.0
+        },
+        {
+          "resource": "glass",
+          "amount": 200.0
+        },
+        {
+          "resource": "supply",
+          "amount": 40.0
+        }
+      ]
+    },
+    {
+      "id": "build_space_atmoscoop",
+      "name": "Orbital Gas Extractor",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "steel",
+          "amount": 150.0
+        },
+        {
+          "resource": "plastic",
+          "amount": 20.0
+        },
+        {
+          "resource": "chips",
+          "amount": 10.0
+        }
+      ]
+    },
+    {
+      "id": "build_space_construction",
+      "name": "Orbital Construction",
+      "category": "Production",
+      "build_cost": [
+        {
+          "resource": "steel",
+          "amount": 100.0
+        },
+        {
+          "resource": "chips",
+          "amount": 10.0
+        }
+      ]
+    },
+    {
+      "id": "build_space_drydock",
+      "name": "Orbital Shipyard",
+      "category": "Production",
+      "build_cost": [
+        {
+          "resource": "steel",
+          "amount": 150.0
+        },
+        {
+          "resource": "plastic",
+          "amount": 50.0
+        },
+        {
+          "resource": "chips",
+          "amount": 25.0
+        }
+      ]
+    },
+    {
+      "id": "build_space_fuel",
+      "name": "Orbital Fuel Refinery",
+      "category": "Production",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 10.0
+        },
+        {
+          "resource": "raremetal",
+          "amount": 30.0
+        }
+      ]
+    },
+    {
+      "id": "build_space_interstellarconstruction",
+      "name": "Interstellar Vehicle Assembly",
+      "category": "Production",
+      "build_cost": [
+        {
+          "resource": "steel",
+          "amount": 200.0
+        }
+      ]
+    },
+    {
+      "id": "build_space_telescope",
+      "name": "Telescope",
+      "category": "Other",
+      "build_cost": [
+        {
+          "resource": "steel",
+          "amount": 10.0
+        },
+        {
+          "resource": "glass",
+          "amount": 30.0
+        },
+        {
+          "resource": "chips",
+          "amount": 5.0
+        }
+      ]
+    },
+    {
+      "id": "build_steelmine",
+      "name": "Steel Extractor",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 125.0
+        }
+      ]
+    },
+    {
+      "id": "build_terraform_magnet",
+      "name": "Planetary Magnetosphere Generator",
+      "category": "Terraformation",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 36000.0
+        }
+      ]
+    },
+    {
+      "id": "build_terraform_space_magnet",
+      "name": "Orbital Magnetosphere Generator",
+      "category": "Terraformation",
+      "build_cost": [
+        {
+          "resource": "steel",
+          "amount": 30000.0
+        }
+      ]
+    },
+    {
+      "id": "build_terraform_space_mirror",
+      "name": "Orbital Mirror",
+      "category": "Terraformation",
+      "build_cost": [
+        {
+          "resource": "plastic",
+          "amount": 2000.0
+        },
+        {
+          "resource": "glass",
+          "amount": 27000.0
+        },
+        {
+          "resource": "steel",
+          "amount": 1000.0
+        }
+      ]
+    },
+    {
+      "id": "build_terraform_space_shade",
+      "name": "Orbital Shade",
+      "category": "Terraformation",
+      "build_cost": [
+        {
+          "resource": "steel",
+          "amount": 13000.0
+        },
+        {
+          "resource": "plastic",
+          "amount": 6000.0
+        },
+        {
+          "resource": "alloy",
+          "amount": 1000.0
+        }
+      ]
+    },
+    {
+      "id": "build_uran_deposition",
+      "name": "Uran Release Station",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 125.0
+        }
+      ]
+    },
+    {
+      "id": "build_uranmine",
+      "name": "Fissiles Mine",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 125.0
+        }
+      ]
+    },
+    {
+      "id": "build_uranmine_big",
+      "name": "Fissiles Mine",
+      "category": "Mining",
+      "build_cost": [
+        {
+          "resource": "metal",
+          "amount": 125.0
+        }
+      ]
+    },
+    {
+      "id": "build_veh_assembly",
+      "name": "Vehicle Assembly",
+      "category": "Production",
+      "build_cost": [
+        {
+          "resource": "steel",
+          "amount": 200.0
+        },
+        {
+          "resource": "raremetal",
+          "amount": 50.0
+        }
+      ]
+    }
+  ],
+  "resources": [
+    {
+      "id": "alloy",
+      "name": "Exotic Alloys"
+    },
+    {
+      "id": "chips",
+      "name": "Electronics"
+    },
+    {
+      "id": "glass",
+      "name": "Glass"
+    },
+    {
+      "id": "metal",
+      "name": "Metals"
+    },
+    {
+      "id": "plastic",
+      "name": "Polymers"
+    },
+    {
+      "id": "raremetal",
+      "name": "Rare Metals"
+    },
+    {
+      "id": "silicon",
+      "name": "Silicon"
+    },
+    {
+      "id": "steel",
+      "name": "Alloy"
+    },
+    {
+      "id": "supply",
+      "name": "Supplies"
+    },
+    {
+      "id": "uran",
+      "name": "Fissiles"
+    }
+  ],
+  "reductions": [
+    {
+      "id": "research_lifesup_10",
+      "name": "Regolith Shielding",
+      "kind": "BuildCost",
+      "percent": 35.0,
+      "affects": [
+        "build_outpost",
+        "build_habitat",
+        "build_habitatdome",
+        "build_habitatcity"
+      ],
+      "affects_all": false
+    },
+    {
+      "id": "research_lifesup_14",
+      "name": "In-Orbit Production",
+      "kind": "BuildCost",
+      "percent": 30.0,
+      "affects": [
+        "build_space_drydock"
+      ],
+      "affects_all": false
+    },
+    {
+      "id": "research_category_robotics",
+      "name": "Robotics",
+      "kind": "ReduceCrewRequirements",
+      "percent": 5.0,
+      "affects": [],
+      "affects_all": true
+    },
+    {
+      "id": "research_lifesup_2",
+      "name": "Improved Capsule Construction",
+      "kind": "BuildCost",
+      "percent": 40.0,
+      "affects": [
+        "module_crew_compartment",
+        "module_crew_medium",
+        "module_crew_large"
+      ],
+      "affects_all": false
+    },
+    {
+      "id": "research_robotics_crew1",
+      "name": "Exoskeletons",
+      "kind": "ReduceCrewRequirements",
+      "percent": 5.0,
+      "affects": [],
+      "affects_all": true
+    },
+    {
+      "id": "research_robotics_crew2",
+      "name": "Expert Systems",
+      "kind": "ReduceCrewRequirements",
+      "percent": 10.0,
+      "affects": [],
+      "affects_all": true
+    },
+    {
+      "id": "research_robotics_crew3",
+      "name": "Cybernetics",
+      "kind": "ReduceCrewRequirements",
+      "percent": 10.0,
+      "affects": [],
+      "affects_all": true
+    },
+    {
+      "id": "research_mat_upgr3",
+      "name": "Metamaterials",
+      "kind": "PowerProduction",
+      "percent": 0.0,
+      "affects": [],
+      "affects_all": true
+    },
+    {
+      "id": "research_lv_upgr1",
+      "name": "Improved Stack Assembly",
+      "kind": "BuildCost",
+      "percent": 20.0,
+      "affects": [
+        "LV"
+      ],
+      "affects_all": false
+    },
+    {
+      "id": "research_lv_upgr3",
+      "name": "Improved Reusable Rockets",
+      "kind": "BuildCost",
+      "percent": 25.0,
+      "affects": [
+        "id_Rocket_RocketType3",
+        "id_Rocket_RocketType4"
+      ],
+      "affects_all": false
+    },
+    {
+      "id": "research_mat_diamondoid",
+      "name": "Diamondoids",
+      "kind": "BuildCost",
+      "percent": 10.0,
+      "affects": [
+        "Facility"
+      ],
+      "affects_all": false
+    },
+    {
+      "id": "research_sails_3",
+      "name": "Improved Sail Deployment",
+      "kind": "BuildCost",
+      "percent": 20.0,
+      "affects": [
+        "spacecraft_sail_small",
+        "spacecraft_sail_mid"
+      ],
+      "affects_all": false
+    },
+    {
+      "id": "research_mat_superconductor1",
+      "name": "High-Temperature Superconductors",
+      "kind": "PowerProduction",
+      "percent": 10.0,
+      "affects": [],
+      "affects_all": true
+    },
+    {
+      "id": "research_category_fusionprop",
+      "name": "Fusion Propulsion",
+      "kind": "PowerProduction",
+      "percent": 10.0,
+      "affects": [
+        "build_power_fusion"
+      ],
+      "affects_all": false
+    },
+    {
+      "id": "research_nukepower_1",
+      "name": "Molten Fission Systems",
+      "kind": "PowerProduction",
+      "percent": 50.0,
+      "affects": [
+        "build_power_nuke"
+      ],
+      "affects_all": false
+    },
+    {
+      "id": "research_nukepower_2",
+      "name": "Gas Core Fission",
+      "kind": "PowerProduction",
+      "percent": 50.0,
+      "affects": [
+        "build_power_nuke"
+      ],
+      "affects_all": false
+    },
+    {
+      "id": "research_power_solar2",
+      "name": "Improved Solar Cells",
+      "kind": "PowerProduction",
+      "percent": 50.0,
+      "affects": [
+        "build_power_solar"
+      ],
+      "affects_all": false
+    }
+  ]
+}

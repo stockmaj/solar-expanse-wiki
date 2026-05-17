@@ -33,6 +33,10 @@ path = "src/bin/gen_pages.rs"
 name = "extract-icons"
 path = "src/bin/extract_icons.rs"
 
+[[bin]]
+name = "gen-calculator-data"
+path = "src/bin/gen_calculator_data.rs"
+
 [profile.release]
 lto = true
 codegen-units = 1
