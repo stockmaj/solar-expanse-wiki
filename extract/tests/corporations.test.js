@@ -65,7 +65,7 @@ const FIXTURE = {
 };
 
 test('buildComparison: research union groups by category, alphabetical within each', () => {
-  const cmp = C.buildComparison(FIXTURE, 'StartGameColonization', 'Pioneer');
+  const cmp = C.buildComparison(FIXTURE, 'StartGameColonization', 'Pioneer', true);
   // Sort: category primary (alphabetical), name secondary (alphabetical).
   // Chemical Propulsion → Hydrolox, Kerolox.  Electromagnetism → Lasers.
   // Spacecraft → Crewed Flight.
@@ -78,7 +78,7 @@ test('buildComparison: research union groups by category, alphabetical within ea
 });
 
 test('buildComparison: each researchRow carries a category field', () => {
-  const cmp = C.buildComparison(FIXTURE, 'StartGameColonization', 'Pioneer');
+  const cmp = C.buildComparison(FIXTURE, 'StartGameColonization', 'Pioneer', true);
   cmp.researchRows.forEach(function (r) {
     assert.ok(typeof r.category === 'string' && r.category.length > 0,
       'row ' + r.name + ' missing category, got ' + JSON.stringify(r));
@@ -102,7 +102,7 @@ test('buildComparison: research items missing a category bucket under "Other"', 
     }],
     difficulties: [{ name: 'Pioneer', money_multiplier: 1.0 }],
   };
-  const cmp = C.buildComparison(fx, 'X', 'Pioneer');
+  const cmp = C.buildComparison(fx, 'X', 'Pioneer', true);
   // Order: Chemical Propulsion (Hydrolox) then Other (Mystery, Other Thing).
   const seq = cmp.researchRows.map(function (r) { return [r.category, r.name]; });
   assert.deepEqual(seq, [
@@ -113,7 +113,7 @@ test('buildComparison: research items missing a category bucket under "Other"', 
 });
 
 test('renderTableMarkup: each category emits exactly one category-header row before its items', () => {
-  const cmp = C.buildComparison(FIXTURE, 'StartGameColonization', 'Pioneer');
+  const cmp = C.buildComparison(FIXTURE, 'StartGameColonization', 'Pioneer', true);
   const html = C.renderTableMarkup(cmp);
   // Three categories in this fixture: Chemical Propulsion, Electromagnetism, Spacecraft.
   function occurrences(needle) {
@@ -143,7 +143,7 @@ test('renderTableMarkup: each category emits exactly one category-header row bef
 });
 
 test('buildComparison: per-corp ✓/— marks match the fixture', () => {
-  const cmp = C.buildComparison(FIXTURE, 'StartGameColonization', 'Pioneer');
+  const cmp = C.buildComparison(FIXTURE, 'StartGameColonization', 'Pioneer', true);
   // Column order is the locale-corp order from the scenario.
   assert.deepEqual(cmp.corpNames, ['SoleX', 'NASA', 'ESA', 'CNSA', 'Roscosmos']);
   // Crewed Flight: every corp.
@@ -159,7 +159,7 @@ test('buildComparison: per-corp ✓/— marks match the fixture', () => {
 
 test('buildComparison: starting cash scales by difficulty multiplier', () => {
   const explorer = C.buildComparison(FIXTURE, 'StartGameColonization', 'Explorer');
-  const pioneer  = C.buildComparison(FIXTURE, 'StartGameColonization', 'Pioneer');
+  const pioneer  = C.buildComparison(FIXTURE, 'StartGameColonization', 'Pioneer', true);
   const veteran  = C.buildComparison(FIXTURE, 'StartGameColonization', 'Veteran');
   // SoleX Pioneer base = 33.7M; Explorer ×1.25, Veteran ×0.75.
   assert.equal(pioneer.cash[0],  33_700_000);
@@ -177,7 +177,7 @@ test('buildComparison: launch-vehicle and spacecraft counts do not scale by diff
 });
 
 test('buildComparison: switching scenario changes the corp set and research union', () => {
-  const expansion = C.buildComparison(FIXTURE, 'StartGameExpansion', 'Pioneer');
+  const expansion = C.buildComparison(FIXTURE, 'StartGameExpansion', 'Pioneer', true);
   assert.deepEqual(expansion.corpNames, ['SoleX']);
   assert.equal(expansion.researchRows.length, 1);
   assert.equal(expansion.researchRows[0].name, 'Crewed Flight');
@@ -192,7 +192,7 @@ test('formatMoney: produces the same abbreviations the Rust generator uses', () 
 });
 
 test('renderTableMarkup: row order is cash, LVs, spacecraft, then research', () => {
-  const cmp = C.buildComparison(FIXTURE, 'StartGameColonization', 'Pioneer');
+  const cmp = C.buildComparison(FIXTURE, 'StartGameColonization', 'Pioneer', true);
   const html = C.renderTableMarkup(cmp);
   const cashIdx    = html.indexOf('Starting cash');
   const lvIdx      = html.indexOf('Pre-built launch vehicles');
@@ -204,7 +204,7 @@ test('renderTableMarkup: row order is cash, LVs, spacecraft, then research', () 
 });
 
 test('renderTableMarkup: splits into two tables on a div.corp-comparison-split', () => {
-  const cmp = C.buildComparison(FIXTURE, 'StartGameColonization', 'Pioneer');
+  const cmp = C.buildComparison(FIXTURE, 'StartGameColonization', 'Pioneer', true);
   const html = C.renderTableMarkup(cmp);
   // Outer wrapper div.
   assert.ok(/<div class="corp-comparison-split">/.test(html),
@@ -221,7 +221,7 @@ test('renderTableMarkup: splits into two tables on a div.corp-comparison-split',
 });
 
 test('renderTableMarkup: left table holds cash/LVs/SC; right table holds research', () => {
-  const cmp = C.buildComparison(FIXTURE, 'StartGameColonization', 'Pioneer');
+  const cmp = C.buildComparison(FIXTURE, 'StartGameColonization', 'Pioneer', true);
   const html = C.renderTableMarkup(cmp);
   // Carve the document into the two tables (between table-open and the
   // following </table>) and assert each contains/excludes the right rows.
@@ -253,7 +253,7 @@ test('renderTableMarkup: left table holds cash/LVs/SC; right table holds researc
 });
 
 test('renderTableMarkup: each table has its own <thead> row with all corp names', () => {
-  const cmp = C.buildComparison(FIXTURE, 'StartGameColonization', 'Pioneer');
+  const cmp = C.buildComparison(FIXTURE, 'StartGameColonization', 'Pioneer', true);
   const html = C.renderTableMarkup(cmp);
   // Two separate <thead> blocks.
   const theadOpens = (html.match(/<thead\b/g) || []).length;
