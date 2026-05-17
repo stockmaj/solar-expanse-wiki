@@ -9,15 +9,7 @@ and ongoing costs.
 _Prelude and Early-Exploration scenarios are procedural and not listed
 here — they have no pre-built save data._
 
-## Difficulty
-
-Selecting a difficulty on the New Game screen scales the corporation's pre-built starting state before play begins, and modifies upkeep / supply usage for the rest of the run.
-
-| Difficulty | Starting money | Upkeep cost | Supply usage |
-| --- | --- | --- | --- |
-| **Explorer** | ×1.25 | ×0.5 | ×0.5 |
-| **Pioneer** | ×1 | ×1 | ×1 |
-| **Veteran** | ×0.75 | ×1.5 | ×1.5 |
+Difficulty also scales ongoing upkeep (Explorer ×0.5, Pioneer ×1, Veteran ×1.5) and supply usage by the same factors — not reflected in the table below, which only shows starting state.
 
 ## Corporations at a glance
 

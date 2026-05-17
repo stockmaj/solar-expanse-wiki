@@ -1424,24 +1424,11 @@ _Prelude and Early-Exploration scenarios are procedural and not listed\n\
 here — they have no pre-built save data._\n\n",
     );
 
-    // ── Global difficulty table — same multipliers across all corps. ──
-    out.push_str("## Difficulty\n\n");
-    out.push_str("Selecting a difficulty on the New Game screen scales the corporation's pre-built starting state before play begins, and modifies upkeep / supply usage for the rest of the run.\n\n");
-    let diff_rows: Vec<Vec<String>> = (0..DIFFICULTY_NAMES.len())
-        .map(|i| {
-            vec![
-                format!("**{}**", DIFFICULTY_NAMES[i]),
-                format!("×{}", DIFFICULTY_MONEY_MULT[i]),
-                format!("×{}", DIFFICULTY_UPKEEP_MULT[i]),
-                format!("×{}", DIFFICULTY_SUPPLY_MULT[i]),
-            ]
-        })
-        .collect();
-    out.push_str(&md_table(
-        &["Difficulty", "Starting money", "Upkeep cost", "Supply usage"],
-        &diff_rows,
-    ));
-    out.push('\n');
+    // Difficulty also modifies upkeep and supply usage, which the
+    // comparison table doesn't surface — keep that as a one-line note so
+    // the player knows there's more to the difficulty choice than just
+    // starting cash.
+    out.push_str("Difficulty also scales ongoing upkeep (Explorer ×0.5, Pioneer ×1, Veteran ×1.5) and supply usage by the same factors — not reflected in the table below, which only shows starting state.\n\n");
 
     // ── Flavor-traits block per corp.  All the numeric/research data
     //    moves into the comparison view below; this section keeps the
