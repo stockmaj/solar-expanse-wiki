@@ -124,12 +124,50 @@
       researchRows = nonParity;
     }
 
+    // ----- Starting facilities -------------------------------------------
+    // Each corp ships with a `starting_facilities` array of `{name, count}`
+    // objects (resolved + title-cased by the Rust generator).  We build a
+    // matrix view: one row per facility name, with one count per corp
+    // column (0 when the corp doesn't own that facility).
+    //
+    // Universal facilities (HQ, Main Building) appear on every corp at
+    // every scenario and carry no comparison signal — drop them so the
+    // table focuses on the interesting mining / extraction / refinery
+    // differences.
+    var UNIVERSAL_FACILITIES = { 'HQ': true, 'Main Building': true };
+    var facilityNameSet = Object.create(null);
+    var facilityNames = [];
+    corps.forEach(function (c) {
+      (c.starting_facilities || []).forEach(function (entry) {
+        var name = entry && entry.name ? entry.name : null;
+        if (!name || UNIVERSAL_FACILITIES[name]) return;
+        if (!facilityNameSet[name]) {
+          facilityNameSet[name] = true;
+          facilityNames.push(name);
+        }
+      });
+    });
+    facilityNames.sort(function (a, b) { return a.localeCompare(b); });
+    var facilityRows = facilityNames.map(function (n) {
+      var counts = corps.map(function (c) {
+        var entries = c.starting_facilities || [];
+        for (var i = 0; i < entries.length; i++) {
+          if (entries[i] && entries[i].name === n) {
+            return entries[i].count || 0;
+          }
+        }
+        return 0;
+      });
+      return { name: n, counts: counts };
+    });
+
     return {
       corpNames: corpNames,
       cash: cash,
       lvCounts: lvCounts,
       scCounts: scCounts,
       researchRows: researchRows,
+      facilityRows: facilityRows,
       // When showAll=false, parityHidden = count actively hidden.
       // When showAll=true, parityHidden is 0 but parityHiddenWhenFiltered
       // preserves the count for the "shown" footnote variant.
@@ -186,6 +224,26 @@
       cmp.scCounts.map(function (v) {
         return '<td style="text-align:center">' + v + '</td>';
       }).join('') + '</tr>');
+
+    // ----- Starting facilities -----
+    // One category-header row (matching the look of the right table's
+    // sub-branch headers), then one row per facility name with the per-corp
+    // count (or em-dash for 0).  Section is only emitted when at least one
+    // corp owns at least one facility — keeps Early Exploration (everyone
+    // starts with nothing built) from rendering an empty header.
+    var facilityRows = cmp.facilityRows || [];
+    if (facilityRows.length > 0) {
+      leftRows.push('<tr class="corp-facility-category"><td colspan="' +
+        (cmp.corpNames.length + 1) +
+        '" style="padding-left:16px;color:var(--accent-dim,#88a);text-align:left;font-weight:600;font-size:0.9em;border-top:1px solid var(--border,#444);background:transparent">' +
+        'Starting facilities</td></tr>');
+      facilityRows.forEach(function (r) {
+        leftRows.push('<tr><td style="padding-left:32px">' + escapeHtml(r.name) + '</td>' +
+          r.counts.map(function (n) {
+            return '<td style="text-align:center">' + (n > 0 ? n : '—') + '</td>';
+          }).join('') + '</tr>');
+      });
+    }
 
     // ----- Right table: completed research, grouped by category -----
     var rightRows = [];
