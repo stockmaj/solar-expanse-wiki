@@ -65,7 +65,7 @@
   // Sort: category alphabetical (primary), name alphabetical (secondary)
   // — this lets renderTableMarkup emit a category header before each
   // consecutive cluster without re-sorting.
-  function buildComparison(data, scenarioId, difficultyName) {
+  function buildComparison(data, scenarioId, difficultyName, showAll) {
     var scenario = findScenario(data, scenarioId);
     var diff = findDifficulty(data, difficultyName);
     if (!scenario || !diff) {
@@ -110,16 +110,19 @@
       return { name: u.name, category: u.category, held: held };
     });
 
-    // Filter out parity rows — research held by every corp (all ✓) or no
-    // corp (all —).  The point of the matrix is to show DIFFERENCES; rows
-    // with parity convey nothing.  Track how many we dropped so the page
-    // can note "N research items with parity not shown."
+    // Identify parity rows — research held by every corp (all ✓) or no
+    // corp (all —).  Default: hide them; the point of the matrix is to
+    // show DIFFERENCES.  showAll=true keeps them in.
     var totalBeforeFilter = researchRows.length;
-    researchRows = researchRows.filter(function (r) {
+    var nonParity = researchRows.filter(function (r) {
       var firstVal = r.held[0];
       return r.held.some(function (v) { return v !== firstVal; });
     });
-    var parityHidden = totalBeforeFilter - researchRows.length;
+    var parityCount = totalBeforeFilter - nonParity.length;
+
+    if (!showAll) {
+      researchRows = nonParity;
+    }
 
     return {
       corpNames: corpNames,
@@ -127,7 +130,12 @@
       lvCounts: lvCounts,
       scCounts: scCounts,
       researchRows: researchRows,
-      parityHidden: parityHidden,
+      // When showAll=false, parityHidden = count actively hidden.
+      // When showAll=true, parityHidden is 0 but parityHiddenWhenFiltered
+      // preserves the count for the "shown" footnote variant.
+      parityHidden: showAll ? 0 : parityCount,
+      parityHiddenWhenFiltered: parityCount,
+      showAll: !!showAll,
     };
   }
 
@@ -155,12 +163,14 @@
     if (!cmp.corpNames.length) {
       return '<p><em>No corporation data for this scenario.</em></p>';
     }
-    // Per-corp <thead> row — emitted into both tables so each one is
-    // self-readable when the layout stacks vertically on narrow screens.
-    var head = '<tr><th>Item</th>' +
-      cmp.corpNames.map(function (n) {
-        return '<th>' + escapeHtml(n) + '</th>';
-      }).join('') + '</tr>';
+    // Per-corp <thead> row.  The left table's leading column has no header
+    // (the rows describe themselves: Starting cash / Pre-built ... etc.),
+    // while the right table uses "Technology" to label the research column.
+    var corpHeaders = cmp.corpNames.map(function (n) {
+      return '<th>' + escapeHtml(n) + '</th>';
+    }).join('');
+    var leftHead = '<tr><th></th>' + corpHeaders + '</tr>';
+    var rightHead = '<tr><th>Technology</th>' + corpHeaders + '</tr>';
 
     // ----- Left table: economy / pre-built fleet -----
     var leftRows = [];
@@ -194,20 +204,36 @@
         }).join('') + '</tr>');
     });
 
-    var leftTable = '<table class="corp-comparison-left"><thead>' + head +
+    var leftTable = '<table class="corp-comparison-left"><thead>' + leftHead +
       '</thead><tbody>' + leftRows.join('') + '</tbody></table>';
-    var rightTable = '<table class="corp-comparison-right"><thead>' + head +
+    var rightTable = '<table class="corp-comparison-right"><thead>' + rightHead +
       '</thead><tbody>' + rightRows.join('') + '</tbody></table>';
 
-    var parityNote = '';
+    // Parity note + Show All checkbox sit underneath the research (right)
+    // table.  The checkbox toggles cmp.showAll via the DOM binding and
+    // triggers a re-render with parity rows included.
+    var parityControls = '';
     if (cmp.parityHidden && cmp.parityHidden > 0) {
-      parityNote = '<p class="corp-parity-note" style="font-size:12px;color:var(--fg-muted);margin-top:4px">' +
-        cmp.parityHidden +
+      parityControls = '<div class="corp-parity-controls" style="font-size:12px;color:var(--fg-muted);margin-top:4px">' +
+        '<label><input type="checkbox" id="corp-show-all-research"' +
+        (cmp.showAll ? ' checked' : '') +
+        ' style="vertical-align:middle;margin-right:4px"> Show all research</label>' +
+        ' &middot; ' + cmp.parityHidden +
         ' research item' + (cmp.parityHidden === 1 ? '' : 's') +
-        ' shared by every corp (or by none) hidden — only differences shown.</p>';
+        ' shared by every corp (or by none) hidden by default.</div>';
+    } else if (cmp.showAll && cmp.parityHiddenWhenFiltered) {
+      // When Show All is on, expose the toggle to turn it back off.
+      parityControls = '<div class="corp-parity-controls" style="font-size:12px;color:var(--fg-muted);margin-top:4px">' +
+        '<label><input type="checkbox" id="corp-show-all-research" checked' +
+        ' style="vertical-align:middle;margin-right:4px"> Show all research</label>' +
+        ' &middot; ' + cmp.parityHiddenWhenFiltered +
+        ' research item' + (cmp.parityHiddenWhenFiltered === 1 ? '' : 's') +
+        ' shared by every corp (or by none) — shown.</div>';
     }
 
-    return '<div class="corp-comparison-split">' + leftTable + rightTable + '</div>' + parityNote;
+    // Right-side cell wraps the parity controls ABOVE the research table.
+    var rightCell = '<div class="corp-comparison-right-cell">' + parityControls + rightTable + '</div>';
+    return '<div class="corp-comparison-split">' + leftTable + rightCell + '</div>';
   }
 
   // ----- DOM binding -----------------------------------------------------
@@ -244,9 +270,18 @@
       difficultySel.value = 'Pioneer';
     }
 
+    var showAll = false;
     function rerender() {
-      var cmp = buildComparison(data, scenarioSel.value, difficultySel.value);
+      var cmp = buildComparison(data, scenarioSel.value, difficultySel.value, showAll);
       out.innerHTML = renderTableMarkup(cmp);
+      // Wire the freshly-rendered checkbox.
+      var cb = document.getElementById('corp-show-all-research');
+      if (cb) {
+        cb.addEventListener('change', function () {
+          showAll = cb.checked;
+          rerender();
+        });
+      }
     }
 
     scenarioSel.addEventListener('change', rerender);
