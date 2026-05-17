@@ -155,9 +155,12 @@ struct FacilityStat {
     workers_required: i64,
     energy_consumption: f64,
     research_prereq: Option<String>,
+    #[allow(dead_code)]
     is_obsolete: bool,
-    // Note: `can_be_scrapped` and `can_be_turned_off` exist in the source dump
-    // but are not rendered on the wiki — serde silently drops them.
+    #[allow(dead_code)]
+    can_be_scrapped: bool,
+    #[allow(dead_code)]
+    can_be_turned_off: bool,
 }
 
 #[derive(Deserialize, Clone)]
@@ -202,7 +205,9 @@ struct ResearchStat {
 struct LaunchVehicleStat {
     id: String,
     max_payload: f64,
+    #[allow(dead_code)]
     max_fuel_load: f64,
+    #[allow(dead_code)]
     exhaust_velocity: f64,
     reusability: f64,
     can_send_human: bool,
@@ -226,6 +231,7 @@ struct SpacecraftStat {
     cargo_capacity: f64,
     fuel_capacity: f64,
     reusability: f64,
+    #[allow(dead_code)]
     needs_launch_vehicle: bool,
     built_in_orbit: bool,
     #[allow(dead_code)]
@@ -430,49 +436,7 @@ fn md_table_with_tips(headers: &[&str], tooltips: &[Option<&str>], rows: &[Vec<S
 }
 
 fn escape_cell(s: &str) -> String {
-    let stripped = strip_unbalanced_quotes(s);
-    stripped.replace('|', "\\|").replace('\n', " ").trim().to_string()
-}
-
-/// Some locale strings come out of the CSV with stray straight double-quote
-/// characters (e.g. `Lightbulb" engine."`) — the opening quote of a phrase was
-/// eaten somewhere upstream, leaving only the closers.  Walk the string and
-/// drop any `"` that doesn't have a matching partner.  Openers are `"`
-/// preceded by start-of-string or a non-word character; closers are `"`
-/// preceded by a word character.  Properly paired quotes (`"Nuclear
-/// Lightbulb"`) survive untouched.
-fn strip_unbalanced_quotes(s: &str) -> String {
-    let chars: Vec<char> = s.chars().collect();
-    if !chars.iter().any(|c| *c == '"') {
-        return s.to_string();
-    }
-    let mut kind: Vec<i8> = vec![0; chars.len()]; // 1 = opener, -1 = closer
-    let mut prev: Option<char> = None;
-    for (i, c) in chars.iter().enumerate() {
-        if *c == '"' {
-            kind[i] = if prev.map_or(true, |p| !p.is_alphanumeric()) { 1 } else { -1 };
-        }
-        prev = Some(*c);
-    }
-    let mut keep: Vec<bool> = vec![true; chars.len()];
-    let mut open_stack: Vec<usize> = Vec::new();
-    for (i, &k) in kind.iter().enumerate() {
-        if k == 1 {
-            open_stack.push(i);
-        } else if k == -1 {
-            if open_stack.pop().is_none() {
-                keep[i] = false;
-            }
-        }
-    }
-    for i in open_stack {
-        keep[i] = false;
-    }
-    chars
-        .into_iter()
-        .enumerate()
-        .filter_map(|(i, c)| if keep[i] { Some(c) } else { None })
-        .collect()
+    s.replace('|', "\\|").replace('\n', " ").trim().to_string()
 }
 
 fn write_file(root: &Path, rel: &str, content: &str) -> Result<()> {
@@ -1169,13 +1133,12 @@ lift them to space.\n\n",
                 "Exhaust V",
                 "Reusable",
                 "Built at",
-                "Needs LV",
                 "Build cost",
                 "Time (d)",
-                "Launch ($)",
+                "Description",
             ],
             &[
-                Some("Hover the spacecraft name for its in-game description"),
+                None,
                 Some("Dry mass in tonnes"),
                 Some("Cargo capacity in tonnes"),
                 Some("Fuel capacity in tonnes"),
@@ -1183,10 +1146,9 @@ lift them to space.\n\n",
                 Some("Effective exhaust velocity — chemical ~3-5 km/s, nuclear ~8-15, fusion 20+"),
                 Some("Survives the trip and can fly again (Yes / Partial / No)"),
                 Some("Where the spacecraft is assembled — Orbit means built in an orbital shipyard; Surface means built on a planet"),
-                Some("Requires a launch vehicle to reach orbit — Yes means it rides a separate LV; No means the craft is self-launching (single-stage-to-orbit or built in orbit)"),
                 Some("Resources required to construct"),
                 Some("Build time in days"),
-                Some("Cash fee paid on every launch"),
+                None,
             ],
             rows,
         ));
@@ -1250,38 +1212,12 @@ lift them to space.\n\n",
         } else {
             fmt_amount(s.cargo_capacity)
         };
-        let needs_lv_cell: String = if is_spawned_not_built {
-            "—".into()
-        } else if s.needs_launch_vehicle {
-            "Yes".into()
-        } else {
-            "No".into()
-        };
-        let launch_cell: String = if is_spawned_not_built {
-            "—".into()
-        } else {
-            fmt_abbrev(s.launch_cost)
-        };
-        // Stash the description in a hover-tooltip on the name span so we can
-        // keep all the human-written prose without paying for a wide
-        // "Description" column.
-        let desc_clean = escape_cell(desc);
-        let name_cell = if desc_clean.is_empty() {
+        rows.push(vec![
             format!(
                 "{anchor}**{name}**",
                 anchor = anchor_tag("spacecraft", &s.id),
                 name = escape_cell(display_name)
-            )
-        } else {
-            format!(
-                "{anchor}<span title=\"{desc}\">**{name}**</span>",
-                anchor = anchor_tag("spacecraft", &s.id),
-                name = escape_cell(display_name),
-                desc = desc_clean.replace('"', "&quot;"),
-            )
-        };
-        rows.push(vec![
-            name_cell,
+            ),
             fmt_amount(s.mass),
             cargo_cell,
             fmt_amount(s.fuel_capacity),
@@ -1289,10 +1225,9 @@ lift them to space.\n\n",
             exhaust,
             fmt_reusability(s.reusability).into(),
             built_at,
-            needs_lv_cell,
             build_cost_cell,
             build_time_cell,
-            launch_cell,
+            escape_cell(desc),
         ]);
     }
     let header = match current {
@@ -1312,9 +1247,7 @@ lift them to space.\n\n",
 - **Engine thrust** is the force the spacecraft's default engine produces, in newtons (or kilo-/mega-newtons for readability). More thrust = shorter burns, higher acceleration, but the spacecraft can only carry so much fuel.\n\
 - **Exhaust V** is the engine's effective exhaust velocity in km/s, equivalent to specific impulse (multiply by ~102 to get ISP in seconds). Higher exhaust V = more Δv per kilogram of fuel = longer reach, but typically less thrust. Chemical engines sit around 3–5 km/s; nuclear thermal 8–15; fusion and ion drives 20+.\n\
 - **Build cost** is the resource cost of building the spacecraft itself (engine and tank modules are paid for separately when configured).\n\
-- **Built at** is where the craft is assembled: *Orbit* means it's built in an orbital shipyard and never lands; *Surface* means it's built on a planet's surface.\n\
-- **Needs LV** says whether the craft must ride a separate [Launch Vehicle](../launch-vehicles/) to reach orbit. *No* means the craft is self-launching (single-stage-to-orbit, or already built in orbit). Hover a spacecraft's name to see its in-game description.\n\
-- **Launch ($)** is the cash fee paid on every launch; spawned-not-built craft like the Orbital Payload Container show `—` because the carrying launch facility pays the launch.\n\n\
+- **Built at** is where the craft is assembled: *Orbit* means it's built in an orbital shipyard and never lands; *Surface* means it's built on a planet's surface (some surface craft are full SSTOs, some are upper stages or ride a Launch Vehicle — see the description column).\n\n\
 ## See also\n\n\
 - [Launch Vehicles](../launch-vehicles/) — surface-to-orbit lifters\n\
 - [Research](../research/) — propulsion tech tree\n",
@@ -1365,61 +1298,43 @@ fn page_launch_vehicles(locale: &Locale, sirenix: &Sirenix) -> String {
     let make_row = |lv: &LaunchVehicleStat| -> Vec<String> {
         let display = id_to_name.get(lv.id.as_str()).copied().unwrap_or(lv.id.as_str());
         let desc = id_to_desc.get(lv.id.as_str()).copied().unwrap_or("");
-        let desc_clean = escape_cell(desc);
-        let name_cell = if desc_clean.is_empty() {
+        vec![
             format!(
                 "{anchor}**{name}**",
                 anchor = anchor_tag("lv", &lv.id),
                 name = escape_cell(display)
-            )
-        } else {
-            format!(
-                "{anchor}<span title=\"{desc}\">**{name}**</span>",
-                anchor = anchor_tag("lv", &lv.id),
-                name = escape_cell(display),
-                desc = desc_clean.replace('"', "&quot;"),
-            )
-        };
-        vec![
-            name_cell,
+            ),
             fmt_amount(lv.max_payload),
-            fmt_abbrev(lv.max_fuel_load),
-            if lv.exhaust_velocity > 0.0 {
-                format!("{:.1}", lv.exhaust_velocity)
-            } else {
-                "—".into()
-            },
             fmt_reusability(lv.reusability).into(),
             if lv.can_send_human { "Yes" } else { "No" }.into(),
             fmt_build_cost(&lv.build_cost, &resource_name),
             fmt_amount(lv.build_time_days),
             fmt_abbrev(lv.launch_cost),
             fmt_abbrev(lv.maintenance_cost_per_day),
+            escape_cell(desc),
         ]
     };
     let headers = [
         "Launch Vehicle",
         "Payload (t)",
-        "Fuel load (t)",
-        "Exhaust v (km/s)",
         "Reusable",
         "Crew",
         "Build cost",
         "Time (d)",
         "Launch",
         "Maint",
+        "Description",
     ];
     let tooltips = [
-        Some("Hover the launch-vehicle name for its in-game description"),
+        None,
         Some("Max payload to low orbit, in tonnes"),
-        Some("Fuel mass the vehicle carries at full load, in tonnes"),
-        Some("Effective exhaust velocity in km/s — proxies the specific impulse: chemical ~3-5, nuclear-thermal 8+"),
         Some("Survives reentry and can fly again (Yes / Partial / No)"),
         Some("Crew-rated for human passengers"),
         Some("Resources required to construct"),
         Some("Build time in days"),
         Some("Cash fee paid on every launch"),
         Some("Daily maintenance cost while idle on the pad"),
+        None,
     ];
 
     let chem_rows: Vec<Vec<String>> = chemical.iter().map(|lv| make_row(lv)).collect();
@@ -1443,12 +1358,9 @@ Three propulsion families are unlocked across the tech tree:\n\n\
 {nuke_table}\n\
 ## Reading the tables\n\n\
 - **Max Payload** is the heaviest load (in tonnes) the vehicle can carry to low orbit.\n\
-- **Fuel load** is the propellant mass the vehicle carries at full fuelling, in tonnes.\n\
-- **Exhaust v** is the engine's effective exhaust velocity in km/s — a proxy for specific impulse and so a proxy for fuel efficiency. Chemical rockets sit around 2.5–10 km/s; nuclear-thermal rockets push past 30.\n\
-- **Reusable** — *Yes* means the vehicle survives reentry and can fly again; *Partial* means parts of the stack are reused; *No* means each launch consumes the vehicle.\n\
+- **Reusable** — *Yes* means the vehicle survives reentry and can fly again; *No* means each launch consumes the vehicle.\n\
 - **Crew Rated** — whether the vehicle can carry humans, not just cargo.\n\
-- **Launch cost** is the cash fee paid every launch; **Maintenance** is the daily upkeep cost while idle on the pad.\n\
-- Hover a launch-vehicle name to see its in-game description.\n\n\
+- **Launch cost** is the cash fee paid every launch; **Maintenance** is the daily upkeep cost while idle on the pad.\n\n\
 ## Alternative launch methods\n\n\
 The game also models several non-rocket launch systems unlocked through\n\
 research and built as facilities at the launch site:\n\n\
@@ -1769,6 +1681,221 @@ types exist:\n\n\
     )
 }
 
+/// Truncate `s` to at most `max_chars` characters, ending at a word boundary
+/// and balancing a stray closing `"` if one would be left dangling.
+fn truncate_premise(s: &str, max_chars: usize) -> String {
+    if s.chars().count() <= max_chars {
+        return s.to_string();
+    }
+    let cut = s
+        .char_indices()
+        .nth(max_chars)
+        .map(|(i, _)| i)
+        .unwrap_or(s.len());
+    let mut head = &s[..cut];
+    if let Some(sp) = head.rfind(|c: char| c.is_whitespace()) {
+        head = &head[..sp];
+    }
+    let mut head_owned: String = head.trim_end().to_string();
+    while let Some(c) = head_owned.chars().last() {
+        if matches!(c, ',' | ';' | ':' | '-' | '—') {
+            head_owned.pop();
+            head_owned.truncate(head_owned.trim_end().len());
+        } else {
+            break;
+        }
+    }
+    if head_owned.chars().filter(|c| *c == '"').count() % 2 == 1 {
+        if let Some(idx) = head_owned.rfind('"') {
+            head_owned.truncate(idx);
+            head_owned.truncate(head_owned.trim_end().len());
+            while let Some(c) = head_owned.chars().last() {
+                if matches!(c, ',' | ';' | ':' | '-' | '—') {
+                    head_owned.pop();
+                    head_owned.truncate(head_owned.trim_end().len());
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+    format!("{}…", head_owned)
+}
+
+/// Resolve a contract-objective `target` id to a human-readable label.
+fn resolve_objective_target(
+    target: &str,
+    fac_name: &BTreeMap<&str, &str>,
+    resource_name: &BTreeMap<&str, &str>,
+    sc_name: &BTreeMap<&str, &str>,
+    lv_name: &BTreeMap<&str, &str>,
+    research_name: &BTreeMap<&str, &str>,
+) -> String {
+    if let Some(rest) = target.strip_prefix("build_") {
+        return smart_title_case(fac_name.get(rest).copied().unwrap_or(rest));
+    }
+    if let Some(rest) = target.strip_prefix("id_resource_") {
+        return resource_name.get(rest).copied().unwrap_or(rest).to_string();
+    }
+    if let Some(rest) = target.strip_prefix("module_") {
+        // Force title-case here — `smart_title_case` is a no-op on strings that
+        // already contain lowercase letters.
+        return title_case_words(&rest.replace('_', " "));
+    }
+    if target.starts_with("research_") {
+        if let Some(nm) = research_name.get(target).copied() {
+            return nm.to_string();
+        }
+        return smart_title_case(&target.trim_start_matches("research_").replace('_', " "));
+    }
+    // `Spacecraft<N><CodeName>` — sirenix-only objective targets that don't
+    // appear in the locale spacecraft list.  Try `research_sc_<lower>` first.
+    if let Some(rest) = target.strip_prefix("Spacecraft") {
+        let codename: String = rest.chars().skip_while(|c| c.is_ascii_digit()).collect();
+        if !codename.is_empty() {
+            let key = format!("research_sc_{}", codename.to_lowercase());
+            if let Some(nm) = research_name.get(key.as_str()).copied() {
+                return nm.to_string();
+            }
+            return codename;
+        }
+    }
+    if let Some(nm) = sc_name.get(target).copied() {
+        return nm.to_string();
+    }
+    if let Some(nm) = lv_name.get(target).copied() {
+        return nm.to_string();
+    }
+    // Launch-vehicle id that didn't match locale (e.g. `lv_chem_superlarge`):
+    // produce a humanized label rather than leaking the raw id.
+    if let Some(rest) = target.strip_prefix("lv_") {
+        let class = if rest.starts_with("chem") {
+            "Chemical"
+        } else if rest.starts_with("nuke") {
+            "Nuclear"
+        } else {
+            ""
+        };
+        let pretty: Vec<String> = rest
+            .split('_')
+            .filter(|p| !p.is_empty() && *p != "chem" && *p != "nuke")
+            .map(|p| {
+                let mut chars = p.chars();
+                match chars.next() {
+                    None => String::new(),
+                    Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+                }
+            })
+            .collect();
+        let modifier = pretty.join(" ");
+        return if class.is_empty() && modifier.is_empty() {
+            "Launch Vehicle".into()
+        } else if class.is_empty() {
+            format!("{modifier} Launch Vehicle")
+        } else if modifier.is_empty() {
+            format!("{class} Launch Vehicle")
+        } else {
+            format!("{class} Launch Vehicle ({modifier})")
+        };
+    }
+    smart_title_case(&target.replace('_', " "))
+}
+
+/// Format a single contract objective into a Requirements-column bullet.
+fn format_objective(
+    o: &ContractObjectiveStat,
+    fac_name: &BTreeMap<&str, &str>,
+    resource_name: &BTreeMap<&str, &str>,
+    sc_name: &BTreeMap<&str, &str>,
+    lv_name: &BTreeMap<&str, &str>,
+    research_name: &BTreeMap<&str, &str>,
+) -> String {
+    let target = o.target.as_deref().map(|t| {
+        resolve_objective_target(t, fac_name, resource_name, sc_name, lv_name, research_name)
+    });
+    // Some objective kinds carry quantity 0 in the source data (the engine
+    // treats "any amount" as 0).  Normalize to at least 1 so the rendered
+    // table doesn't show nonsensical "Build 0× X" / "Have 0× Y" lines.
+    let qty = if o.quantity <= 0.0 { 1.0 } else { o.quantity };
+    match (o.kind.as_str(), target.as_deref()) {
+        ("BuildFacility", Some(t)) => format!("Build {}× {}", fmt_amount(qty), t),
+        ("Possession", Some(t)) => format!("Have {}× {}", fmt_amount(qty), t),
+        // Fleet Expansion: "Possess 10" with no target means 10 spacecraft.
+        ("Possession", None) => format!("Have {}× Spacecraft", fmt_amount(qty)),
+        ("MarketsOffers", Some(t)) | ("MarketPlaceOffers", Some(t)) => {
+            format!("Market trade {}× {}", fmt_amount(qty), t)
+        }
+        ("ChangeHabitabilityParameters", _) => "Adjust habitability parameter".into(),
+        ("ChangeDepositParameters", Some(t)) | ("ChangeDeposit", Some(t)) => {
+            format!("Survey {} deposit", t)
+        }
+        ("Exploration", _) | ("ExplorationObject", _) => "Explore".into(),
+        ("ExplorationInterstellar", _) => "Explore interstellar".into(),
+        ("MakeResearch", Some(t)) => format!("Research: {}", t),
+        ("MakeResearch", None) => "Research".into(),
+        ("CreateSpaceCraft", Some(t)) => format!("Build spacecraft: {}", t),
+        ("CreateSpaceCraft", None) => "Build spacecraft".into(),
+        ("CreateVehicle", Some(t)) => format!("Build launch vehicle: {}", t),
+        ("CreateVehicle", None) => "Build launch vehicle".into(),
+        ("Deliver", Some(t)) => format!("Deliver {}× {}", fmt_amount(qty), t),
+        ("Deliver", None) => "Deliver".into(),
+        ("DetonateNuclearDevice", _) => "Detonate nuclear device".into(),
+        ("MakeEnergyProduction", _) => "Establish energy production".into(),
+        ("ScheduleFly", _) => "Schedule a flight".into(),
+        ("ScheduleFlyGravityAssist", _) => "Schedule a gravity-assist flight".into(),
+        ("ScheduleCyclicalMission", _) => "Schedule a cyclical mission".into(),
+        ("SelectLayer", _) => "Select layer".into(),
+        (kind, Some(t)) => format!("{}: {}× {}", humanize_kind(kind), fmt_amount(qty), t),
+        (kind, None) => humanize_kind(kind),
+    }
+}
+
+/// Convert an objective kind like `"MakeResearch"` into `"Make research"`.
+fn humanize_kind(kind: &str) -> String {
+    let mut out = String::with_capacity(kind.len() + 4);
+    for (i, c) in kind.char_indices() {
+        if i > 0 && c.is_uppercase() {
+            out.push(' ');
+            for l in c.to_lowercase() {
+                out.push(l);
+            }
+        } else if i == 0 {
+            for u in c.to_uppercase() {
+                out.push(u);
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Title-case every word in `s` regardless of its existing case.  Unlike
+/// `smart_title_case`, this always applies — used for ids like
+/// `module_crew_compartment` that arrive lowercase and need real Title Case.
+fn title_case_words(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut at_word_start = true;
+    for c in s.chars() {
+        if c.is_alphabetic() {
+            if at_word_start {
+                for u in c.to_uppercase() {
+                    out.push(u);
+                }
+                at_word_start = false;
+            } else {
+                for l in c.to_lowercase() {
+                    out.push(l);
+                }
+            }
+        } else {
+            out.push(c);
+            at_word_start = c.is_whitespace() || c == '/' || c == '-' || c == '(';
+        }
+    }
+    out
+}
+
 fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
     let contract_name: BTreeMap<&str, &str> = locale
         .contracts
@@ -1797,6 +1924,11 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
         .collect();
     let resource_name: BTreeMap<&str, &str> = locale
         .resources
+        .iter()
+        .map(|r| (r.id.as_str(), r.name.as_str()))
+        .collect();
+    let research_name: BTreeMap<&str, &str> = locale
+        .research
         .iter()
         .map(|r| (r.id.as_str(), r.name.as_str()))
         .collect();
@@ -1962,48 +2094,20 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
         .map(|c| {
             let display = contract_name.get(c.id.as_str()).copied().unwrap_or(c.id.as_str());
             let premise = contract_premise.get(c.id.as_str()).copied().unwrap_or("");
-            let premise = if premise.len() > 240 {
-                let cut = premise
-                    .char_indices()
-                    .nth(240)
-                    .map(|(i, _)| i)
-                    .unwrap_or(premise.len());
-                format!("{}…", &premise[..cut])
-            } else {
-                premise.to_string()
-            };
+            let premise = truncate_premise(premise, 240);
 
             // Objectives: dedupe identical lines (same kind + target + qty).
             let mut obj_bits: Vec<String> = Vec::new();
             let mut seen_obj: std::collections::BTreeSet<String> = Default::default();
             for o in &c.objectives {
-                let pretty_target = o.target.as_deref().map(|t| {
-                    if let Some(rest) = t.strip_prefix("build_") {
-                        smart_title_case(fac_name.get(rest).copied().unwrap_or(rest))
-                    } else if let Some(rest) = t.strip_prefix("id_resource_") {
-                        resource_name.get(rest).copied().unwrap_or(rest).to_string()
-                    } else if let Some(rest) = t.strip_prefix("module_") {
-                        smart_title_case(&rest.replace('_', " "))
-                    } else {
-                        sc_name
-                            .get(t)
-                            .copied()
-                            .or_else(|| lv_name.get(t).copied())
-                            .unwrap_or(t)
-                            .to_string()
-                    }
-                });
-                let line = match (o.kind.as_str(), pretty_target.as_deref()) {
-                    ("BuildFacility", Some(t)) => format!("Build {}× {}", fmt_amount(o.quantity), t),
-                    ("Possession", Some(t)) => format!("Have {}× {}", fmt_amount(o.quantity), t),
-                    ("Possession", None) => format!("Possess {}", fmt_amount(o.quantity)),
-                    ("MarketsOffers", Some(t)) => format!("Market trade {}× {}", fmt_amount(o.quantity), t),
-                    ("ChangeHabitabilityParameters", _) => "Adjust habitability parameter".into(),
-                    ("ChangeDepositParameters", Some(t)) => format!("Survey {} deposit", t),
-                    ("Exploration", _) => "Explore".into(),
-                    (kind, Some(t)) => format!("{}: {}× {}", kind, fmt_amount(o.quantity), t),
-                    (kind, None) => kind.into(),
-                };
+                let line = format_objective(
+                    o,
+                    &fac_name,
+                    &resource_name,
+                    &sc_name,
+                    &lv_name,
+                    &research_name,
+                );
                 if seen_obj.insert(line.clone()) {
                     obj_bits.push(line);
                 }
@@ -2055,17 +2159,30 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
             let name_cell = format!("{anchor}{name_body}");
 
             // Prereq column — which contracts must complete before this one
-            // is offered.  Built from the reverse-rewards lookup.
+            // is offered.  Built from the reverse-rewards lookup.  Filter the
+            // same way `entries` is filtered: drop tutorial/_test contracts
+            // and any source with an empty locale display name.
             let prereq_cell = match unlocked_by.get(c.id.as_str()) {
                 None => "—".to_string(),
-                Some(srcs) => srcs
-                    .iter()
-                    .map(|src| {
-                        let pretty = contract_name.get(src).copied().unwrap_or(src);
-                        link_same_page("contract", src, &escape_cell(pretty))
-                    })
-                    .collect::<Vec<_>>()
-                    .join("<br>"),
+                Some(srcs) => {
+                    let pretty_links: Vec<String> = srcs
+                        .iter()
+                        .filter(|src| !src.contains("_test"))
+                        .filter_map(|src| {
+                            let pretty = contract_name.get(src).copied().unwrap_or("");
+                            if pretty.is_empty() {
+                                None
+                            } else {
+                                Some(link_same_page("contract", src, &escape_cell(pretty)))
+                            }
+                        })
+                        .collect();
+                    if pretty_links.is_empty() {
+                        "—".to_string()
+                    } else {
+                        pretty_links.join("<br>")
+                    }
+                }
             };
 
             let order_cell = depth.get(c.id.as_str()).copied().unwrap_or(0).to_string();
@@ -2136,47 +2253,6 @@ fn smart_title_case(s: &str) -> String {
         }
     }
     out
-}
-
-/// Map a `*_deposition` (Release Station) facility id to the resource id it
-/// releases.  The deposition prefix matches the resource id directly for most
-/// resources; `carbon` is the lone exception (resource id is `volatile`).
-fn release_station_resource_id(facility_id: &str) -> Option<&'static str> {
-    let prefix = facility_id.strip_suffix("_deposition")?;
-    match prefix {
-        "carbon" => Some("volatile"),
-        "co2" => Some("co2"),
-        "hel3" => Some("hel3"),
-        "hydrogen" => Some("hydrogen"),
-        "metal" => Some("metal"),
-        "nitrogen" => Some("nitrogen"),
-        "noblegas" => Some("noblegas"),
-        "oxygen" => Some("oxygen"),
-        "raremetal" => Some("raremetal"),
-        "silicon" => Some("silicon"),
-        "uran" => Some("uran"),
-        _ => None,
-    }
-}
-
-/// Fill in `{0}`-style format slots in a facility's locale description.  The
-/// game-side locale strings carry C#-style placeholders (e.g. Release Stations:
-/// "Releases {0} to the surface").  Without substitution they leak through to
-/// the wiki — this resolves the known cases.
-fn substitute_facility_desc(
-    facility_id: &str,
-    desc: &str,
-    resource_name: &BTreeMap<&str, &str>,
-) -> String {
-    if !desc.contains("{0}") {
-        return desc.to_string();
-    }
-    if let Some(res_id) = release_station_resource_id(facility_id) {
-        if let Some(name) = resource_name.get(res_id) {
-            return desc.replace("{0}", name);
-        }
-    }
-    desc.to_string()
 }
 
 fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
@@ -2263,23 +2339,11 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
     let row_for = |f: &FacilityStat,
                    facility_name: &BTreeMap<&str, &str>,
                    research_name: &BTreeMap<&str, &str>,
-                   resource_name: &BTreeMap<&str, &str>,
-                   with_anchor: bool|
+                   resource_name: &BTreeMap<&str, &str>|
      -> Vec<String> {
         let id_no_prefix = f.id.strip_prefix("build_").unwrap_or(&f.id);
         let raw_display = facility_name.get(id_no_prefix).copied().unwrap_or(id_no_prefix);
-        // Append a tier suffix for the "big" variant so its row is distinct
-        // from the regular variant.  In the locale data, "carbonmine" and
-        // "carbonmine_big" carry identical names ("CARBON MINE"); without a
-        // suffix the wiki shows two identical rows.
-        let display = {
-            let titled = smart_title_case(raw_display);
-            if id_no_prefix.ends_with("_big") || id_no_prefix.ends_with("-big") {
-                format!("{titled} (Large)")
-            } else {
-                titled
-            }
-        };
+        let display = smart_title_case(raw_display);
         // Prefer the reverse-lookup (which research unlocks this facility?) over
         // the facility's own `lockByHelpNotUse` field — the former is set for
         // every researched facility, the latter only for a few.
@@ -2308,17 +2372,12 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
         } else {
             "—".to_string()
         };
-        let raw_desc = facility_desc.get(id_no_prefix).copied().unwrap_or("");
-        let desc = substitute_facility_desc(id_no_prefix, raw_desc, resource_name);
-        let name_cell = if with_anchor {
-            format!(
-                "{anchor}**{name}**",
-                anchor = anchor_tag("facility", id_no_prefix),
-                name = escape_cell(&display)
-            )
-        } else {
-            format!("**{name}**", name = escape_cell(&display))
-        };
+        let desc = facility_desc.get(id_no_prefix).copied().unwrap_or("");
+        let name_cell = format!(
+            "{anchor}**{name}**",
+            anchor = anchor_tag("facility", id_no_prefix),
+            name = escape_cell(&display)
+        );
         vec![
             name_cell,
             f.facility_type.clone(),
@@ -2327,7 +2386,7 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
             energy,
             maint,
             prereq,
-            escape_cell(&desc),
+            escape_cell(desc),
         ]
     };
 
@@ -2342,31 +2401,13 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
         "Description",
     ];
 
-    // Track which facility ids already received their canonical anchor on the
-    // Ground table; the Orbital table reuses those rows (for "Surface, Orbit"
-    // facilities) but renders without an anchor so the page has at most one
-    // `<a id="facility-...">` per id.  Browsers only honor the first anchor
-    // anyway — a duplicate silently breaks inbound links to the second row.
-    let mut anchored_ids: std::collections::HashSet<String> =
-        std::collections::HashSet::new();
     let ground_rows: Vec<Vec<String>> = ground
         .iter()
-        .map(|f| {
-            let id_no_prefix = f.id.strip_prefix("build_").unwrap_or(&f.id).to_string();
-            anchored_ids.insert(id_no_prefix);
-            row_for(f, &facility_name, &research_name, &resource_name, true)
-        })
+        .map(|f| row_for(f, &facility_name, &research_name, &resource_name))
         .collect();
     let orbital_rows: Vec<Vec<String>> = orbital
         .iter()
-        .map(|f| {
-            let id_no_prefix = f.id.strip_prefix("build_").unwrap_or(&f.id);
-            let with_anchor = !anchored_ids.contains(id_no_prefix);
-            if with_anchor {
-                anchored_ids.insert(id_no_prefix.to_string());
-            }
-            row_for(f, &facility_name, &research_name, &resource_name, with_anchor)
-        })
+        .map(|f| row_for(f, &facility_name, &research_name, &resource_name))
         .collect();
 
     let header_tips: [Option<&str>; 8] = [
@@ -2420,76 +2461,6 @@ fn fmt_work_hours(h: f64) -> String {
     }
 }
 
-/// Convert a snake_case-ish id fragment into Title Case words.
-/// e.g. "crew_compartment" → "Crew Compartment", "chemhelios" → "Chemhelios".
-fn humanize_id_fragment(s: &str) -> String {
-    let cleaned = s.replace('_', " ");
-    let mut out = String::with_capacity(cleaned.len());
-    let mut cap_next = true;
-    for c in cleaned.chars() {
-        if c.is_whitespace() {
-            out.push(c);
-            cap_next = true;
-        } else if cap_next && c.is_alphabetic() {
-            for u in c.to_uppercase() {
-                out.push(u);
-            }
-            cap_next = false;
-        } else {
-            out.push(c);
-        }
-    }
-    out
-}
-
-/// Render a single `bonus_components` entry as a human-readable label.
-/// Resolution order:
-///   `build_<id>`             → facility display name (locale)
-///   `id_Rocket_*` / `lv_*`   → launch-vehicle display name (locale)
-///   `spacecraft_*`           → spacecraft display name (locale)
-///   `module_*` / `eng_*` / `cargo_*` / etc. → humanized fragment (no locale entry available)
-fn resolve_bonus_component(
-    target: &str,
-    facility_name: &BTreeMap<&str, &str>,
-    spacecraft_name: &BTreeMap<&str, &str>,
-    lv_name: &BTreeMap<&str, &str>,
-) -> String {
-    if let Some(key) = target.strip_prefix("build_") {
-        let name = facility_name.get(key).copied().unwrap_or(key);
-        return smart_title_case(name);
-    }
-    if target.starts_with("id_Rocket_") || target.starts_with("lv_") {
-        if let Some(name) = lv_name.get(target).copied() {
-            return smart_title_case(name);
-        }
-        let frag = target
-            .strip_prefix("id_Rocket_")
-            .or_else(|| target.strip_prefix("lv_"))
-            .unwrap_or(target);
-        return humanize_id_fragment(frag);
-    }
-    if target.starts_with("spacecraft_") {
-        if let Some(name) = spacecraft_name.get(target).copied() {
-            return smart_title_case(name);
-        }
-        let frag = target.strip_prefix("spacecraft_").unwrap_or(target);
-        return humanize_id_fragment(frag);
-    }
-    // module_*, eng_*, cargo_*, etc. — no locale entry; humanize the fragment.
-    for prefix in &["module_", "eng_", "cargo_"] {
-        if let Some(frag) = target.strip_prefix(prefix) {
-            return humanize_id_fragment(frag);
-        }
-    }
-    // Sentinel values used by the game data for "applies to everything in a class".
-    match target {
-        "All" => "(all)".to_string(),
-        "Facility" => "(all facilities)".to_string(),
-        "LV" => "(all launch vehicles)".to_string(),
-        other => humanize_id_fragment(other),
-    }
-}
-
 fn fmt_research_unlock(
     r: &ResearchStat,
     facility_name: &BTreeMap<&str, &str>,
@@ -2501,17 +2472,8 @@ fn fmt_research_unlock(
             let target = r.unlock_target.as_deref().unwrap_or("");
             // Facility unlock targets are full ids like "build_outpost"; locale ids are bare ("outpost").
             let key = target.strip_prefix("build_").unwrap_or(target);
-            // Some unlocks point at spacecraft modules (module_crew_compartment, …) that
-            // don't appear in `locale.facilities`.  Humanize the fragment as a fallback so we
-            // don't leak the internal id into the page.
-            let display = if let Some(name) = facility_name.get(key).copied() {
-                smart_title_case(name)
-            } else if let Some(frag) = key.strip_prefix("module_") {
-                humanize_id_fragment(frag)
-            } else {
-                humanize_id_fragment(key)
-            };
-            let link = link_cross_page("facilities", "facility", key, &format!("**{display}**"));
+            let pretty = smart_title_case(facility_name.get(key).copied().unwrap_or(key));
+            let link = link_cross_page("facilities", "facility", key, &format!("**{pretty}**"));
             format!("Builds {link}")
         }
         "UnlockSpacecraftType" => {
@@ -2531,16 +2493,9 @@ fn fmt_research_unlock(
                 let comps = if r.bonus_components.is_empty() {
                     "".to_string()
                 } else {
-                    let names: Vec<String> = r
-                        .bonus_components
-                        .iter()
-                        .map(|t| resolve_bonus_component(t, facility_name, spacecraft_name, lv_name))
-                        .collect();
-                    format!(" on {}", names.join(", "))
+                    format!(" on {}", r.bonus_components.join(", "))
                 };
-                // fmt_amount already emits a leading `-` for negatives; only prepend `+` for non-negatives.
-                let sign = if r.bonus_amount < 0.0 { "" } else { "+" };
-                format!("{sign}{} {}{}", fmt_amount(r.bonus_amount), b, comps)
+                format!("+{} {}{}", fmt_amount(r.bonus_amount), b, comps)
             }
             None => "Bonus".into(),
         },
@@ -2904,199 +2859,6 @@ mod tests {
         }
     }
 
-    fn name_map<'a>(pairs: &[(&'a str, &'a str)]) -> BTreeMap<&'a str, &'a str> {
-        pairs.iter().copied().collect()
-    }
-
-    fn research_bonus(kind: &str, amount: f64, components: &[&str]) -> ResearchStat {
-        ResearchStat {
-            id: "test".into(),
-            work_hours: 0.0,
-            branch: "".into(),
-            subbranch: "".into(),
-            prereqs: vec![],
-            action: "UnlockBonus".into(),
-            unlock_target: None,
-            bonus_kind: Some(kind.into()),
-            bonus_amount: amount,
-            bonus_components: components.iter().map(|s| s.to_string()).collect(),
-            show_in_tree: true,
-            contract_unlocks: vec![],
-        }
-    }
-
-    #[test]
-    fn fmt_research_unlock_resolves_build_facility_to_display_name() {
-        let facilities = name_map(&[("farm", "HYDROPONIC FARM")]);
-        let spacecraft = name_map(&[]);
-        let lv = name_map(&[]);
-        let r = research_bonus("ProductionEfficiency", 10.0, &["build_farm"]);
-        let out = fmt_research_unlock(&r, &facilities, &spacecraft, &lv);
-        assert!(
-            out.contains("Farm") && !out.contains("build_farm"),
-            "got {out:?}"
-        );
-    }
-
-    #[test]
-    fn fmt_research_unlock_joins_multiple_build_ids_as_display_names() {
-        let facilities = name_map(&[
-            ("outpost", "Outpost"),
-            ("habitat", "Habitat"),
-            ("habitatdome", "Habitat Dome"),
-            ("habitatcity", "Habitat City"),
-        ]);
-        let spacecraft = name_map(&[]);
-        let lv = name_map(&[]);
-        let r = research_bonus(
-            "BuildCost",
-            -35.0,
-            &[
-                "build_outpost",
-                "build_habitat",
-                "build_habitatdome",
-                "build_habitatcity",
-            ],
-        );
-        let out = fmt_research_unlock(&r, &facilities, &spacecraft, &lv);
-        assert!(out.contains("Outpost"), "got {out:?}");
-        assert!(out.contains("Habitat"), "got {out:?}");
-        assert!(out.contains("Habitat Dome"), "got {out:?}");
-        assert!(out.contains("Habitat City"), "got {out:?}");
-        assert!(!out.contains("build_"), "leaked build_ id: {out:?}");
-    }
-
-    #[test]
-    fn fmt_research_unlock_negative_amount_does_not_double_sign() {
-        let facilities = name_map(&[("outpost", "Outpost")]);
-        let spacecraft = name_map(&[]);
-        let lv = name_map(&[]);
-        let r = research_bonus("BuildCost", -35.0, &["build_outpost"]);
-        let out = fmt_research_unlock(&r, &facilities, &spacecraft, &lv);
-        assert!(!out.contains("+-"), "double-signed: {out:?}");
-        assert!(out.contains("-35"), "missing -35: {out:?}");
-    }
-
-    #[test]
-    fn fmt_research_unlock_humanizes_engine_component_id() {
-        let facilities = name_map(&[]);
-        let spacecraft = name_map(&[]);
-        let lv = name_map(&[]);
-        let r = research_bonus(
-            "ComponentExhaustV",
-            20.0,
-            &["eng_chem", "eng_chemsmall", "eng_chemhelios", "eng_chemorion"],
-        );
-        let out = fmt_research_unlock(&r, &facilities, &spacecraft, &lv);
-        assert!(!out.contains("eng_chem"), "raw eng_ id leaked: {out:?}");
-        assert!(!out.contains("eng_"), "raw eng_ prefix leaked: {out:?}");
-        // Humanized form should contain something recognizable.
-        assert!(
-            out.to_lowercase().contains("chem"),
-            "missing humanized 'chem' fragment: {out:?}"
-        );
-    }
-
-    #[test]
-    fn fmt_research_unlock_resolves_id_rocket_to_lv_name() {
-        let facilities = name_map(&[]);
-        let spacecraft = name_map(&[]);
-        let lv = name_map(&[
-            ("id_Rocket_RocketType3", "Falcon"),
-            ("id_Rocket_RocketType4", "Eagle"),
-        ]);
-        let r = research_bonus(
-            "BuildCost",
-            25.0,
-            &["id_Rocket_RocketType3", "id_Rocket_RocketType4"],
-        );
-        let out = fmt_research_unlock(&r, &facilities, &spacecraft, &lv);
-        assert!(out.contains("Falcon"), "got {out:?}");
-        assert!(out.contains("Eagle"), "got {out:?}");
-        assert!(
-            !out.contains("id_Rocket_"),
-            "raw rocket id leaked: {out:?}"
-        );
-    }
-
-    #[test]
-    fn fmt_research_unlock_resolves_spacecraft_id_to_display_name() {
-        let facilities = name_map(&[]);
-        let spacecraft = name_map(&[
-            ("spacecraft_chem_mid2", "Selene"),
-            ("spacecraft_chem_large", "Stratos"),
-        ]);
-        let lv = name_map(&[]);
-        let r = research_bonus(
-            "SCCargoCapacityBase",
-            50.0,
-            &["spacecraft_chem_mid2", "spacecraft_chem_large"],
-        );
-        let out = fmt_research_unlock(&r, &facilities, &spacecraft, &lv);
-        assert!(out.contains("Selene"), "got {out:?}");
-        assert!(out.contains("Stratos"), "got {out:?}");
-        assert!(
-            !out.contains("spacecraft_chem"),
-            "raw spacecraft id leaked: {out:?}"
-        );
-    }
-
-    #[test]
-    fn fmt_research_unlock_humanizes_module_id_without_locale_entry() {
-        let facilities = name_map(&[]);
-        let spacecraft = name_map(&[]);
-        let lv = name_map(&[]);
-        let r = ResearchStat {
-            id: "test".into(),
-            work_hours: 0.0,
-            branch: "".into(),
-            subbranch: "".into(),
-            prereqs: vec![],
-            action: "UnlockFacility".into(),
-            unlock_target: Some("module_crew_compartment".into()),
-            bonus_kind: None,
-            bonus_amount: 0.0,
-            bonus_components: vec![],
-            show_in_tree: true,
-            contract_unlocks: vec![],
-        };
-        let out = fmt_research_unlock(&r, &facilities, &spacecraft, &lv);
-        assert!(
-            out.contains("Crew Compartment"),
-            "expected humanized name 'Crew Compartment', got {out:?}"
-        );
-        assert!(
-            !out.contains("module_"),
-            "raw module_ id leaked: {out:?}"
-        );
-    }
-
-    #[test]
-    fn fmt_research_unlock_all_sentinel_renders_readable_with_facility_kind() {
-        let facilities = name_map(&[]);
-        let spacecraft = name_map(&[]);
-        let lv = name_map(&[]);
-        let r = research_bonus("BuildSpeed", 25.0, &["Facility"]);
-        let out = fmt_research_unlock(&r, &facilities, &spacecraft, &lv);
-        assert!(
-            out.contains("all facilities"),
-            "expected 'all facilities' phrasing, got {out:?}"
-        );
-    }
-
-    #[test]
-    fn fmt_research_unlock_lv_sentinel_renders_all_launch_vehicles() {
-        let facilities = name_map(&[]);
-        let spacecraft = name_map(&[]);
-        let lv = name_map(&[]);
-        let r = research_bonus("LaunchCost", 20.0, &["LV"]);
-        let out = fmt_research_unlock(&r, &facilities, &spacecraft, &lv);
-        assert!(
-            out.contains("all launch vehicles"),
-            "expected 'all launch vehicles' phrasing, got {out:?}"
-        );
-    }
-
     #[test]
     fn body_lookup_resolves_taxonomy_id_via_display_name() {
         let locale = fixture_locale();
@@ -3117,441 +2879,247 @@ mod tests {
         assert_eq!(ctx.body("Wild 2").unwrap().name, "81P Wild ");
     }
 
-    // ── Audit finding #5: spacecraft & launch-vehicle table coverage ──
+    // ---------- Audit fix #2: contracts page never leaks raw internal IDs ----------
 
-    fn sc_stat(
-        id: &str,
-        mass: f64,
-        needs_lv: bool,
-        built_in_orbit: bool,
-        launch_cost: f64,
-        build_cost: Vec<ResourceCost>,
-        build_time_days: f64,
-    ) -> SpacecraftStat {
-        SpacecraftStat {
-            id: id.into(),
-            engine_module: None,
-            engine_type: "chemical".into(),
-            mass,
-            cargo_capacity: 100.0,
-            fuel_capacity: 100.0,
-            reusability: 1.0,
-            needs_launch_vehicle: needs_lv,
-            built_in_orbit,
-            can_be_built_by_player: true,
-            build_cost,
-            build_time_days,
-            launch_cost,
-        }
-    }
-
-    fn lv_stat(id: &str, max_payload: f64, max_fuel_load: f64, exhaust_velocity: f64) -> LaunchVehicleStat {
-        LaunchVehicleStat {
-            id: id.into(),
-            max_payload,
-            max_fuel_load,
-            exhaust_velocity,
-            reusability: 0.0,
-            can_send_human: false,
-            is_locked: false,
-            build_cost: vec![],
-            build_time_days: 50.0,
-            launch_cost: 150.0,
-            maintenance_cost_per_day: 10.0,
-            fuel_type_on_start: None,
-        }
-    }
-
-    fn locale_with_spacecraft(items: Vec<(&str, &str, &str)>) -> Locale {
-        let mut l = fixture_locale();
-        l.spacecraft = items
-            .into_iter()
-            .map(|(id, name, desc)| NameDesc {
-                id: id.into(),
-                name: name.into(),
-                description: desc.into(),
-            })
-            .collect();
-        l
-    }
-
-    fn locale_with_launch_vehicles(items: Vec<(&str, &str, &str)>) -> Locale {
-        let mut l = fixture_locale();
-        l.launch_vehicles = items
-            .into_iter()
-            .map(|(id, name, desc)| NameDesc {
-                id: id.into(),
-                name: name.into(),
-                description: desc.into(),
-            })
-            .collect();
-        l
-    }
-
-    fn row_for<'a>(table: &'a str, marker: &str) -> &'a str {
-        table
-            .lines()
-            .find(|l| l.contains(marker))
-            .expect("expected marker row in table")
-    }
-
-    #[test]
-    fn spacecraft_built_craft_shows_launch_cost() {
-        let locale = locale_with_spacecraft(vec![(
-            "spacecraft_electric_small",
-            "Hermes",
-            "Long-distance interplanetary craft.",
-        )]);
-        let sirenix = Sirenix {
-            spacecraft: vec![sc_stat(
-                "spacecraft_electric_small",
-                60.0,
-                true,
-                true,
-                5000.0,
-                vec![ResourceCost { resource_id: "steel".into(), amount: 100.0 }],
-                150.0,
-            )],
-            ..Sirenix::default()
-        };
-        let table = page_spacecraft(&locale, &sirenix);
-        let row = row_for(&table, "Hermes");
-        // Built craft should render an abbreviated, non-zero launch fee — not "—".
-        assert!(
-            row.contains(" 5k "),
-            "Hermes row missing rendered launch cost: {row}"
-    // ---------- Audit fix #4: facility page anchor/desc/tier bugs ----------
-
-    fn facility_stat(id: &str, placement: &str, ftype: &str) -> FacilityStat {
-        FacilityStat {
-            id: id.into(),
-            descriptor: "Ground".into(),
-            placement: placement.into(),
-            facility_type: ftype.into(),
-            build_cost: vec![],
-            maintenance_per_day: 0.0,
-            workers_required: 0,
-            energy_consumption: 0.0,
-            research_prereq: None,
-            is_obsolete: false,
-        }
-    }
-
-    fn facility_locale_entry(id: &str, name: &str, desc: &str) -> Facility {
-        Facility {
-            id: id.into(),
-            name: name.into(),
-            description: desc.into(),
-        }
-    }
-
-    fn facility_page_locale(
-        facilities: Vec<Facility>,
-        resources: Vec<ResourceEntry>,
-    ) -> Locale {
+    fn contracts_fixture_locale() -> Locale {
         Locale {
             celestial_bodies: vec![],
-            spacecraft: vec![],
-            launch_vehicles: vec![],
-            research: vec![],
+            spacecraft: vec![
+                NameDesc { id: "spacecraft_chem_small".into(), name: "Iris".into(), description: String::new() },
+                NameDesc { id: "spacecraft_chem_large".into(), name: "Stratos".into(), description: String::new() },
+                NameDesc { id: "spacecraft_electric_small".into(), name: "Hermes".into(), description: String::new() },
+            ],
+            launch_vehicles: vec![
+                NameDesc { id: "lv_chem_seadragon".into(), name: "Albatross".into(), description: String::new() },
+                NameDesc { id: "lv_chemadvanced".into(), name: "Condor".into(), description: String::new() },
+            ],
+            research: vec![
+                ResearchEntry { id: "research_sc_helios".into(), category: "sc".into(), name: "Stratos".into(), description: String::new() },
+                ResearchEntry { id: "research_sc_iris".into(), category: "sc".into(), name: "Iris".into(), description: String::new() },
+                ResearchEntry { id: "research_sc_hermes".into(), category: "sc".into(), name: "Hermes".into(), description: String::new() },
+            ],
             corporations: vec![],
-            contracts: vec![],
-            resources,
-            facilities,
+            contracts: vec![
+                NameDesc {
+                    id: "contract_tutorial_moonlanding".into(),
+                    name: "Lunar Landing".into(),
+                    description: "It's time for a grand return to the moon.".into(),
+                },
+                NameDesc {
+                    // Carries the `_test` substring; mirrors production where the
+                    // locale name is empty for tutorial-test contracts.
+                    id: "contract_tutorial_moonlandingMultiModuleDeliverTest".into(),
+                    name: String::new(),
+                    description: String::new(),
+                },
+                NameDesc {
+                    id: "contract_mars_terraform_water".into(),
+                    name: "Blue Mars".into(),
+                    description: "Bringing enough water to Mars will make it possible for many organisms to thrive and help regulate temperature. Doing it will require a large-scale operation, but with enough persistence and good planning, we'll wipe the name Red Planet\" from books.\"".into(),
+                },
+                NameDesc {
+                    id: "contract_general_fleet".into(),
+                    name: "Fleet Expansion".into(),
+                    description: "We need more ships.".into(),
+                },
+                NameDesc {
+                    id: "contract_downstream".into(),
+                    name: "Downstream Contract".into(),
+                    description: "Downstream of the test contract.".into(),
+                },
+            ],
+            resources: vec![],
+            facilities: vec![],
             habitability_scales: BTreeMap::new(),
             cargo: vec![],
         }
     }
 
-    fn facility_page_sirenix(facilities: Vec<FacilityStat>) -> Sirenix {
-        Sirenix {
-            facilities,
-            ..Default::default()
+    fn make_contract(id: &str, objectives: Vec<ContractObjectiveStat>, unlock_rewards: Vec<String>) -> ContractStat {
+        ContractStat {
+            id: id.into(),
+            is_locked: false,
+            is_final: false,
+            objectives,
+            money_reward: 0.0,
+            unlock_rewards,
+            facility_grants: vec![],
+            spacecraft_grants: vec![],
+            launch_vehicle_grants: vec![],
+            resource_grants: vec![],
         }
     }
 
-    fn count_occurrences(haystack: &str, needle: &str) -> usize {
-        haystack.matches(needle).count()
+    fn obj(kind: &str, quantity: f64, target: Option<&str>) -> ContractObjectiveStat {
+        ContractObjectiveStat {
+            kind: kind.into(),
+            quantity,
+            target: target.map(|s| s.into()),
+        }
     }
 
     #[test]
-    fn facility_with_both_placement_emits_anchor_only_once() {
-        // A habitation facility whose placement covers both surface and orbit
-        // (e.g. City Station) used to appear in BOTH the ground and orbital
-        // sections with the same <a id="facility-..."> anchor.  Browsers honor
-        // the first anchor only, silently breaking inbound links to the second
-        // row.  The anchor must be unique on the page.
-        let locale = facility_page_locale(
-            vec![facility_locale_entry(
-                "space_0gcity",
-                "CITY STATION",
-                "Vast, spinning ring.",
-            )],
-            vec![],
-        );
-        let sirenix = facility_page_sirenix(vec![facility_stat(
-            "build_space_0gcity",
-            "Surface, Orbit",
-            "Habitation",
-        )]);
-        let page = page_facilities(&locale, &sirenix);
-        assert_eq!(
-            count_occurrences(&page, "id=\"facility-space-0gcity\""),
-            1,
-            "anchor id=\"facility-space-0gcity\" should be unique on the page\n--- page ---\n{page}"
-        );
-        assert!(
-            page.contains("City Station"),
-            "City Station should still be listed on the page"
-        );
-    }
-
-    #[test]
-    fn spacecraft_spawned_not_built_shows_dash_for_launch() {
-        // OPC has empty build_cost AND build_time_days==0 — render Launch as —.
-        let locale = locale_with_spacecraft(vec![(
-            "spacecraft_capsule",
-            "Orbital Payload Container",
-            "Container for cargo deployed to orbit.",
-        )]);
+    fn make_research_renders_research_display_name_no_quantity() {
+        let locale = contracts_fixture_locale();
         let sirenix = Sirenix {
-            spacecraft: vec![sc_stat(
-                "spacecraft_capsule",
-                0.0,
-                true,
-                false,
-                1000.0,
+            contracts: vec![make_contract(
+                "contract_tutorial_moonlanding",
+                vec![obj("MakeResearch", 0.0, Some("research_sc_helios"))],
                 vec![],
-                0.0,
             )],
-            ..Sirenix::default()
+            ..Default::default()
         };
-        let table = page_spacecraft(&locale, &sirenix);
-        let row = row_for(&table, "Orbital Payload Container");
-        // Count separators to find the Launch column; simpler: assert at least
-        // one " — " is present and that no fmt_abbrev launch_cost like "1k" leaks.
-        assert!(
-            !row.contains(" 1k "),
-            "OPC row should NOT show launch_cost: {row}"
-        );
-        assert!(row.contains(" — "), "OPC row should use em-dash placeholders: {row}");
+        let page = page_contracts(&locale, &sirenix);
+        assert!(page.contains("Stratos"), "page should mention research display name:\n{page}");
+        assert!(!page.contains("research_sc_helios"), "raw research id leaked:\n{page}");
+        assert!(!page.contains("0×"), "zero-quantity leaked:\n{page}");
+        assert!(!page.contains("MakeResearch"), "raw kind leaked:\n{page}");
     }
 
     #[test]
-    fn spacecraft_needs_lv_column_renders_yes_no() {
-        let locale = locale_with_spacecraft(vec![
-            // chem_large = Stratos: actual data has needLaunchVehicleToGoToMoon=false
-            ("spacecraft_chem_large", "Stratos", "Reusable upper stage."),
-            // nuke_nolv = Cronos: single-stage-to-orbit, false
-            ("spacecraft_nuke_nolv", "Cronos", "Single-stage-to-orbit."),
-            // capsule = OPC: spawned-not-built, should render —
-            ("spacecraft_capsule", "Orbital Payload Container", "Cargo container."),
-            // electric_small = Hermes: needs_lv=true in source data
-            ("spacecraft_electric_small", "Hermes", "Interplanetary."),
-        ]);
+    fn create_spacecraft_renders_spacecraft_display_name() {
+        let locale = contracts_fixture_locale();
         let sirenix = Sirenix {
-            spacecraft: vec![
-                sc_stat(
-                    "spacecraft_chem_large",
-                    80.0,
-                    false,
-                    false,
-                    1000.0,
-                    vec![ResourceCost { resource_id: "steel".into(), amount: 120.0 }],
-                    120.0,
+            contracts: vec![make_contract(
+                "contract_tutorial_moonlanding",
+                vec![obj("CreateSpaceCraft", 0.0, Some("Spacecraft3Helios"))],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let page = page_contracts(&locale, &sirenix);
+        assert!(
+            !page.contains("Spacecraft3Helios"),
+            "raw spacecraft objective id leaked:\n{page}"
+        );
+        assert!(!page.contains("0×"), "zero-quantity leaked:\n{page}");
+        assert!(
+            page.contains("Helios") || page.contains("Stratos"),
+            "spacecraft display name missing:\n{page}"
+        );
+    }
+
+    #[test]
+    fn create_vehicle_renders_launch_vehicle_display_name() {
+        let locale = contracts_fixture_locale();
+        let sirenix = Sirenix {
+            contracts: vec![make_contract(
+                "contract_tutorial_moonlanding",
+                vec![obj("CreateVehicle", 0.0, Some("lv_chem_superlarge"))],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let page = page_contracts(&locale, &sirenix);
+        assert!(
+            !page.contains("lv_chem_superlarge"),
+            "raw lv objective id leaked:\n{page}"
+        );
+        assert!(!page.contains("0×"), "zero-quantity leaked:\n{page}");
+        assert!(
+            page.contains("Launch Vehicle") || page.contains("Chemical") || page.contains("Albatross"),
+            "no launch-vehicle display name:\n{page}"
+        );
+    }
+
+    #[test]
+    fn prereq_column_omits_or_renames_test_contracts() {
+        let locale = contracts_fixture_locale();
+        let sirenix = Sirenix {
+            contracts: vec![
+                make_contract(
+                    "contract_tutorial_moonlandingMultiModuleDeliverTest",
+                    vec![],
+                    vec!["contract_downstream".into()],
                 ),
-                sc_stat(
-                    "spacecraft_nuke_nolv",
-                    700.0,
-                    false,
-                    false,
-                    1000.0,
-                    vec![ResourceCost { resource_id: "steel".into(), amount: 400.0 }],
-                    150.0,
-                ),
-                sc_stat("spacecraft_capsule", 0.0, true, false, 1000.0, vec![], 0.0),
-                sc_stat(
-                    "spacecraft_electric_small",
-                    60.0,
-                    true,
-                    true,
-                    1000.0,
-                    vec![ResourceCost { resource_id: "steel".into(), amount: 100.0 }],
-                    150.0,
-                ),
+                make_contract("contract_downstream", vec![], vec![]),
             ],
-            ..Sirenix::default()
+            ..Default::default()
         };
-        let table = page_spacecraft(&locale, &sirenix);
-
-        // Each row's "Needs LV" cell appears between pipes; check via row text.
-        let stratos = row_for(&table, "Stratos");
-        let cronos = row_for(&table, "Cronos");
-        let opc = row_for(&table, "Orbital Payload Container");
-        let hermes = row_for(&table, "Hermes");
-
-        // Data has both Stratos and Cronos as needLaunchVehicleToGoToMoon=false,
-        // so both should render "No" in the new "Needs LV" column.
-        assert!(stratos.contains(" No "), "Stratos Needs-LV cell not 'No': {stratos}");
-        assert!(cronos.contains(" No "), "Cronos Needs-LV cell not 'No': {cronos}");
-        // OPC: spawned-not-built — every build-side cell is em-dash including Needs LV.
-        // Hermes: needs_lv=true → Yes.
-        assert!(hermes.contains(" Yes "), "Hermes Needs-LV cell not 'Yes': {hermes}");
-        // OPC row should not contain "Yes" or "No" tokens for Needs LV;
-        // it should render a dash there too — relax: just ensure no contradiction.
-        let _ = opc;
-    }
-
-    #[test]
-    fn ariane_description_has_no_stray_trailing_quote() {
-        // Source locale ends with `Lightbulb" engine."` — must not leak through
-        // into any cell or attribute on the rendered row.
-        let locale = locale_with_spacecraft(vec![(
-            "spacecraft_nuke_large",
-            "Ariane",
-            "Most powerful nuclear thermal spacecraft, powered by a Nuclear Lightbulb\" engine.\"",
-        )]);
-        let sirenix = Sirenix {
-            spacecraft: vec![sc_stat(
-                "spacecraft_nuke_large",
-                50.0,
-                false,
-                true,
-                1000.0,
-                vec![ResourceCost { resource_id: "steel".into(), amount: 150.0 }],
-                150.0,
-            )],
-            ..Sirenix::default()
-        };
-        let table = page_spacecraft(&locale, &sirenix);
-        let row = row_for(&table, "Ariane");
-        // The stray pattern `Lightbulb" engine.` (raw quote glued to a word)
-        // must not appear anywhere — neither in a visible cell nor in a title
-        // attribute.  An HTML close like `engine.">` is fine because the
-        // attribute-closing quote is followed by `>`; a leaked stray quote
-        // followed by ` ` (a space-then-word) is the bug.
+        let page = page_contracts(&locale, &sirenix);
         assert!(
-            !row.contains("Lightbulb\" "),
-            "Ariane row leaks stray mid-word quote: {row}"
+            !page.contains("moonlandingMultiModuleDeliverTest"),
+            "raw _test id leaked into prereq column:\n{page}"
         );
-        assert!(
-            !row.contains("engine.\"|") && !row.contains("engine.\" "),
-            "Ariane row leaks stray trailing quote: {row}"
-        );
-    }
-
-    #[test]
-    fn launch_vehicle_row_renders_fuel_load_and_exhaust_v() {
-        let locale = locale_with_launch_vehicles(vec![(
-            "id_Rocket_RocketType1",
-            "Sparrow",
-            "Cheap, simple, single use small Launch Vehicle.",
-        )]);
-        let sirenix = Sirenix {
-            launch_vehicles: vec![lv_stat("id_Rocket_RocketType1", 10.0, 10000.0, 4.4)],
-            ..Sirenix::default()
-        };
-        let table = page_launch_vehicles(&locale, &sirenix);
-        let row = row_for(&table, "Sparrow");
-        // Fuel load should appear (10000 tonnes → "10k" via fmt_abbrev).
-        assert!(
-            row.contains(" 10k "),
-            "Sparrow row missing fuel load: {row}"
-        );
-        // Exhaust velocity 4.4 km/s should appear as "4.4".
-        assert!(
-            row.contains(" 4.4 "),
-            "Sparrow row missing exhaust velocity: {row}"
-        );
-    }
-
-    #[test]
-    fn launch_vehicle_row_with_empty_description_has_placeholder() {
-        // Albatross locale entry has description="" — table shouldn't render an
-        // empty descriptor cell or otherwise leave the row visually broken.
-        let locale = locale_with_launch_vehicles(vec![("lv_chem_seadragon", "Albatross", "")]);
-        let sirenix = Sirenix {
-            launch_vehicles: vec![lv_stat("lv_chem_seadragon", 1800.0, 10000.0, 4.4)],
-            ..Sirenix::default()
-        };
-        let table = page_launch_vehicles(&locale, &sirenix);
-        let row = row_for(&table, "Albatross");
-        // No empty trailing description cell (the old bug rendered "| Albatross | ... |  |").
-        assert!(
-            !row.ends_with(" |  |"),
-            "Albatross row has a blank trailing description cell: {row}"
-    fn release_station_description_substitutes_resource_name() {
-        // The locale string is literally "Releases {0} to the surface" — a
-        // C#-style format slot.  The wiki must substitute the released resource
-        // name, not emit the raw slot.
-        let locale = facility_page_locale(
-            vec![facility_locale_entry(
-                "carbon_deposition",
-                "Carbon Release Station",
-                "Releases {0} to the surface",
-            )],
-            vec![ResourceEntry {
-                id: "volatile".into(),
-                name: "Carbon".into(),
-            }],
-        );
-        let sirenix = facility_page_sirenix(vec![facility_stat(
-            "build_carbon_deposition",
-            "Surface",
-            "Mining",
-        )]);
-        let page = page_facilities(&locale, &sirenix);
-        assert!(
-            !page.contains("{0}"),
-            "rendered page must not contain the raw format slot\n--- page ---\n{page}"
-        );
-        assert!(
-            page.contains("Releases Carbon to the surface"),
-            "released-resource name should be substituted into the description\n--- page ---\n{page}"
-        );
-    }
-
-    #[test]
-    fn large_tier_facility_gets_distinct_display_name() {
-        // `carbonmine` and `carbonmine_big` share the same locale name
-        // ("CARBON MINE").  Two rows with identical names look like a rendering
-        // bug to a reader.  The "big" tier should carry a tier marker so each
-        // row is uniquely identifiable.
-        let locale = facility_page_locale(
-            vec![
-                facility_locale_entry("carbonmine", "CARBON MINE", "Extracts carbon."),
-                facility_locale_entry("carbonmine_big", "CARBON MINE", "Extracts carbon."),
-            ],
-            vec![],
-        );
-        let sirenix = facility_page_sirenix(vec![
-            facility_stat("build_carbonmine", "Surface", "Mining"),
-            facility_stat("build_carbonmine_big", "Surface", "Mining"),
-        ]);
-        let page = page_facilities(&locale, &sirenix);
-        let small_row = page
+        let row = page
             .lines()
-            .find(|l| l.contains("id=\"facility-carbonmine\""))
-            .expect("small variant row present");
-        let big_row = page
-            .lines()
-            .find(|l| l.contains("id=\"facility-carbonmine-big\""))
-            .expect("big variant row present");
-        let extract_name = |row: &str| -> String {
-            let start = row.find("**").expect("opening **") + 2;
-            let rest = &row[start..];
-            let end = rest.find("**").expect("closing **");
-            rest[..end].to_string()
-        };
-        let small_name = extract_name(small_row);
-        let big_name = extract_name(big_row);
-        assert_ne!(
-            small_name, big_name,
-            "small and large tier should not share the same display name (both = {small_name:?})"
-        );
+            .find(|l| l.contains("Downstream Contract"))
+            .expect("Downstream Contract row present");
         assert!(
-            big_name.contains("Large") || big_name.contains("Big") || big_name.contains("II"),
-            "large-tier name should carry a tier marker; got {big_name:?}"
+            !row.contains("[](#"),
+            "empty-name prereq link leaked: {row}"
+        );
+    }
+
+    #[test]
+    fn premise_truncation_does_not_end_mid_quoted_string() {
+        let locale = contracts_fixture_locale();
+        let sirenix = Sirenix {
+            contracts: vec![make_contract("contract_mars_terraform_water", vec![], vec![])],
+            ..Default::default()
+        };
+        let page = page_contracts(&locale, &sirenix);
+        assert!(
+            !page.contains("Red Planet\" fr"),
+            "premise truncates mid-word after stray closing quote:\n{page}"
+        );
+        let row = page
+            .lines()
+            .find(|l| l.contains("Blue Mars"))
+            .expect("Blue Mars row present");
+        let quote_count = row.chars().filter(|c| *c == '"').count();
+        assert_eq!(
+            quote_count % 2,
+            0,
+            "row has unbalanced quotes: {row}"
+        );
+    }
+
+    #[test]
+    fn possession_with_no_target_renders_spacecraft_label() {
+        let locale = contracts_fixture_locale();
+        let sirenix = Sirenix {
+            contracts: vec![make_contract(
+                "contract_general_fleet",
+                vec![obj("Possession", 10.0, None)],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let page = page_contracts(&locale, &sirenix);
+        let row = page
+            .lines()
+            .find(|l| l.contains("Fleet Expansion"))
+            .expect("Fleet Expansion row present");
+        assert!(
+            row.contains("Spacecraft"),
+            "Possess-without-target should label as Spacecraft: {row}"
+        );
+    }
+
+    #[test]
+    fn deliver_module_target_renders_friendly_label() {
+        let locale = contracts_fixture_locale();
+        let sirenix = Sirenix {
+            contracts: vec![make_contract(
+                "contract_tutorial_moonlanding",
+                vec![obj("Deliver", 1.0, Some("module_crew_compartment"))],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let page = page_contracts(&locale, &sirenix);
+        assert!(
+            page.contains("Crew Compartment"),
+            "module target should render Title Case:\n{page}"
+        );
+        let row = page
+            .lines()
+            .find(|l| l.contains("Lunar Landing"))
+            .expect("row present");
+        assert!(
+            !row.contains("× crew compartment"),
+            "raw lowercased module target leaked: {row}"
         );
     }
 }
