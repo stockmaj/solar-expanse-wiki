@@ -1339,11 +1339,14 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
                 reward_bits.join("<br>")
             };
 
-            let flags = if c.is_final { "Final" } else { "" };
+            let display = if c.is_final {
+                format!("**{}** *(final)*", escape_cell(display))
+            } else {
+                format!("**{}**", escape_cell(display))
+            };
 
             vec![
-                format!("**{}**", escape_cell(display)),
-                flags.into(),
+                display,
                 requirements,
                 rewards,
                 escape_cell(&premise),
@@ -1351,7 +1354,7 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
         })
         .collect();
     let table = md_table(
-        &["Contract", "Flag", "Requirements", "Rewards", "Premise"],
+        &["Contract", "Requirements", "Rewards", "Premise"],
         &rows,
     );
     format!(
@@ -1364,7 +1367,7 @@ the next link in a chain (Mars Phase 1 → Mars Phase 2 → …), a new spacecra
 or a new launch vehicle.\n\n\
 {table}\n\
 ## Reading the table\n\n\
-- **Flag**: *Final* marks the contract that ends a campaign.\n\
+- A contract marked **(final)** ends a campaign chain.\n\
 - **Requirements**: the objectives you have to complete to claim the payout. Body-specific objectives (\"deliver 100 t to Mars\") list the *what* but not the destination — the premise text describes the target.\n\
 - **Rewards**: cash, resources, facility / spacecraft / launch-vehicle unlocks, and the next contract in the chain.\n\
 - **Premise**: the in-game flavor text introducing the contract.\n"

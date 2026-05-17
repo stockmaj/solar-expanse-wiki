@@ -343,7 +343,14 @@ fn main() -> Result<()> {
         total_keys: keys.len(),
         celestial_bodies: celestial_bodies(&keys),
         spacecraft: pair_name_description(&keys, "spacecraft_"),
-        launch_vehicles: pair_name_description(&keys, "lv_"),
+        launch_vehicles: {
+            // Two prefixes carry launch-vehicle locale entries:
+            //   `lv_*`             — late-game / specialty rockets (Albatross, Pelican, Magpie, Condor, Teratorn)
+            //   `id_Rocket_*`      — core campaign rockets (Sparrow, Falcon, Eagle, …)
+            let mut out = pair_name_description(&keys, "lv_");
+            out.extend(pair_name_description(&keys, "id_Rocket_"));
+            out
+        },
         cargo: pair_name_description(&keys, "cargo_"),
         research: research(&keys),
         corporations: corporations(&keys),

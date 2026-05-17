@@ -174,11 +174,14 @@ fn parse_spacecraft(v: &Value) -> Option<Spacecraft> {
 
 fn parse_launch_vehicle(v: &Value) -> Option<LaunchVehicle> {
     let id = v.get("id")?.as_str()?.to_string();
-    if !id.starts_with("lv_") {
+    // The game has two LV id namespaces: `lv_*` (specialty rockets) and
+    // `id_Rocket_*` (the core campaign rockets — Sparrow, Falcon, Eagle, etc.).
+    let is_lv = id.starts_with("lv_") || id.starts_with("id_Rocket_");
+    if !is_lv {
         return None;
     }
     let lower = id.to_ascii_lowercase();
-    if lower.contains("cheat") || lower.contains("test") || lower.contains("fake") {
+    if lower.contains("cheat") || lower.contains("test") || lower.contains("fake") || lower.contains("forcyclemision") {
         return None;
     }
     let f = |path: &[&str]| -> f64 { lookup_f64(v, path).unwrap_or(0.0) };
