@@ -264,7 +264,50 @@
     bindPlaced(root, ctx);
     bindReset(root, ctx);
     bindSave(root, ctx);
+    setupTooltips(root);
     rerenderAll(root, ctx);
+  }
+
+  function setupTooltips(root) {
+    if (root._tipBound) return;
+    root._tipBound = true;
+
+    var tip = document.createElement('div');
+    tip.className = 'calc-tooltip';
+    document.body.appendChild(tip);
+
+    var showTimer = null;
+    var currentTarget = null;
+
+    function place(target) {
+      var rect = target.getBoundingClientRect();
+      tip.style.left = (rect.left + rect.width / 2) + 'px';
+      tip.style.top = rect.top + 'px';
+    }
+
+    root.addEventListener('mouseover', function (ev) {
+      var t = ev.target.closest('[data-tip]');
+      if (!t || !root.contains(t) || t === currentTarget) return;
+      currentTarget = t;
+      clearTimeout(showTimer);
+      showTimer = setTimeout(function () {
+        tip.textContent = t.getAttribute('data-tip') || '';
+        place(t);
+        tip.classList.add('calc-tooltip-show');
+      }, 100);
+    });
+    root.addEventListener('mouseout', function (ev) {
+      var t = ev.target.closest('[data-tip]');
+      if (!t) return;
+      var to = ev.relatedTarget;
+      if (to && t.contains(to)) return;
+      currentTarget = null;
+      clearTimeout(showTimer);
+      tip.classList.remove('calc-tooltip-show');
+    });
+    window.addEventListener('scroll', function () {
+      if (currentTarget) tip.classList.remove('calc-tooltip-show');
+    }, true);
   }
 
   function indexBy(arr, key) {
@@ -351,6 +394,10 @@
     });
     catOrder.sort(function (a, b) { return a.localeCompare(b); });
 
+    var checked = Object.keys(ctx.state.checked)
+      .map(function (id) { return ctx.redById[id]; })
+      .filter(Boolean);
+
     var html = '';
     var anyShown = false;
     catOrder.forEach(function (cat) {
@@ -364,8 +411,18 @@
         '<div class="calc-facility-cat-name">' + escapeHtml(cat) + '</div>' +
         '<ul>' +
         visible.map(function (f) {
-          return '<li class="calc-facility-item" draggable="true" data-id="' + escapeHtml(f.id) + '" data-tip="Click or drag to add">' +
-            escapeHtml(f.name) +
+          var reduced = applyReductions(f, checked);
+          var pipsHtml = (f.build_cost || []).map(function (bc) {
+            var amount = reduced[bc.resource] || 0;
+            var resName = (ctx.resById[bc.resource] && ctx.resById[bc.resource].name) || bc.resource;
+            return '<span class="calc-pip" data-tip="' + escapeHtml(resName + ': ' + amount.toLocaleString()) + '">' +
+              '<span class="calc-pip-num">' + fmtAbbrev(amount) + '</span>' +
+              '<img class="calc-pip-icon" src="' + escapeHtml(iconUrl(bc.resource)) + '" alt="">' +
+              '</span>';
+          }).join('');
+          return '<li class="calc-facility-item" draggable="true" data-id="' + escapeHtml(f.id) + '">' +
+            '<span class="calc-facility-name">' + escapeHtml(f.name) + '</span>' +
+            '<span class="calc-facility-cost">' + pipsHtml + '</span>' +
             '</li>';
         }).join('') +
         '</ul></div>';
@@ -432,7 +489,7 @@
     return '<ul class="calc-placed">' + rows.map(function (r) {
       var reduced = applyReductions(r.fac, checked);
       var pipsHtml = (r.fac.build_cost || []).map(function (bc) {
-        var amount = reduced[bc.resource] || 0;
+        var amount = (reduced[bc.resource] || 0) * r.count;
         var resName = (ctx.resById[bc.resource] && ctx.resById[bc.resource].name) || bc.resource;
         return '<span class="calc-pip" data-tip="' + escapeHtml(resName + ': ' + amount.toLocaleString()) + '">' +
           '<span class="calc-pip-num">' + fmtAbbrev(amount) + '</span>' +

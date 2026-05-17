@@ -347,6 +347,29 @@ main hr {
   margin-top: 4px;
 }
 
+/* ---------- Corporation comparison split layout (/corporations/) ----------
+ *
+ * The comparison view renders as two side-by-side tables that share the
+ * per-corp <thead> row:
+ *   - Left: Starting cash + pre-built fleet (3 short rows).
+ *   - Right: Completed research, grouped by tech-tree category (long).
+ *
+ * The left table sizes to its content (flex 0 0 auto) so the small fleet
+ * block doesn't stretch; the right table fills the remaining width.
+ * On narrow viewports the wrapper stacks vertically so each table keeps
+ * its full width and the research matrix stays readable.
+ */
+.corp-comparison-split {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+.corp-comparison-split > table { flex: 0 0 auto; }
+.corp-comparison-right { flex: 1 1 auto; }
+@media (max-width: 900px) {
+  .corp-comparison-split { flex-direction: column; }
+}
+
 /* ---------- Colony construction calculator (/calculator/) ---------- */
 
 #calc-root .calc-bonuses {
@@ -512,6 +535,21 @@ main hr {
   border-radius: 3px;
   cursor: grab;
   font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+#calc-root .calc-facility-name {
+  flex: 1;
+  min-width: 0;
+}
+#calc-root .calc-facility-cost {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  color: var(--fg-muted);
+  font-size: 11px;
 }
 #calc-root .calc-facility-item:hover {
   background: rgba(255,179,71,0.08);
@@ -572,16 +610,12 @@ main hr {
   margin-right: 6px;
 }
 
-/* Fast custom tooltips — 100ms vs the browser's ~500ms for native title=. */
-#calc-root [data-tip] {
-  position: relative;
-}
-#calc-root [data-tip]::after {
-  content: attr(data-tip);
-  position: absolute;
-  bottom: calc(100% + 4px);
-  left: 50%;
-  transform: translateX(-50%);
+/* Fast custom tooltips — single floating element on <body> (positioned by JS).
+   Lives outside the calc panes' overflow:auto so it isn't clipped. 100ms
+   delay vs the browser's ~500ms for native title=. */
+.calc-tooltip {
+  position: fixed;
+  transform: translate(-50%, calc(-100% - 4px));
   background: var(--code-bg);
   color: var(--fg);
   border: 1px solid var(--rule);
@@ -592,10 +626,9 @@ main hr {
   white-space: nowrap;
   pointer-events: none;
   opacity: 0;
-  z-index: 10;
-  transition: opacity 0s 0.1s;
+  z-index: 1000;
 }
-#calc-root [data-tip]:hover::after {
+.calc-tooltip-show {
   opacity: 1;
 }
 #calc-root .calc-placed-row:last-child {
