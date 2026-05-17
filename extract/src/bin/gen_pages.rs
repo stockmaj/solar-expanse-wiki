@@ -1553,10 +1553,7 @@ The five playable starting factions in Solar Expanse. Each scenario\n\
 (Early Exploration / The Expansion / Colonization Era / Race Beyond)\n\
 ships a different pre-built save where every corporation starts with\n\
 its own completed research, funding, and fleet. Difficulty further\n\
-scales starting money and ongoing costs.\n\n\
-_Prelude is a procedural epoch with no pre-built save and is not\n\
-listed in the comparison table; it still appears in the epoch\n\
-timeline below._\n\n",
+scales starting money and ongoing costs.\n\n",
     );
 
     // ── Epoch / Timeline ──────────────────────────────────────────────────
@@ -1565,20 +1562,30 @@ timeline below._\n\n",
     // the corp roster the player may choose at that epoch. Corp lists are
     // alphabetised so the column reads consistently across rows.
     if !sirenix.epochs.is_empty() {
+        // Only render epochs that actually ship for Sol-system play — the
+        // ones routed via PlanetarySystem_Realistic.mapEpochToToStartData
+        // (= the same epochs that appear in scenario_starts).  Prelude is
+        // defined in the dump but only mapped under PlanetarySystem_JSON
+        // (a dev system), so the game's New Game menu doesn't show it.
+        let playable_epochs: std::collections::BTreeSet<&str> = sirenix
+            .scenario_starts
+            .iter()
+            .map(|s| s.scenario_id.as_str())
+            .collect();
         out.push_str("## Epoch / Timeline\n\n");
         out.push_str(
-            "Solar Expanse ships five start epochs, each with its own roster of\n\
-playable corporations. Four of them — Early Exploration, The Expansion,\n\
-Colonization Era, and Race Beyond — ship pre-built saves that drive the\n\
-comparison table above; Prelude starts procedurally.\n\n\
-*The shipped data files carry start-year values and lock flags that\n\
-don't match what the game UI currently shows (start years drift with\n\
-patches, and lock states change as you progress), so they're not in\n\
-this table. The names and corp rosters below are stable.*\n\n",
+            "Solar Expanse's New Game menu offers four start epochs in Sol-system play —\n\
+Early Exploration, The Expansion, Colonization Era, and Race Beyond — each\n\
+with its own roster of playable corporations, all driving the comparison\n\
+table above.\n\n\
+*The shipped data files carry start-year values that don't match what the\n\
+game UI currently shows (start years drift with patches), so they're not\n\
+in this table. The names and corp rosters below are stable.*\n\n",
         );
         let epoch_rows: Vec<Vec<String>> = sirenix
             .epochs
             .iter()
+            .filter(|e| playable_epochs.contains(e.id.as_str()))
             .map(|e| {
                 let name = epoch_display_name(&e.id);
                 let year = extract_epoch_year(&e.start_date_string)
@@ -4073,20 +4080,32 @@ mod tests {
                     possible_player_companies: vec!["NASA".into()],
                 },
             ],
+            // scenario_starts drives the "playable in Sol-system" filter for
+            // the epoch table — only epoch ids present here are rendered.
+            scenario_starts: vec![
+                ScenarioStartStat { scenario_id: "StartGameEpoch_EarlyExploration".into(), corp_starts: vec![] },
+                ScenarioStartStat { scenario_id: "StartGameEpoch_TheExpansion".into(), corp_starts: vec![] },
+                ScenarioStartStat { scenario_id: "StartGameEpoch_Colonization".into(), corp_starts: vec![] },
+                ScenarioStartStat { scenario_id: "StartGameEpoch_RaceBeyond".into(), corp_starts: vec![] },
+            ],
             ..Default::default()
         };
         let page = page_corporations(&locale, &sirenix);
-        // A timeline section exists with each epoch's display name.
-        assert!(page.contains("Prelude"), "missing Prelude:\n{page}");
+        // Timeline lists the four Sol-system epochs; Prelude is filtered out
+        // because it isn't mapped in PlanetarySystem_Realistic (not playable
+        // from the New Game menu).
+        assert!(!page.contains("Prelude"), "Prelude should be filtered out — not playable in Sol-system\n{page}");
         assert!(page.contains("Early Exploration"), "missing Early Exploration:\n{page}");
         assert!(page.contains("Colonization Era"), "missing Colonization Era:\n{page}");
         assert!(page.contains("The Expansion"), "missing The Expansion:\n{page}");
         assert!(page.contains("Race Beyond"), "missing Race Beyond:\n{page}");
-        // Internal id must NOT leak into player-facing output.
-        assert!(
-            !page.contains("StartGameEpoch_"),
-            "internal epoch id leaked into page:\n{page}"
-        );
+        // Internal id may appear in `value="..."` attributes (option tags
+        // need a stable key) but must NOT leak into any visible cell.
+        for line in page.lines() {
+            if line.starts_with("| ") && line.contains("StartGameEpoch_") {
+                panic!("internal epoch id leaked into a table cell: {line}");
+            }
+        }
         // Year column was dropped — shipped startDateString doesn't match
         // the years displayed in the game UI, so we don't surface it.
         assert!(
