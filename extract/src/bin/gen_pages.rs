@@ -1095,6 +1095,20 @@ fn page_spacecraft(locale: &Locale, sirenix: &Sirenix) -> String {
         .map(|c| (c.id.as_str(), c))
         .collect();
 
+    // Reverse map: spacecraft_id → research_id of the node that unlocks it.
+    // Built from research entries with `action == "UnlockSpacecraftType"`.
+    let research_unlocking_sc: BTreeMap<&str, &str> = sirenix
+        .research
+        .iter()
+        .filter(|r| r.action == "UnlockSpacecraftType")
+        .filter_map(|r| r.unlock_target.as_deref().map(|t| (t, r.id.as_str())))
+        .collect();
+    let research_display_name: BTreeMap<&str, &str> = locale
+        .research
+        .iter()
+        .map(|r| (r.id.as_str(), r.name.as_str()))
+        .collect();
+
     // Keep only entries that have a player-facing locale name AND a populated stat row.
     let mut entries: Vec<&SpacecraftStat> = sirenix
         .spacecraft
@@ -1212,9 +1226,25 @@ lift them to space.\n\n",
         } else {
             fmt_amount(s.cargo_capacity)
         };
+        // Append a research-unlock link below the spacecraft name when the
+        // tech tree gates it.  Same cell to avoid widening the table.
+        let research_suffix = research_unlocking_sc
+            .get(s.id.as_str())
+            .map(|rid| {
+                let label = research_display_name
+                    .get(rid)
+                    .copied()
+                    .filter(|n| !n.is_empty())
+                    .unwrap_or(rid);
+                format!(
+                    "<br><sub>Unlock: {}</sub>",
+                    link_cross_page("research", "research", rid, &escape_cell(label))
+                )
+            })
+            .unwrap_or_default();
         rows.push(vec![
             format!(
-                "{anchor}**{name}**",
+                "{anchor}**{name}**{research_suffix}",
                 anchor = anchor_tag("spacecraft", &s.id),
                 name = escape_cell(display_name)
             ),
@@ -1247,7 +1277,7 @@ lift them to space.\n\n",
 - **Engine thrust** is the force the spacecraft's default engine produces, in newtons (or kilo-/mega-newtons for readability). More thrust = shorter burns, higher acceleration, but the spacecraft can only carry so much fuel.\n\
 - **Exhaust V** is the engine's effective exhaust velocity in km/s, equivalent to specific impulse (multiply by ~102 to get ISP in seconds). Higher exhaust V = more Δv per kilogram of fuel = longer reach, but typically less thrust. Chemical engines sit around 3–5 km/s; nuclear thermal 8–15; fusion and ion drives 20+.\n\
 - **Build cost** is the resource cost of building the spacecraft itself (engine and tank modules are paid for separately when configured).\n\
-- **Built at** is where the craft is assembled: *Orbit* means it's built in an orbital shipyard and never lands; *Surface* means it's built on a planet's surface (some surface craft are full SSTOs, some are upper stages or ride a Launch Vehicle — see the description column).\n\n\
+- **Built at** is where the craft is assembled: *Orbit* means it's built in an orbital shipyard and never lands; *Surface* means it's built on a planet's surface (some surface craft are full SSTOs, some are upper stages or ride a [launch vehicle](../launch-vehicles/) — the player picks which LV to pair with the craft at flight-planning time, so no fixed mapping is listed here).\n\n\
 ## See also\n\n\
 - [Launch Vehicles](../launch-vehicles/) — surface-to-orbit lifters\n\
 - [Research](../research/) — propulsion tech tree\n",
@@ -1587,21 +1617,23 @@ fn page_resources(locale: &Locale, sirenix: &Sirenix) -> String {
         .collect();
 
     // For each resource, walk facility tooltips to find any that mention the resource by name.
-    let producers_for = |resource_display: &str| -> Vec<String> {
+    // Returns (facility_id, pretty_display) pairs so the caller can emit
+    // cross-page links into the facilities page.
+    let producers_for = |resource_display: &str| -> Vec<(String, String)> {
         let lower = resource_display.to_lowercase();
         // Avoid matching very short or ambiguous resource names ("ice", "gas") — substring noise.
         if lower.len() < 4 {
             return Vec::new();
         }
-        let mut hits: Vec<String> = Vec::new();
+        let mut hits: Vec<(String, String)> = Vec::new();
         for (fid, fname) in &fac_name {
             let desc = fac_desc.get(fid).copied().unwrap_or("");
             if desc.to_lowercase().contains(&lower) {
-                hits.push(smart_title_case(fname));
+                hits.push((fid.to_string(), smart_title_case(fname)));
             }
         }
-        hits.sort();
-        hits.dedup();
+        hits.sort_by(|a, b| a.1.cmp(&b.1));
+        hits.dedup_by(|a, b| a.1 == b.1);
         hits
     };
 
@@ -1634,14 +1666,22 @@ fn page_resources(locale: &Locale, sirenix: &Sirenix) -> String {
             let prod_cell = if producers.is_empty() {
                 "—".to_string()
             } else {
-                producers.join("<br>")
+                producers
+                    .iter()
+                    .map(|(fid, name)| {
+                        link_cross_page("facilities", "facility", fid, &escape_cell(name))
+                    })
+                    .collect::<Vec<_>>()
+                    .join("<br>")
             };
             let desc = res_desc
                 .get(r.id.as_str())
                 .map(|s| s.as_str())
                 .unwrap_or("");
+            // Inline anchor so other pages (facilities, research) can deep-link to this row.
+            let anchor = anchor_tag("resource", &r.id);
             vec![
-                format!("**{}**", escape_cell(display)),
+                format!("{anchor}**{}**", escape_cell(display)),
                 r.resource_type.clone(),
                 price,
                 prod_cell,
@@ -2140,8 +2180,9 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
             }
             for u in &c.unlock_rewards {
                 let pretty = contract_name.get(u.as_str()).copied().unwrap_or(u.as_str());
-                if pretty != *u {
-                    reward_bits.push(format!("Next: {}", pretty));
+                if pretty != *u && !pretty.is_empty() && !u.contains("_test") {
+                    let link = link_same_page("contract", u, &escape_cell(pretty));
+                    reward_bits.push(format!("Next: {}", link));
                 }
             }
             let rewards = if reward_bits.is_empty() {
@@ -2464,6 +2505,7 @@ fn fmt_work_hours(h: f64) -> String {
 fn fmt_research_unlock(
     r: &ResearchStat,
     facility_name: &BTreeMap<&str, &str>,
+    facility_anchored: &std::collections::BTreeSet<&str>,
     spacecraft_name: &BTreeMap<&str, &str>,
     lv_name: &BTreeMap<&str, &str>,
 ) -> String {
@@ -2472,9 +2514,31 @@ fn fmt_research_unlock(
             let target = r.unlock_target.as_deref().unwrap_or("");
             // Facility unlock targets are full ids like "build_outpost"; locale ids are bare ("outpost").
             let key = target.strip_prefix("build_").unwrap_or(target);
-            let pretty = smart_title_case(facility_name.get(key).copied().unwrap_or(key));
-            let link = link_cross_page("facilities", "facility", key, &format!("**{pretty}**"));
-            format!("Builds {link}")
+            // Some research nodes carry `UnlockFacility` actions whose target
+            // is a spacecraft module (e.g. `module_crew_compartment`,
+            // `asteroid_engine_module`) — the facilities page filters those
+            // out, so the would-be anchor `facility-…` doesn't exist.  Only
+            // emit a cross-page link when an anchor is actually rendered.
+            let resolved_name = facility_name.get(key).copied();
+            let pretty = match resolved_name {
+                Some(name) if !name.is_empty() => smart_title_case(name),
+                _ => {
+                    // No locale name; humanize the raw id.
+                    if key.contains('_')
+                        || key.chars().all(|c| c.is_lowercase() || c == '_' || c.is_ascii_digit())
+                    {
+                        title_case_words(&key.replace('_', " "))
+                    } else {
+                        smart_title_case(key)
+                    }
+                }
+            };
+            if facility_anchored.contains(key) {
+                let link = link_cross_page("facilities", "facility", key, &format!("**{pretty}**"));
+                format!("Builds {link}")
+            } else {
+                format!("Builds **{pretty}**")
+            }
         }
         "UnlockSpacecraftType" => {
             let target = r.unlock_target.as_deref().unwrap_or("");
@@ -2547,6 +2611,25 @@ fn page_research(locale: &Locale, sirenix: &Sirenix) -> String {
         .map(|s| (s.id.as_str(), s.name.as_str()))
         .collect();
 
+    // Mirror page_facilities' filter so we only emit cross-page links when an
+    // anchor will actually be rendered there.  Orbital descriptors (e.g. crew
+    // / engine modules) and FacilitySegments are skipped by the facilities
+    // page, so linking them would 404.
+    let facility_anchored: std::collections::BTreeSet<&str> = sirenix
+        .facilities
+        .iter()
+        .filter(|f| !f.is_obsolete)
+        .filter(|f| f.facility_type != "FacilitySegment")
+        .filter(|f| f.descriptor != "Orbital")
+        .map(|f| f.id.strip_prefix("build_").unwrap_or(&f.id))
+        .filter(|id| {
+            locale
+                .facilities
+                .iter()
+                .any(|lf| lf.id == *id && !lf.name.is_empty())
+        })
+        .collect();
+
     // Every research node a player can interact with goes on the page.  `showInTree`
     // is the game's in-tree-header flag, not a "should-this-be-public" flag.
     let visible: Vec<&ResearchStat> = sirenix.research.iter().collect();
@@ -2607,7 +2690,7 @@ Physics, Biotech), each subdivided into focused sub-branches.\n\n",
                         name_cell,
                         fmt_work_hours(r.work_hours),
                         prereqs,
-                        fmt_research_unlock(r, &facility_name, &spacecraft_name, &lv_name),
+                        fmt_research_unlock(r, &facility_name, &facility_anchored, &spacecraft_name, &lv_name),
                         escape_cell(&desc_for(&r.id)),
                     ]
                 })
@@ -3120,6 +3203,223 @@ mod tests {
         assert!(
             !row.contains("× crew compartment"),
             "raw lowercased module target leaked: {row}"
+        );
+    }
+
+    // ---------- Navigation fixes: cross-page links wherever they apply ----------
+
+    fn nav_fixture_locale() -> Locale {
+        Locale {
+            celestial_bodies: vec![],
+            spacecraft: vec![
+                NameDesc { id: "spacecraft_chem_small".into(), name: "Iris".into(), description: "Small chemical craft.".into() },
+            ],
+            launch_vehicles: vec![],
+            research: vec![
+                ResearchEntry { id: "research_sc_iris".into(), category: "sc".into(), name: "Iris".into(), description: String::new() },
+                ResearchEntry { id: "research_lifesup_1".into(), category: "lifesup".into(), name: "Crewed Flight".into(), description: String::new() },
+            ],
+            corporations: vec![],
+            contracts: vec![
+                NameDesc {
+                    id: "contract_root".into(),
+                    name: "Root Contract".into(),
+                    description: "Root.".into(),
+                },
+                NameDesc {
+                    id: "contract_asteroid_mining".into(),
+                    name: "Asteroid Mining".into(),
+                    description: "Follow-up.".into(),
+                },
+            ],
+            resources: vec![
+                ResourceEntry { id: "energy".into(), name: "Energy".into() },
+                ResourceEntry { id: "energy_Description".into(), name: "The lifeblood of modern infrastructure.".into() },
+            ],
+            facilities: vec![
+                Facility {
+                    id: "geothermal".into(),
+                    name: "Geothermal Power".into(),
+                    description: "Produces Energy from underground heat.".into(),
+                },
+            ],
+            habitability_scales: BTreeMap::new(),
+            cargo: vec![],
+        }
+    }
+
+    fn make_sc_stat(id: &str, built_in_orbit: bool) -> SpacecraftStat {
+        SpacecraftStat {
+            id: id.into(),
+            engine_module: None,
+            engine_type: "chemical".into(),
+            mass: 1.0,
+            cargo_capacity: 2.0,
+            fuel_capacity: 20.0,
+            reusability: 0.0,
+            needs_launch_vehicle: false,
+            built_in_orbit,
+            can_be_built_by_player: true,
+            build_cost: vec![],
+            build_time_days: 30.0,
+            launch_cost: 1000.0,
+        }
+    }
+
+    fn make_research(id: &str, action: &str, target: Option<&str>) -> ResearchStat {
+        ResearchStat {
+            id: id.into(),
+            work_hours: 1_000_000.0,
+            branch: "Engineering".into(),
+            subbranch: "Spacecraft".into(),
+            prereqs: vec![],
+            action: action.into(),
+            unlock_target: target.map(|s| s.into()),
+            bonus_kind: None,
+            bonus_amount: 0.0,
+            bonus_components: vec![],
+            show_in_tree: false,
+            contract_unlocks: vec![],
+        }
+    }
+
+    fn make_resource_stat(id: &str, resource_type: &str) -> ResourceStat {
+        ResourceStat {
+            id: id.into(),
+            resource_type: resource_type.into(),
+            market_price_base: 11.5,
+            show_on_ui: true,
+            can_be_left_on_object: true,
+        }
+    }
+
+    #[test]
+    fn resources_page_links_producers_to_facility_anchors() {
+        // Energy is produced by Geothermal Power — the producers cell should
+        // render a markdown link to the facility's anchor on the facilities page.
+        let locale = nav_fixture_locale();
+        let sirenix = Sirenix {
+            resources: vec![make_resource_stat("energy", "Energy")],
+            ..Default::default()
+        };
+        let page = page_resources(&locale, &sirenix);
+        assert!(
+            page.contains("[Geothermal Power](../facilities/#facility-geothermal)"),
+            "producers cell should link facility name to facilities-page anchor:\n{page}"
+        );
+    }
+
+    #[test]
+    fn resources_page_emits_anchor_per_row() {
+        // Other pages (e.g. facilities) link back to resources; each row needs
+        // a stable inline anchor so those links land somewhere.
+        let locale = nav_fixture_locale();
+        let sirenix = Sirenix {
+            resources: vec![make_resource_stat("energy", "Energy")],
+            ..Default::default()
+        };
+        let page = page_resources(&locale, &sirenix);
+        assert!(
+            page.contains("<a id=\"resource-energy\"></a>"),
+            "resource row should carry an inline anchor tag:\n{page}"
+        );
+    }
+
+    #[test]
+    fn contracts_next_chain_renders_as_link() {
+        // "Next: <ContractName>" in the Rewards cell should be a markdown link
+        // to the follow-up contract's same-page anchor.
+        let locale = nav_fixture_locale();
+        let sirenix = Sirenix {
+            contracts: vec![
+                make_contract(
+                    "contract_root",
+                    vec![],
+                    vec!["contract_asteroid_mining".into()],
+                ),
+                make_contract("contract_asteroid_mining", vec![], vec![]),
+            ],
+            ..Default::default()
+        };
+        let page = page_contracts(&locale, &sirenix);
+        assert!(
+            page.contains("Next: [Asteroid Mining](#contract-contract-asteroid-mining)"),
+            "Rewards `Next:` should be a same-page link:\n{page}"
+        );
+    }
+
+    #[test]
+    fn spacecraft_page_links_to_research_unlock() {
+        // Spacecraft row should include a cross-page link to the research that
+        // unlocks the craft.  `research_sc_iris` unlocks `spacecraft_chem_small`.
+        let locale = nav_fixture_locale();
+        let sirenix = Sirenix {
+            spacecraft: vec![make_sc_stat("spacecraft_chem_small", false)],
+            research: vec![make_research("research_sc_iris", "UnlockSpacecraftType", Some("spacecraft_chem_small"))],
+            ..Default::default()
+        };
+        let page = page_spacecraft(&locale, &sirenix);
+        let row = page
+            .lines()
+            .find(|l| l.contains("Iris"))
+            .expect("Iris row present:\n");
+        assert!(
+            row.contains("../research/#research-research-sc-iris"),
+            "Iris row should link to its research-unlock anchor:\n{row}"
+        );
+    }
+
+    #[test]
+    fn contracts_next_chain_skips_test_followups() {
+        // A contract whose unlock_rewards reference a tutorial `_test` follow-up
+        // must not render a `Next:` link to it (the target row is filtered out,
+        // so the anchor never appears).  Regression for audit fix #2.
+        let locale = contracts_fixture_locale();
+        let sirenix = Sirenix {
+            contracts: vec![
+                make_contract(
+                    "contract_tutorial_moonlanding",
+                    vec![],
+                    vec!["contract_tutorial_moonlandingMultiModuleDeliverTest".into()],
+                ),
+            ],
+            ..Default::default()
+        };
+        let page = page_contracts(&locale, &sirenix);
+        assert!(
+            !page.contains("contract-contract-tutorial-moonlandingmultimoduledelivertest"),
+            "dead `Next:` link to a filtered _test contract leaked:\n{page}"
+        );
+        assert!(
+            !page.contains("moonlandingMultiModuleDeliverTest"),
+            "raw _test id rendered in Next column:\n{page}"
+        );
+    }
+
+    #[test]
+    fn research_unlockfacility_without_real_facility_does_not_emit_dead_link() {
+        // Some research nodes carry an `UnlockFacility` action whose target is
+        // actually a spacecraft module (no facility with that id exists in
+        // locale).  The page must not render a broken `facilities/#facility-…`
+        // link to it.
+        let locale = nav_fixture_locale();
+        let sirenix = Sirenix {
+            research: vec![make_research(
+                "research_lifesup_1",
+                "UnlockFacility",
+                Some("module_crew_compartment"),
+            )],
+            ..Default::default()
+        };
+        let page = page_research(&locale, &sirenix);
+        assert!(
+            !page.contains("facilities/#facility-module-crew-compartment"),
+            "page emitted dead `facilities/#facility-module-…` anchor:\n{page}"
+        );
+        // The label should still render — just not as a link.
+        assert!(
+            page.contains("Crew Compartment") || page.contains("module_crew_compartment"),
+            "module target label missing entirely:\n{page}"
         );
     }
 }
