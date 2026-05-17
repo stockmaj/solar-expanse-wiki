@@ -1630,12 +1630,40 @@ this table. The names and corp rosters below are stable.*\n\n",
     // ── Build the JSON blob that powers the interactive comparison table. ──
     // Schema:
     //   { scenarios: [{ id, name, corps: [{ name, starting_money,
-    //                                        lv_count, sc_count, research: [str…] }] }],
+    //                                        lv_count, sc_count,
+    //                                        research: [{name, category}…] }] }],
     //     difficulties: [{ name, money_multiplier }] }
+    //
+    // Each research entry is an object so the JS renderer can group rows in
+    // the comparison table by sub-branch (the player-facing tech-tree branch
+    // labels). `category` is the humanized `researchSubType.name`
+    // (`SubBranch_` already stripped on the parser side); items with no
+    // matching ResearchStat in the dump fall back to "Other".
     //
     // Corp order inside each scenario matches the locale order
     // (SoleX, NASA, ESA, CNSA, Roscosmos) so the comparison columns line
     // up with the in-game customization screen.
+    // Map research id → humanized sub-branch label.  The Sirenix dump
+    // stores camelCase sub-branch ids (`LaunchVehicle`, `LifeSupport`,
+    // `Chemical`); the tech-tree UI shows the same ids with spaces between
+    // words and every word title-cased — so `LaunchVehicle` → `Launch
+    // Vehicle`, not `Launch vehicle`.  Single-word ids (`Chemical`,
+    // `Spacecraft`) pass through unchanged.
+    let humanize_subbranch = |sb: &str| -> String {
+        let mut out = String::with_capacity(sb.len() + 4);
+        for (i, c) in sb.char_indices() {
+            if i > 0 && c.is_uppercase() {
+                out.push(' ');
+            }
+            out.push(c);
+        }
+        out
+    };
+    let research_subbranch: BTreeMap<&str, &str> = sirenix
+        .research
+        .iter()
+        .map(|r| (r.id.as_str(), r.subbranch.as_str()))
+        .collect();
     let mut scenarios_json: Vec<serde_json::Value> = Vec::new();
     for s in &sirenix.scenario_starts {
         let mut corps_json: Vec<serde_json::Value> = Vec::new();
@@ -1648,7 +1676,10 @@ this table. The names and corp rosters below are stable.*\n\n",
                 Some(cs) => cs,
                 None => continue,
             };
-            let mut research_names: Vec<String> = cs
+            // Build (name, category) tuples, dedup by name, then sort by
+            // category-then-name so the JS layer can group adjacent rows
+            // without re-sorting.
+            let mut entries: Vec<(String, String)> = cs
                 .completed_research
                 .iter()
                 .filter_map(|rid| {
@@ -1661,18 +1692,31 @@ this table. The names and corp rosters below are stable.*\n\n",
                     let nm = research_name
                         .get(rid.as_str())
                         .copied()
-                        .unwrap_or(rid.as_str());
-                    Some(nm.to_string())
+                        .unwrap_or(rid.as_str())
+                        .to_string();
+                    let cat = research_subbranch
+                        .get(rid.as_str())
+                        .map(|sb| humanize_subbranch(sb))
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or_else(|| "Other".to_string());
+                    Some((nm, cat))
                 })
                 .collect();
-            research_names.sort();
-            research_names.dedup();
+            entries.sort_by(|a, b| a.1.cmp(&b.1).then(a.0.cmp(&b.0)));
+            entries.dedup_by(|a, b| a.0 == b.0);
+            let research_json: Vec<serde_json::Value> = entries
+                .into_iter()
+                .map(|(name, category)| serde_json::json!({
+                    "name": name,
+                    "category": category,
+                }))
+                .collect();
             corps_json.push(serde_json::json!({
                 "name": c.name,
                 "starting_money": cs.starting_money,
                 "lv_count": cs.starting_launch_vehicles,
                 "sc_count": cs.starting_spacecraft,
-                "research": research_names,
+                "research": research_json,
             }));
         }
         scenarios_json.push(serde_json::json!({
@@ -4290,6 +4334,131 @@ mod tests {
         );
         assert_eq!(early_n, 1, "Early Exploration SoleX should have 1 research");
         assert_eq!(expansion_n, 4, "The Expansion SoleX should have 4 research");
+    }
+
+    #[test]
+    fn corporations_corp_data_research_entries_carry_category_objects() {
+        // Each completed-research entry in the CORP_DATA blob must be a
+        // `{name, category}` object — not a bare string — so the JS renderer
+        // can group rows by sub-branch in the comparison table.
+        let locale = corp_compare_locale();
+        // Two pieces of research with distinct sub-branches. The locale alone
+        // can't carry the sub-branch (it lives on the ResearchStat in the
+        // Sirenix dump), so we set them up here.
+        let mut chem = make_research("research_chem_main1", "UnlockBonus", None);
+        chem.subbranch = "Chemical".into();
+        let mut iris = make_research("research_sc_iris", "UnlockSpacecraftType", Some("spacecraft_chem_small"));
+        iris.subbranch = "Spacecraft".into();
+        let sirenix = Sirenix {
+            research: vec![chem, iris],
+            scenario_starts: vec![ScenarioStartStat {
+                scenario_id: "StartGameEpoch_EarlyExploration".into(),
+                corp_starts: vec![CorpStartStat {
+                    company_id: "Solex".into(),
+                    starting_money: 5_000_000.0,
+                    completed_research: vec![
+                        "research_chem_main1".into(),
+                        "research_sc_iris".into(),
+                    ],
+                    starting_launch_vehicles: 0,
+                    starting_spacecraft: 0,
+                }],
+            }],
+            ..Default::default()
+        };
+        let page = page_corporations(&locale, &sirenix);
+        // Parse the CORP_DATA blob.
+        let blob_pos = page.find("window.CORP_DATA = ").expect("CORP_DATA blob present");
+        let blob_tail = &page[blob_pos + "window.CORP_DATA = ".len()..];
+        let blob_end = blob_tail.find("};").expect("CORP_DATA blob ends with `};`");
+        let blob_json = format!("{}{}", &blob_tail[..blob_end], "}");
+        let parsed: serde_json::Value = serde_json::from_str(&blob_json)
+            .unwrap_or_else(|e| panic!("CORP_DATA JSON parse failed: {e}\n{blob_json}"));
+        let solex = &parsed["scenarios"][0]["corps"][0];
+        let research = solex["research"].as_array().expect("research array");
+        assert_eq!(research.len(), 2, "SoleX should have 2 research entries");
+        for entry in research {
+            assert!(
+                entry.is_object(),
+                "research entry must be an object, got {entry}"
+            );
+            assert!(
+                entry["name"].is_string(),
+                "research entry missing string `name`: {entry}"
+            );
+            assert!(
+                entry["category"].is_string(),
+                "research entry missing string `category`: {entry}"
+            );
+        }
+        // The Iris row should carry the "Spacecraft" sub-branch label.
+        let iris_entry = research
+            .iter()
+            .find(|e| e["name"].as_str() == Some("Iris SC"))
+            .expect("Iris SC entry present");
+        assert_eq!(iris_entry["category"].as_str(), Some("Spacecraft"));
+        // The Kerolox row should carry "Chemical" (humanized to player label).
+        let kero_entry = research
+            .iter()
+            .find(|e| e["name"].as_str() == Some("Kerolox"))
+            .expect("Kerolox entry present");
+        assert_eq!(kero_entry["category"].as_str(), Some("Chemical"));
+    }
+
+    #[test]
+    fn corporations_corp_data_humanizes_multi_word_subbranch() {
+        // CamelCase sub-branch ids like `LaunchVehicle` must humanize to
+        // "Launch Vehicle" before they reach the CORP_DATA blob.
+        let locale = corp_compare_locale();
+        let mut r = make_research("research_lv_main1", "UnlockVehicleType", Some("lv_chem_small"));
+        r.subbranch = "LaunchVehicle".into();
+        let sirenix = Sirenix {
+            research: vec![r],
+            scenario_starts: vec![ScenarioStartStat {
+                scenario_id: "StartGameEpoch_EarlyExploration".into(),
+                corp_starts: vec![CorpStartStat {
+                    company_id: "Solex".into(),
+                    starting_money: 5_000_000.0,
+                    completed_research: vec!["research_lv_main1".into()],
+                    starting_launch_vehicles: 0,
+                    starting_spacecraft: 0,
+                }],
+            }],
+            ..Default::default()
+        };
+        let page = page_corporations(&locale, &sirenix);
+        assert!(
+            page.contains("\"category\":\"Launch Vehicle\""),
+            "expected humanized 'Launch Vehicle' category in blob:\n{page}"
+        );
+    }
+
+    #[test]
+    fn corporations_corp_data_unknown_subbranch_buckets_as_other() {
+        // A research id missing from the Sirenix research list (rare — e.g.
+        // dump skew) must still appear in CORP_DATA with category "Other".
+        let locale = corp_compare_locale();
+        let sirenix = Sirenix {
+            // Intentionally empty research list — the completed_research id
+            // below has no matching ResearchStat.
+            research: vec![],
+            scenario_starts: vec![ScenarioStartStat {
+                scenario_id: "StartGameEpoch_EarlyExploration".into(),
+                corp_starts: vec![CorpStartStat {
+                    company_id: "Solex".into(),
+                    starting_money: 5_000_000.0,
+                    completed_research: vec!["research_chem_main1".into()],
+                    starting_launch_vehicles: 0,
+                    starting_spacecraft: 0,
+                }],
+            }],
+            ..Default::default()
+        };
+        let page = page_corporations(&locale, &sirenix);
+        assert!(
+            page.contains("\"category\":\"Other\""),
+            "expected fallback 'Other' category in blob:\n{page}"
+        );
     }
 
     #[test]

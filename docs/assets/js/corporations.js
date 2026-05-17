@@ -53,9 +53,18 @@
 
   // Given a parsed CORP_DATA blob plus scenario-id + difficulty-name,
   // produce the data the comparison table needs:
-  //   { corpNames, cash, lvCounts, scCounts, researchRows: [{name, held: [bool…]}] }
-  // researchRows is alphabetical by display name and filtered to entries
-  // held by at least one corp at this scenario.
+  //   { corpNames, cash, lvCounts, scCounts,
+  //     researchRows: [{name, category, held: [bool…]}] }
+  // Each corp's research is now [{name, category}…] — `category` is the
+  // player-facing tech-tree sub-branch label (e.g. "Spacecraft", "Chemical
+  // Propulsion"). The Rust generator already humanizes camelCase ids and
+  // falls back to "Other" when the dump doesn't carry a sub-branch, but we
+  // defensively apply the same fallback here so renderTableMarkup can
+  // assume every row has a non-empty category.
+  //
+  // Sort: category alphabetical (primary), name alphabetical (secondary)
+  // — this lets renderTableMarkup emit a category header before each
+  // consecutive cluster without re-sorting.
   function buildComparison(data, scenarioId, difficultyName) {
     var scenario = findScenario(data, scenarioId);
     var diff = findDifficulty(data, difficultyName);
@@ -68,21 +77,37 @@
     var lvCounts = corps.map(function (c) { return c.lv_count; });
     var scCounts = corps.map(function (c) { return c.sc_count; });
 
+    function entryCategory(e) {
+      return (e && e.category) ? e.category : 'Other';
+    }
+
     // Union of all research display names held by any corp in this scenario.
+    // Track the category alongside the name so it survives into the row.
     var seen = Object.create(null);
     var union = [];
     corps.forEach(function (c) {
-      (c.research || []).forEach(function (name) {
-        if (!seen[name]) { seen[name] = true; union.push(name); }
+      (c.research || []).forEach(function (entry) {
+        var name = entry && entry.name ? entry.name : String(entry);
+        var category = entryCategory(entry);
+        if (!seen[name]) {
+          seen[name] = true;
+          union.push({ name: name, category: category });
+        }
       });
     });
-    union.sort(function (a, b) { return a.localeCompare(b); });
+    union.sort(function (a, b) {
+      var byCat = a.category.localeCompare(b.category);
+      return byCat !== 0 ? byCat : a.name.localeCompare(b.name);
+    });
 
-    var researchRows = union.map(function (name) {
+    var researchRows = union.map(function (u) {
       var held = corps.map(function (c) {
-        return (c.research || []).indexOf(name) !== -1;
+        return (c.research || []).some(function (e) {
+          var nm = e && e.name ? e.name : String(e);
+          return nm === u.name;
+        });
       });
-      return { name: name, held: held };
+      return { name: u.name, category: u.category, held: held };
     });
 
     return {
@@ -133,8 +158,20 @@
         (cmp.corpNames.length + 1) +
         '" style="background:var(--bg-elev);color:var(--accent);text-align:left;font-weight:600;border-top:2px solid var(--accent-dim);padding-top:8px">Completed research</td></tr>');
     }
+    // Emit research rows grouped by category. The rows are already sorted
+    // category-then-name in buildComparison(), so consecutive entries with
+    // the same category form a single group — we prepend exactly one
+    // category-header row per group.
+    var prevCategory = null;
     cmp.researchRows.forEach(function (r) {
-      rows.push('<tr><td>' + escapeHtml(r.name) + '</td>' +
+      if (r.category !== prevCategory) {
+        rows.push('<tr class="corp-research-category"><td colspan="' +
+          (cmp.corpNames.length + 1) +
+          '" style="padding-left:16px;color:var(--accent-dim,#88a);text-align:left;font-weight:600;font-size:0.9em;border-top:1px solid var(--border,#444);background:transparent">' +
+          escapeHtml(r.category) + '</td></tr>');
+        prevCategory = r.category;
+      }
+      rows.push('<tr><td style="padding-left:32px">' + escapeHtml(r.name) + '</td>' +
         r.held.map(function (h) {
           return '<td style="text-align:center">' + (h ? '✓' : '—') + '</td>';
         }).join('') + '</tr>');

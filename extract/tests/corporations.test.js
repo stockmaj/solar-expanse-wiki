@@ -15,24 +15,45 @@ const path = require('node:path');
 const C = require(path.join(__dirname, '..', '..', 'docs', 'assets', 'js', 'corporations.js'));
 
 // Compact fixture mirroring the shape page_corporations() emits.
+// Research entries are objects { name, category } where category is the
+// player-facing sub-branch label from the tech tree (e.g. "Spacecraft",
+// "Chemical Propulsion").
 const FIXTURE = {
   scenarios: [
     {
       id: 'StartGameColonization',
       name: 'Colonization Era',
       corps: [
-        { name: 'SoleX',     starting_money: 33_700_000, lv_count: 2, sc_count: 8, research: ['Crewed Flight', 'Hydrolox', 'Lasers'] },
-        { name: 'NASA',      starting_money: 35_900_000, lv_count: 1, sc_count: 2, research: ['Crewed Flight', 'Kerolox'] },
-        { name: 'ESA',       starting_money: 30_000_000, lv_count: 1, sc_count: 1, research: ['Crewed Flight', 'Hydrolox'] },
-        { name: 'CNSA',      starting_money: 28_000_000, lv_count: 1, sc_count: 1, research: ['Crewed Flight'] },
-        { name: 'Roscosmos', starting_money: 27_000_000, lv_count: 1, sc_count: 1, research: ['Crewed Flight', 'Kerolox', 'Lasers'] },
+        { name: 'SoleX',     starting_money: 33_700_000, lv_count: 2, sc_count: 8, research: [
+          { name: 'Crewed Flight', category: 'Spacecraft' },
+          { name: 'Hydrolox',      category: 'Chemical Propulsion' },
+          { name: 'Lasers',        category: 'Electromagnetism' },
+        ] },
+        { name: 'NASA',      starting_money: 35_900_000, lv_count: 1, sc_count: 2, research: [
+          { name: 'Crewed Flight', category: 'Spacecraft' },
+          { name: 'Kerolox',       category: 'Chemical Propulsion' },
+        ] },
+        { name: 'ESA',       starting_money: 30_000_000, lv_count: 1, sc_count: 1, research: [
+          { name: 'Crewed Flight', category: 'Spacecraft' },
+          { name: 'Hydrolox',      category: 'Chemical Propulsion' },
+        ] },
+        { name: 'CNSA',      starting_money: 28_000_000, lv_count: 1, sc_count: 1, research: [
+          { name: 'Crewed Flight', category: 'Spacecraft' },
+        ] },
+        { name: 'Roscosmos', starting_money: 27_000_000, lv_count: 1, sc_count: 1, research: [
+          { name: 'Crewed Flight', category: 'Spacecraft' },
+          { name: 'Kerolox',       category: 'Chemical Propulsion' },
+          { name: 'Lasers',        category: 'Electromagnetism' },
+        ] },
       ],
     },
     {
       id: 'StartGameExpansion',
       name: 'The Expansion',
       corps: [
-        { name: 'SoleX', starting_money: 27_200_000, lv_count: 2, sc_count: 4, research: ['Crewed Flight'] },
+        { name: 'SoleX', starting_money: 27_200_000, lv_count: 2, sc_count: 4, research: [
+          { name: 'Crewed Flight', category: 'Spacecraft' },
+        ] },
       ],
     },
   ],
@@ -43,15 +64,82 @@ const FIXTURE = {
   ],
 };
 
-test('buildComparison: research union is alphabetical and excludes zero-corp items', () => {
+test('buildComparison: research union groups by category, alphabetical within each', () => {
   const cmp = C.buildComparison(FIXTURE, 'StartGameColonization', 'Pioneer');
-  // Three research items appear across the five corps: Crewed Flight, Hydrolox, Kerolox, Lasers.
+  // Sort: category primary (alphabetical), name secondary (alphabetical).
+  // Chemical Propulsion → Hydrolox, Kerolox.  Electromagnetism → Lasers.
+  // Spacecraft → Crewed Flight.
   const researchNames = cmp.researchRows.map(function (r) { return r.name; });
-  assert.deepEqual(researchNames, ['Crewed Flight', 'Hydrolox', 'Kerolox', 'Lasers']);
+  assert.deepEqual(researchNames, ['Hydrolox', 'Kerolox', 'Lasers', 'Crewed Flight']);
   // Sanity: nothing held by zero corps slipped in.
   cmp.researchRows.forEach(function (r) {
     assert.ok(r.held.some(Boolean), 'row ' + r.name + ' has no holders');
   });
+});
+
+test('buildComparison: each researchRow carries a category field', () => {
+  const cmp = C.buildComparison(FIXTURE, 'StartGameColonization', 'Pioneer');
+  cmp.researchRows.forEach(function (r) {
+    assert.ok(typeof r.category === 'string' && r.category.length > 0,
+      'row ' + r.name + ' missing category, got ' + JSON.stringify(r));
+  });
+  // Specific lookups.
+  const hydrolox = cmp.researchRows.find(function (r) { return r.name === 'Hydrolox'; });
+  assert.equal(hydrolox.category, 'Chemical Propulsion');
+  const crewed = cmp.researchRows.find(function (r) { return r.name === 'Crewed Flight'; });
+  assert.equal(crewed.category, 'Spacecraft');
+});
+
+test('buildComparison: research items missing a category bucket under "Other"', () => {
+  const fx = {
+    scenarios: [{
+      id: 'X', name: 'X',
+      corps: [{ name: 'A', starting_money: 0, lv_count: 0, sc_count: 0, research: [
+        { name: 'Mystery',  category: '' },
+        { name: 'Other Thing' /* no category property at all */ },
+        { name: 'Hydrolox', category: 'Chemical Propulsion' },
+      ] }],
+    }],
+    difficulties: [{ name: 'Pioneer', money_multiplier: 1.0 }],
+  };
+  const cmp = C.buildComparison(fx, 'X', 'Pioneer');
+  // Order: Chemical Propulsion (Hydrolox) then Other (Mystery, Other Thing).
+  const seq = cmp.researchRows.map(function (r) { return [r.category, r.name]; });
+  assert.deepEqual(seq, [
+    ['Chemical Propulsion', 'Hydrolox'],
+    ['Other',               'Mystery'],
+    ['Other',               'Other Thing'],
+  ]);
+});
+
+test('renderTableMarkup: each category emits exactly one category-header row before its items', () => {
+  const cmp = C.buildComparison(FIXTURE, 'StartGameColonization', 'Pioneer');
+  const html = C.renderTableMarkup(cmp);
+  // Three categories in this fixture: Chemical Propulsion, Electromagnetism, Spacecraft.
+  function occurrences(needle) {
+    var count = 0, idx = 0;
+    while ((idx = html.indexOf(needle, idx)) !== -1) { count++; idx += needle.length; }
+    return count;
+  }
+  // Category header rows are emitted with class corp-research-category.
+  const categoryRowCount = occurrences('corp-research-category');
+  assert.equal(categoryRowCount, 3, 'expected 3 category header rows, got ' + categoryRowCount + '\n' + html);
+  // Each category label appears in the markup.
+  ['Chemical Propulsion', 'Electromagnetism', 'Spacecraft'].forEach(function (cat) {
+    assert.ok(html.indexOf(cat) !== -1, 'category label missing: ' + cat);
+  });
+  // Header for a category must appear before its items.
+  const chemHeader = html.indexOf('>Chemical Propulsion<');
+  const hydro     = html.indexOf('>Hydrolox<');
+  const kero      = html.indexOf('>Kerolox<');
+  assert.ok(chemHeader >= 0 && hydro > chemHeader && kero > chemHeader,
+    'Chemical Propulsion header must precede its items, got ' +
+    JSON.stringify({ chemHeader, hydro, kero }));
+  // Spacecraft header should come after Electromagnetism (alphabetical).
+  const emHeader = html.indexOf('>Electromagnetism<');
+  const scHeader = html.indexOf('>Spacecraft<');
+  assert.ok(chemHeader < emHeader && emHeader < scHeader,
+    'category headers must be alphabetical');
 });
 
 test('buildComparison: per-corp ✓/— marks match the fixture', () => {
@@ -106,10 +194,10 @@ test('formatMoney: produces the same abbreviations the Rust generator uses', () 
 test('renderTableMarkup: row order is cash, LVs, spacecraft, then research', () => {
   const cmp = C.buildComparison(FIXTURE, 'StartGameColonization', 'Pioneer');
   const html = C.renderTableMarkup(cmp);
-  const cashIdx = html.indexOf('Starting cash');
-  const lvIdx = html.indexOf('Launch vehicles');
-  const scIdx = html.indexOf('Spacecraft');
-  const crewedIdx = html.indexOf('Crewed Flight');
+  const cashIdx    = html.indexOf('Starting cash');
+  const lvIdx      = html.indexOf('Pre-built launch vehicles');
+  const scIdx      = html.indexOf('Pre-built spacecraft');
+  const crewedIdx  = html.indexOf('Crewed Flight');
   assert.ok(cashIdx >= 0 && lvIdx > cashIdx && scIdx > lvIdx && crewedIdx > scIdx,
     'expected cash < LV < spacecraft < research, got indices ' +
     JSON.stringify({ cashIdx, lvIdx, scIdx, crewedIdx }));
