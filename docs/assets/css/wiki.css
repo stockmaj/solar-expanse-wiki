@@ -421,7 +421,8 @@ main hr {
   font-size: 14px;
   color: var(--accent);
 }
-#calc-root .calc-reset {
+#calc-root .calc-reset,
+#calc-root .calc-save {
   background: transparent;
   color: var(--fg-muted);
   border: 1px solid var(--rule);
@@ -430,10 +431,50 @@ main hr {
   font: inherit;
   font-size: 12px;
   cursor: pointer;
+  margin-left: 6px;
 }
-#calc-root .calc-reset:hover {
+#calc-root .calc-reset:hover,
+#calc-root .calc-save:hover {
   color: var(--fg);
   border-color: var(--accent-dim);
+}
+#calc-root .calc-saved {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0 0 8px;
+}
+#calc-root .calc-saved:empty {
+  margin: 0;
+}
+#calc-root .calc-saved-item {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  overflow: hidden;
+}
+#calc-root .calc-saved-load,
+#calc-root .calc-saved-delete {
+  background: transparent;
+  color: var(--fg);
+  border: 0;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 8px;
+}
+#calc-root .calc-saved-load:hover {
+  background: var(--code-bg);
+  color: var(--accent);
+}
+#calc-root .calc-saved-delete {
+  color: var(--fg-muted);
+  border-left: 1px solid var(--rule);
+}
+#calc-root .calc-saved-delete:hover {
+  color: var(--accent);
+  background: var(--code-bg);
 }
 #calc-root .calc-filter {
   background: var(--code-bg);

@@ -1,7 +1,7 @@
 // Node-only unit tests for calculator.js — additive-stacking math.
 // Run with `node docs/assets/js/calculator.test.js` from anywhere.
 
-const { applyReductions, workerTotal, powerNetTotal } = require('./calculator.js');
+const { applyReductions, workerTotal, powerNetTotal, addSaved, removeSaved } = require('./calculator.js');
 
 let passed = 0;
 let failed = 0;
@@ -223,6 +223,73 @@ eq(
   -400,
   'power net: non-power reductions are ignored'
 );
+
+// ----- Saved lists --------------------------------------------------------
+
+eq(
+  addSaved([], 'Mars Colony', { build_habitat: 2 }),
+  [{ name: 'Mars Colony', placed: { build_habitat: 2 } }],
+  'addSaved: appends a new entry'
+);
+
+eq(
+  addSaved(
+    [{ name: 'Mars Colony', placed: { build_habitat: 1 } }],
+    'Mars Colony',
+    { build_habitat: 5, build_alloymine: 1 }
+  ),
+  [{ name: 'Mars Colony', placed: { build_habitat: 5, build_alloymine: 1 } }],
+  'addSaved: overwrites entry with same name'
+);
+
+eq(
+  addSaved(
+    [{ name: 'A', placed: { x: 1 } }],
+    'B',
+    { y: 2 }
+  ),
+  [{ name: 'A', placed: { x: 1 } }, { name: 'B', placed: { y: 2 } }],
+  'addSaved: preserves existing entries when adding new'
+);
+
+eq(
+  addSaved([], '   ', { x: 1 }),
+  [],
+  'addSaved: blank name is rejected (no entry added)'
+);
+
+eq(
+  addSaved([], '  Mars  ', { x: 1 }),
+  [{ name: 'Mars', placed: { x: 1 } }],
+  'addSaved: trims surrounding whitespace from name'
+);
+
+eq(
+  removeSaved(
+    [
+      { name: 'A', placed: { x: 1 } },
+      { name: 'B', placed: { y: 2 } },
+    ],
+    'A'
+  ),
+  [{ name: 'B', placed: { y: 2 } }],
+  'removeSaved: drops the named entry'
+);
+
+eq(
+  removeSaved([{ name: 'A', placed: {} }], 'Z'),
+  [{ name: 'A', placed: {} }],
+  'removeSaved: no-op when name not present'
+);
+
+// Mutation guards — both functions should return a new array, not mutate input.
+{
+  const original = [{ name: 'A', placed: { x: 1 } }];
+  const frozen = JSON.stringify(original);
+  addSaved(original, 'B', { y: 1 });
+  removeSaved(original, 'A');
+  eq(JSON.stringify(original), frozen, 'addSaved/removeSaved do not mutate input array');
+}
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed === 0 ? 0 : 1);

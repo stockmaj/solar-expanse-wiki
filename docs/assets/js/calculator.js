@@ -80,6 +80,24 @@
     return Math.round(total);
   }
 
+  function addSaved(saved, name, placed) {
+    var trimmed = String(name).trim();
+    if (!trimmed) return saved.slice();
+    var entry = { name: trimmed, placed: Object.assign({}, placed) };
+    var idx = -1;
+    for (var i = 0; i < saved.length; i++) {
+      if (saved[i].name === trimmed) { idx = i; break; }
+    }
+    var next = saved.slice();
+    if (idx >= 0) next[idx] = entry;
+    else next.push(entry);
+    return next;
+  }
+
+  function removeSaved(saved, name) {
+    return saved.filter(function (s) { return s.name !== name; });
+  }
+
   // Net power need = consumption − (production × PowerProduction bonus).
   // Positive → deficit, negative → surplus.
   function powerNetTotal(placed, checkedReductions) {
@@ -94,6 +112,7 @@
   // ----- DOM binding -----------------------------------------------------
 
   var STORAGE_KEY = 'solar-expanse-calc-v1';
+  var SAVED_KEY = 'solar-expanse-calc-saved-v1';
 
   function escapeHtml(s) {
     return String(s)
@@ -120,6 +139,23 @@
   function saveState(state) {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (e) { /* quota / private-mode — ignore */ }
+  }
+
+  function loadSavedList() {
+    try {
+      var raw = localStorage.getItem(SAVED_KEY);
+      if (!raw) return [];
+      var parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function persistSavedList(saved) {
+    try {
+      localStorage.setItem(SAVED_KEY, JSON.stringify(saved));
     } catch (e) { /* quota / private-mode — ignore */ }
   }
 
@@ -177,8 +213,10 @@
         '<div class="calc-pane calc-pane-mid">' +
           '<div class="calc-pane-header">' +
             '<h3>Placed</h3>' +
+            '<button type="button" class="calc-save" id="calc-save">Save…</button>' +
             '<button type="button" class="calc-reset" id="calc-reset">Reset</button>' +
           '</div>' +
+          '<div class="calc-saved" id="calc-saved"></div>' +
           '<div class="calc-placed-list" id="calc-placed-list" data-drop="1"></div>' +
         '</div>' +
         '<div class="calc-pane calc-pane-right">' +
@@ -190,6 +228,7 @@
     var ctx = {
       data: data,
       state: state,
+      saved: loadSavedList(),
       facById: indexBy(data.facilities, 'id'),
       resById: indexBy(data.resources, 'id'),
       redById: indexBy(data.reductions, 'id'),
@@ -199,6 +238,7 @@
     bindFacilityList(root, ctx);
     bindPlaced(root, ctx);
     bindReset(root, ctx);
+    bindSave(root, ctx);
     rerenderAll(root, ctx);
   }
 
@@ -449,6 +489,64 @@
     });
   }
 
+  // ----- Saved lists ----------------------------------------------------
+
+  function renderSavedList(ctx) {
+    if (!ctx.saved.length) return '';
+    return ctx.saved.map(function (s) {
+      return '<span class="calc-saved-item" data-name="' + escapeHtml(s.name) + '">' +
+        '<button type="button" class="calc-saved-load" data-name="' + escapeHtml(s.name) + '" title="Load">' +
+        escapeHtml(s.name) + '</button>' +
+        '<button type="button" class="calc-saved-delete" data-name="' + escapeHtml(s.name) + '" title="Delete">×</button>' +
+      '</span>';
+    }).join('');
+  }
+
+  function bindSave(root, ctx) {
+    var btn = root.querySelector('#calc-save');
+    if (btn) {
+      btn.addEventListener('click', function () {
+        if (!Object.keys(ctx.state.placed).length) return;
+        var name = prompt('Name this list:');
+        if (name === null) return;
+        ctx.saved = addSaved(ctx.saved, name, ctx.state.placed);
+        persistSavedList(ctx.saved);
+        rerenderSaved(root, ctx);
+      });
+    }
+    attachSavedHandlers(root, ctx);
+  }
+
+  function attachSavedHandlers(root, ctx) {
+    root.querySelectorAll('.calc-saved-load').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var name = b.getAttribute('data-name');
+        var entry = ctx.saved.find(function (s) { return s.name === name; });
+        if (!entry) return;
+        ctx.state.placed = Object.assign({}, entry.placed);
+        pruneState(ctx.state, ctx.data);
+        saveState(ctx.state);
+        rerenderPlaced(root, ctx);
+        rerenderTotals(root, ctx);
+      });
+    });
+    root.querySelectorAll('.calc-saved-delete').forEach(function (b) {
+      b.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        var name = b.getAttribute('data-name');
+        ctx.saved = removeSaved(ctx.saved, name);
+        persistSavedList(ctx.saved);
+        rerenderSaved(root, ctx);
+      });
+    });
+  }
+
+  function rerenderSaved(root, ctx) {
+    var el = root.querySelector('#calc-saved');
+    el.innerHTML = renderSavedList(ctx);
+    attachSavedHandlers(root, ctx);
+  }
+
   // ----- Totals (right pane) --------------------------------------------
 
   function renderTotals(ctx) {
@@ -500,6 +598,7 @@
   function rerenderAll(root, ctx) {
     rerenderPlaced(root, ctx);
     rerenderTotals(root, ctx);
+    rerenderSaved(root, ctx);
   }
 
   function rerenderPlaced(root, ctx) {
@@ -523,6 +622,8 @@
     totalResources: totalResources,
     workerTotal: workerTotal,
     powerNetTotal: powerNetTotal,
+    addSaved: addSaved,
+    removeSaved: removeSaved,
   };
 
   if (typeof module !== 'undefined' && module.exports) {
