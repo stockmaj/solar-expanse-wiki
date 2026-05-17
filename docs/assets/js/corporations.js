@@ -217,7 +217,7 @@
       parityControls = '<div class="corp-parity-controls" style="font-size:12px;color:var(--fg-muted);margin-top:4px">' +
         '<label><input type="checkbox" id="corp-show-all-research"' +
         (cmp.showAll ? ' checked' : '') +
-        ' style="vertical-align:middle;margin-right:4px"> Show all research</label>' +
+        ' style="vertical-align:middle;margin-right:4px"> Show all starting research</label>' +
         ' &middot; ' + cmp.parityHidden +
         ' research item' + (cmp.parityHidden === 1 ? '' : 's') +
         ' shared by every corp (or by none) hidden by default.</div>';
@@ -225,7 +225,7 @@
       // When Show All is on, expose the toggle to turn it back off.
       parityControls = '<div class="corp-parity-controls" style="font-size:12px;color:var(--fg-muted);margin-top:4px">' +
         '<label><input type="checkbox" id="corp-show-all-research" checked' +
-        ' style="vertical-align:middle;margin-right:4px"> Show all research</label>' +
+        ' style="vertical-align:middle;margin-right:4px"> Show all starting research</label>' +
         ' &middot; ' + cmp.parityHiddenWhenFiltered +
         ' research item' + (cmp.parityHiddenWhenFiltered === 1 ? '' : 's') +
         ' shared by every corp (or by none) — shown.</div>';

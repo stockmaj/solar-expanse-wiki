@@ -1762,21 +1762,6 @@ in this table. The names and corp rosters below are stable.*\n\n",
     // starting cash.
     out.push_str("Difficulty also scales ongoing upkeep (Explorer ×0.5, Pioneer ×1, Veteran ×1.5) and supply usage by the same factors — not reflected in the table below, which only shows starting state.\n\n");
 
-    // ── Flavor-traits block per corp.  All the numeric/research data
-    //    moves into the comparison view below; this section keeps the
-    //    locale's hand-written one-liner traits accessible to readers.
-    out.push_str("## Corporations at a glance\n\n");
-    for c in &locale.corporations {
-        out.push_str(&format!("### {}\n\n{}\n\n", c.name, c.description));
-        let traits = c.traits.replace("\\n", "\n");
-        let traits = traits.trim();
-        if !traits.is_empty() {
-            out.push_str("**Flavor traits (from new-game screen):**\n");
-            out.push_str(traits);
-            out.push_str("\n\n");
-        }
-    }
-
     // ── Build the JSON blob that powers the interactive comparison table. ──
     // Schema:
     //   { scenarios: [{ id, name, corps: [{ name, starting_money,
@@ -1925,6 +1910,21 @@ in this table. The names and corp rosters below are stable.*\n\n",
 
     out.push_str(&format!("<script>\nwindow.CORP_DATA = {corp_data_json};\n</script>\n"));
     out.push_str("<script src=\"{{ '/assets/js/corporations.js' | relative_url }}?v={{ site.data.wiki.generated_at }}\"></script>\n\n");
+
+    // ── Flavor-traits block per corp.  Moved below the comparison so the
+    //    above-the-fold view is the player-actionable interactive matrix;
+    //    the descriptive prose follows for readers who want context.
+    out.push_str("## Corporations at a glance\n\n");
+    for c in &locale.corporations {
+        out.push_str(&format!("### {}\n\n{}\n\n", c.name, c.description));
+        let traits = c.traits.replace("\\n", "\n");
+        let traits = traits.trim();
+        if !traits.is_empty() {
+            out.push_str("**Flavor traits (from new-game screen):**\n");
+            out.push_str(traits);
+            out.push_str("\n\n");
+        }
+    }
 
     out.push_str("## See also\n\n- [Research](../research/) — full tech tree across all branches\n");
     out
