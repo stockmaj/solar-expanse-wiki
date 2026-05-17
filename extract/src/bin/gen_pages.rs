@@ -828,10 +828,10 @@ fn fmt_build_cost(cost: &[ResourceCost], resource_name: &BTreeMap<&str, &str>) -
             // amount.  The icons live in /images/resources/<id>.png and were
             // cropped out of the game's sprite atlas by extract-icons.
             // `alt` covers screen readers / icon-load failures.
-            // Wrap the whole token in a span so the tooltip's hover area is
-            // icon + number, not just the 16-pixel icon.
+            // "20 [icon]" reads more naturally than "[icon] 20"; the wrapping
+            // span widens the tooltip hover area to cover the whole token.
             format!(
-                "<span title=\"{label}\"><img src=\"../images/resources/{id}.png\" width=\"16\" alt=\"{label}\"/>&nbsp;{amount}</span>",
+                "<span title=\"{label}\">{amount}&nbsp;<img src=\"../images/resources/{id}.png\" width=\"16\" alt=\"{label}\"/></span>",
                 id = c.resource_id,
                 label = label,
                 amount = fmt_abbrev(c.amount),
