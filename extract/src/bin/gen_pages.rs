@@ -787,6 +787,33 @@ fn engine_category_for(stat: &SpacecraftStat) -> u8 {
     }
 }
 
+/// HTML-safe anchor id for an entry row.  e.g. ("research", "research_chem_main1")
+/// → "research-research_chem_main1".  Non-alphanumeric characters become dashes.
+fn anchor_id(kind: &str, id: &str) -> String {
+    let slug: String = id
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    format!("{kind}-{slug}")
+}
+
+/// Inline anchor tag to place before an entry's display name so other rows can
+/// link directly to it.
+fn anchor_tag(kind: &str, id: &str) -> String {
+    format!("<a id=\"{}\"></a>", anchor_id(kind, id))
+}
+
+/// Markdown link to an entry on another page.  `page_dir` is the page's URL
+/// directory (e.g., "research", "facilities"), relative to /docs/.
+fn link_cross_page(page_dir: &str, kind: &str, id: &str, display: &str) -> String {
+    format!("[{display}](../{page_dir}/#{anchor})", anchor = anchor_id(kind, id))
+}
+
+/// Markdown link to another row on the *same* page.
+fn link_same_page(kind: &str, id: &str, display: &str) -> String {
+    format!("[{display}](#{anchor})", anchor = anchor_id(kind, id))
+}
+
 fn fmt_amount(v: f64) -> String {
     if v == v.trunc() && v.abs() < 1e9 {
         format!("{}", v as i64)
@@ -967,7 +994,11 @@ lift them to space.\n\n",
         let thrust = engine.map(|e| fmt_thrust(e.thrust)).unwrap_or_else(|| "—".into());
         let exhaust = engine.map(|e| fmt_exhaust(e.exhaust_v)).unwrap_or_else(|| "—".into());
         rows.push(vec![
-            format!("**{}**", escape_cell(display_name)),
+            format!(
+                "{anchor}**{name}**",
+                anchor = anchor_tag("spacecraft", &s.id),
+                name = escape_cell(display_name)
+            ),
             fmt_amount(s.mass),
             fmt_amount(s.cargo_capacity),
             fmt_amount(s.fuel_capacity),
@@ -1041,7 +1072,11 @@ fn page_launch_vehicles(locale: &Locale, sirenix: &Sirenix) -> String {
             let display = id_to_name.get(lv.id.as_str()).copied().unwrap_or(lv.id.as_str());
             let desc = id_to_desc.get(lv.id.as_str()).copied().unwrap_or("");
             vec![
-                format!("**{}**", escape_cell(display)),
+                format!(
+                    "{anchor}**{name}**",
+                    anchor = anchor_tag("lv", &lv.id),
+                    name = escape_cell(display)
+                ),
                 fmt_amount(lv.max_payload),
                 fmt_reusability(lv.reusability).into(),
                 if lv.can_send_human { "Yes" } else { "No" }.into(),
@@ -1533,7 +1568,10 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
             .copied()
             .or_else(|| f.research_prereq.as_deref());
         let prereq = prereq_id
-            .map(|r| research_name.get(r).copied().unwrap_or(r).to_string())
+            .map(|r| {
+                let name = research_name.get(r).copied().unwrap_or(r).to_string();
+                link_cross_page("research", "research", r, &escape_cell(&name))
+            })
             .unwrap_or_else(|| "—".to_string());
         let workers = if f.workers_required > 0 {
             f.workers_required.to_string()
@@ -1551,8 +1589,13 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
             "—".to_string()
         };
         let desc = facility_desc.get(id_no_prefix).copied().unwrap_or("");
+        let name_cell = format!(
+            "{anchor}**{name}**",
+            anchor = anchor_tag("facility", id_no_prefix),
+            name = escape_cell(&display)
+        );
         vec![
-            format!("**{}**", escape_cell(&display)),
+            name_cell,
             f.facility_type.clone(),
             fmt_build_cost(&f.build_cost, resource_name),
             workers,
@@ -1635,18 +1678,21 @@ fn fmt_research_unlock(
             let target = r.unlock_target.as_deref().unwrap_or("");
             // Facility unlock targets are full ids like "build_outpost"; locale ids are bare ("outpost").
             let key = target.strip_prefix("build_").unwrap_or(target);
-            let pretty = facility_name.get(key).copied().unwrap_or(key);
-            format!("Builds **{}**", smart_title_case(pretty))
+            let pretty = smart_title_case(facility_name.get(key).copied().unwrap_or(key));
+            let link = link_cross_page("facilities", "facility", key, &format!("**{pretty}**"));
+            format!("Builds {link}")
         }
         "UnlockSpacecraftType" => {
             let target = r.unlock_target.as_deref().unwrap_or("");
             let pretty = spacecraft_name.get(target).copied().unwrap_or(target);
-            format!("Spacecraft: **{}**", pretty)
+            let link = link_cross_page("spacecraft", "spacecraft", target, &format!("**{pretty}**"));
+            format!("Spacecraft: {link}")
         }
         "UnlockVehicleType" => {
             let target = r.unlock_target.as_deref().unwrap_or("");
             let pretty = lv_name.get(target).copied().unwrap_or(target);
-            format!("Launch Vehicle: **{}**", pretty)
+            let link = link_cross_page("launch-vehicles", "lv", target, &format!("**{pretty}**"));
+            format!("Launch Vehicle: {link}")
         }
         "UnlockBonus" => match &r.bonus_kind {
             Some(b) => {
@@ -1754,12 +1800,17 @@ Physics, Biotech), each subdivided into focused sub-branches.\n\n",
                     } else {
                         r.prereqs
                             .iter()
-                            .map(|p| format!("{}", escape_cell(&name_for(p))))
+                            .map(|p| link_same_page("research", p, &escape_cell(&name_for(p))))
                             .collect::<Vec<_>>()
                             .join("<br>")
                     };
+                    let name_cell = format!(
+                        "{anchor}**{name}**",
+                        anchor = anchor_tag("research", &r.id),
+                        name = escape_cell(&display)
+                    );
                     vec![
-                        format!("**{}**", escape_cell(&display)),
+                        name_cell,
                         fmt_work_hours(r.work_hours),
                         prereqs,
                         fmt_research_unlock(r, &facility_name, &spacecraft_name, &lv_name),
