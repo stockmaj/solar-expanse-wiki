@@ -3133,13 +3133,29 @@ fn page_research(locale: &Locale, sirenix: &Sirenix) -> String {
     // is the game's in-tree-header flag, not a "should-this-be-public" flag.
     let visible: Vec<&ResearchStat> = sirenix.research.iter().collect();
 
-    // Bucket by branch then subbranch
-    let mut by_branch: BTreeMap<&str, BTreeMap<&str, Vec<&ResearchStat>>> = BTreeMap::new();
+    // Humanize CamelCase sub-branch ids the same way the corp comparison
+    // does — `LaunchVehicle` → `Launch Vehicle` — so the H2 headers below
+    // match the player-facing tech-tree section names.
+    let humanize_sub = |sb: &str| -> String {
+        let mut out = String::with_capacity(sb.len() + 4);
+        for (i, c) in sb.char_indices() {
+            if i > 0 && c.is_uppercase() { out.push(' '); }
+            out.push(c);
+        }
+        out
+    };
+
+    // Bucket directly by sub-branch.  The game's tech-tree UI doesn't show
+    // the top-level branch (Engineering/Physics/Biotech) division — it
+    // displays the sub-branches as the top-level categories — so the wiki
+    // mirrors that.  Items from the same sub-branch across different
+    // top-level branches (e.g. Spacecraft research that sits under both
+    // Engineering and Biotech) merge into a single section.
+    let mut by_sub: BTreeMap<String, Vec<&ResearchStat>> = BTreeMap::new();
     for r in &visible {
-        by_branch
-            .entry(r.branch.as_str())
-            .or_default()
-            .entry(r.subbranch.as_str())
+        if r.subbranch.is_empty() { continue; }
+        by_sub
+            .entry(humanize_sub(&r.subbranch))
             .or_default()
             .push(*r);
     }
@@ -3149,17 +3165,14 @@ fn page_research(locale: &Locale, sirenix: &Sirenix) -> String {
 The tech tree drives progression. Every research node has a work-hours cost,\n\
 zero or more prerequisite research nodes, and unlocks something — a new\n\
 facility, spacecraft, launch vehicle, or a numeric bonus on existing\n\
-equipment. Research is grouped into three top-level branches (Engineering,\n\
-Physics, Biotech), each subdivided into focused sub-branches.\n\n",
+equipment. Sections below match the sub-branches the game shows in the\n\
+research tree (Computing, Chemical Propulsion, Spacecraft, …).\n\n",
     );
 
-    for (branch, subs) in &by_branch {
-        out.push_str(&format!("## {}\n\n", pretty_branch(branch)));
-        for (sub, items) in subs {
-            if sub.is_empty() {
-                continue;
-            }
-            out.push_str(&format!("### {}\n\n", sub));
+    {
+        for (sub, items) in &by_sub {
+            out.push_str(&format!("## {}\n\n", sub));
+            {
             let mut items_sorted = items.clone();
             items_sorted.sort_by(|a, b| {
                 a.work_hours
@@ -3206,6 +3219,7 @@ Physics, Biotech), each subdivided into focused sub-branches.\n\n",
                 &rows,
             ));
             out.push('\n');
+            }
         }
     }
 
