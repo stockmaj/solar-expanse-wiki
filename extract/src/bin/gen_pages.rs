@@ -795,6 +795,28 @@ fn fmt_amount(v: f64) -> String {
     }
 }
 
+/// Abbreviate large numbers with k/M/B suffixes for cargo, money, and resource
+/// quantities.  Values below 1,000 are written out in full.
+fn fmt_abbrev(v: f64) -> String {
+    if v <= 0.0 {
+        return "0".into();
+    }
+    let (scaled, suffix) = if v >= 1e9 {
+        (v / 1e9, "B")
+    } else if v >= 1e6 {
+        (v / 1e6, "M")
+    } else if v >= 1e3 {
+        (v / 1e3, "k")
+    } else {
+        return fmt_amount(v);
+    };
+    if (scaled - scaled.round()).abs() < 0.05 {
+        format!("{:.0}{}", scaled, suffix)
+    } else {
+        format!("{:.1}{}", scaled, suffix)
+    }
+}
+
 fn fmt_build_cost(cost: &[ResourceCost], resource_name: &BTreeMap<&str, &str>) -> String {
     if cost.is_empty() {
         return "—".into();
@@ -802,7 +824,7 @@ fn fmt_build_cost(cost: &[ResourceCost], resource_name: &BTreeMap<&str, &str>) -
     cost.iter()
         .map(|c| {
             let label = resource_name.get(c.resource_id.as_str()).copied().unwrap_or(c.resource_id.as_str());
-            format!("{} {}", fmt_amount(c.amount), label)
+            format!("{} {}", fmt_abbrev(c.amount), label)
         })
         .collect::<Vec<_>>()
         .join("<br>")
@@ -1013,8 +1035,8 @@ fn page_launch_vehicles(locale: &Locale, sirenix: &Sirenix) -> String {
                 if lv.can_send_human { "Yes" } else { "No" }.into(),
                 fmt_build_cost(&lv.build_cost, &resource_name),
                 fmt_amount(lv.build_time_days),
-                fmt_amount(lv.launch_cost),
-                fmt_amount(lv.maintenance_cost_per_day),
+                fmt_abbrev(lv.launch_cost),
+                fmt_abbrev(lv.maintenance_cost_per_day),
                 escape_cell(desc),
             ]
         })
@@ -1157,7 +1179,7 @@ fn page_resources(locale: &Locale, sirenix: &Sirenix) -> String {
         .map(|r| {
             let display = res_name.get(r.id.as_str()).copied().unwrap_or(r.id.as_str());
             let price = if r.market_price_base > 0.0 {
-                fmt_amount(r.market_price_base)
+                fmt_abbrev(r.market_price_base)
             } else {
                 "—".to_string()
             };
@@ -1305,7 +1327,7 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
 
             let mut reward_bits: Vec<String> = Vec::new();
             if c.money_reward > 0.0 {
-                reward_bits.push(format!("Cash: {}", fmt_amount(c.money_reward)));
+                reward_bits.push(format!("Cash: {}", fmt_abbrev(c.money_reward)));
             }
             for r in &c.resource_grants {
                 let label = resource_name
@@ -1479,7 +1501,7 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
             "—".to_string()
         };
         let maint = if f.maintenance_per_day > 0.0 {
-            fmt_amount(f.maintenance_per_day)
+            fmt_abbrev(f.maintenance_per_day)
         } else {
             "—".to_string()
         };
@@ -1884,6 +1906,20 @@ mod tests {
     #[test]
     fn escape_cell_escapes_pipes_and_collapses_newlines() {
         assert_eq!(escape_cell("a | b\nc"), "a \\| b c");
+    }
+
+    #[test]
+    fn fmt_abbrev_handles_k_m_b_with_clean_rounding() {
+        assert_eq!(fmt_abbrev(0.0), "0");
+        assert_eq!(fmt_abbrev(50.0), "50");
+        assert_eq!(fmt_abbrev(999.0), "999");
+        assert_eq!(fmt_abbrev(6000.0), "6k");
+        assert_eq!(fmt_abbrev(6500.0), "6.5k");
+        assert_eq!(fmt_abbrev(750_000.0), "750k");
+        assert_eq!(fmt_abbrev(1_000_000.0), "1M");
+        assert_eq!(fmt_abbrev(20_000_000.0), "20M");
+        assert_eq!(fmt_abbrev(1_898_100.0), "1.9M");
+        assert_eq!(fmt_abbrev(1_000_000_000.0), "1B");
     }
 
     fn fixture_locale() -> Locale {

@@ -33,7 +33,7 @@ lift them to space.
 
 | Spacecraft | Mass (t) | Cargo (t) | Fuel (t) | Engine thrust | Exhaust V | Reusable | Built at | Build cost | Build time (d) | Description |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| **Atlas** | 50 | 150 | 500 | 875.5 MN | 4000.0 km/s | Yes | Orbit | 1000 Exotic Alloys<br>500 Helium-3<br>200 Electronics<br>4000 Alloy | 360 | Enormous spacecraft able to move entire asteroids. |
+| **Atlas** | 50 | 150 | 500 | 875.5 MN | 4000.0 km/s | Yes | Orbit | 1k Exotic Alloys<br>500 Helium-3<br>200 Electronics<br>4k Alloy | 360 | Enormous spacecraft able to move entire asteroids. |
 | **Zeus** | 50 | 150 | 500 | 40.0 MN | 11000.0 km/s | Yes | Orbit | 500 Exotic Alloys<br>500 Polymers<br>100 Electronics<br>400 Helium-3 | 150 | Operating at the limits of theoretical performance of fusion spacecraft, the Zeus can fly farther and faster than any other. |
 | **Sirius** | 50 | 150 | 500 | 9.8 MN | 2400.0 km/s | Yes | Orbit | 200 Exotic Alloys<br>400 Polymers<br>50 Electronics<br>150 Helium-3 | 150 | Advanced fusion spacecraft. |
 | **Nike** | 100 | 150 | 5000 | 6.0 MN | 1000.0 km/s | Yes | Orbit | 300 Alloy<br>100 Exotic Alloys<br>50 Electronics<br>50 Helium-3 | 180 | First generation fusion spacecraft, with efficiency unmatched by previous designs. |
