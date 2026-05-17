@@ -1,7 +1,7 @@
 // Node-only unit tests for calculator.js — additive-stacking math.
 // Run with `node docs/assets/js/calculator.test.js` from anywhere.
 
-const { applyReductions, workerTotal, powerNetTotal, addSaved, removeSaved } = require('./calculator.js');
+const { applyReductions, workerTotal, powerNetTotal, addSaved, removeSaved, iconFile } = require('./calculator.js');
 
 let passed = 0;
 let failed = 0;
@@ -290,6 +290,13 @@ eq(
   removeSaved(original, 'A');
   eq(JSON.stringify(original), frozen, 'addSaved/removeSaved do not mutate input array');
 }
+
+// ----- Icon file mapping --------------------------------------------------
+
+eq(iconFile('metal'), 'metal.png', 'iconFile: default = id + .png');
+eq(iconFile('hel3'), 'HEL3.png', 'iconFile: hel3 is an all-caps override');
+eq(iconFile('human'), 'human.png', 'iconFile: human maps directly');
+eq(iconFile('energy'), 'energy.png', 'iconFile: energy maps directly');
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed === 0 ? 0 : 1);

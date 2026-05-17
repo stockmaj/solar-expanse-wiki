@@ -538,12 +538,38 @@ main hr {
 }
 #calc-root .calc-placed-row {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   align-items: center;
   gap: 8px;
   padding: 4px 4px;
   border-bottom: 1px solid var(--rule);
   font-size: 13px;
+}
+#calc-root .calc-placed-cost {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+#calc-root .calc-pip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+}
+#calc-root .calc-pip-icon {
+  width: 14px;
+  height: 14px;
+  vertical-align: middle;
+  display: inline-block;
+}
+#calc-root .calc-total-icon {
+  width: 16px;
+  height: 16px;
+  vertical-align: middle;
+  margin-right: 6px;
 }
 #calc-root .calc-placed-row:last-child {
   border-bottom: 0;

@@ -159,17 +159,29 @@
     } catch (e) { /* quota / private-mode — ignore */ }
   }
 
-  function dataUrl() {
-    // Honour Jekyll's baseurl when present.  We can't read site.baseurl from
-    // JS, but the script tag was injected with a relative_url, so we can
-    // derive the base from its src attribute.
+  function siteBase() {
     var scripts = document.getElementsByTagName('script');
     for (var i = 0; i < scripts.length; i++) {
       var s = scripts[i].getAttribute('src') || '';
       var idx = s.indexOf('/assets/js/calculator.js');
-      if (idx !== -1) return s.slice(0, idx) + '/assets/data/calculator.json';
+      if (idx !== -1) return s.slice(0, idx);
     }
-    return '/assets/data/calculator.json';
+    return '';
+  }
+
+  function dataUrl() {
+    return siteBase() + '/assets/data/calculator.json';
+  }
+
+  // The PNG files live in docs/images/resources/. Resource ids map 1:1 to the
+  // filename except for `hel3`, which uses the all-caps `HEL3.png`.
+  function iconFile(resourceId) {
+    if (resourceId === 'hel3') return 'HEL3.png';
+    return resourceId + '.png';
+  }
+
+  function iconUrl(resourceId) {
+    return siteBase() + '/images/resources/' + iconFile(resourceId);
   }
 
   function bindDom() {
@@ -376,9 +388,7 @@
   function addFacility(root, ctx, id, delta) {
     if (!ctx.facById[id]) return;
     var cur = ctx.state.placed[id] || 0;
-    var next = cur + delta;
-    if (next <= 0) delete ctx.state.placed[id];
-    else ctx.state.placed[id] = next;
+    ctx.state.placed[id] = Math.max(0, cur + delta);
     saveState(ctx.state);
     rerenderPlaced(root, ctx);
     rerenderTotals(root, ctx);
@@ -386,9 +396,7 @@
 
   function setFacilityCount(root, ctx, id, value) {
     if (!ctx.facById[id]) return;
-    var n = Math.max(0, Math.floor(value));
-    if (n === 0) delete ctx.state.placed[id];
-    else ctx.state.placed[id] = n;
+    ctx.state.placed[id] = Math.max(0, Math.floor(value));
     saveState(ctx.state);
     rerenderPlaced(root, ctx);
     rerenderTotals(root, ctx);
@@ -404,9 +412,23 @@
       .filter(function (r) { return r.fac; })
       .sort(function (a, b) { return a.fac.name.localeCompare(b.fac.name); });
 
+    var checked = Object.keys(ctx.state.checked)
+      .map(function (id) { return ctx.redById[id]; })
+      .filter(Boolean);
+
     return '<ul class="calc-placed">' + rows.map(function (r) {
+      var reduced = applyReductions(r.fac, checked);
+      var pipsHtml = (r.fac.build_cost || []).map(function (bc) {
+        var amount = reduced[bc.resource] || 0;
+        var resName = (ctx.resById[bc.resource] && ctx.resById[bc.resource].name) || bc.resource;
+        return '<span class="calc-pip" title="' + escapeHtml(resName) + '">' +
+          '<span class="calc-pip-num">' + amount.toLocaleString() + '</span>' +
+          '<img class="calc-pip-icon" src="' + escapeHtml(iconUrl(bc.resource)) + '" alt="">' +
+          '</span>';
+      }).join('');
       return '<li class="calc-placed-row" data-id="' + escapeHtml(r.id) + '">' +
         '<span class="calc-placed-name">' + escapeHtml(r.fac.name) + '</span>' +
+        '<span class="calc-placed-cost">' + pipsHtml + '</span>' +
         '<span class="calc-placed-counter">' +
           '<button type="button" class="calc-dec" data-id="' + escapeHtml(r.id) + '">−</button>' +
           '<span class="calc-count" data-id="' + escapeHtml(r.id) + '" title="Click to edit">' + r.count + '</span>' +
@@ -566,6 +588,7 @@
     var resourceRows = Object.keys(totals)
       .map(function (rid) {
         return {
+          rid: rid,
           name: (ctx.resById[rid] && ctx.resById[rid].name) || rid,
           amount: totals[rid],
         };
@@ -579,8 +602,8 @@
     var grand = resourceRows.reduce(function (sum, r) { return sum + r.amount; }, 0);
 
     var extraRows = [];
-    if (workers > 0) extraRows.push({ name: 'Humans', amount: workers });
-    if (powerNet !== 0) extraRows.push({ name: 'Power (net)', amount: powerNet });
+    if (workers > 0) extraRows.push({ rid: 'human', name: 'Humans', amount: workers });
+    if (powerNet !== 0) extraRows.push({ rid: 'energy', name: 'Power (net)', amount: powerNet });
 
     if (resourceRows.length === 0 && extraRows.length === 0) {
       return '<p class="calc-empty"><em>All costs reduced to 0.</em></p>';
@@ -588,7 +611,9 @@
 
     return '<table class="calc-totals"><thead><tr><th>Resource</th><th>Amount</th></tr></thead><tbody>' +
       resourceRows.concat(extraRows).map(function (r) {
-        return '<tr><td>' + escapeHtml(r.name) + '</td>' +
+        return '<tr><td>' +
+          '<img class="calc-total-icon" src="' + escapeHtml(iconUrl(r.rid)) + '" alt=""> ' +
+          escapeHtml(r.name) + '</td>' +
           '<td class="calc-num">' + r.amount.toLocaleString() + '</td></tr>';
       }).join('') +
       '</tbody><tfoot><tr><td><strong>Total tons</strong></td>' +
@@ -624,6 +649,7 @@
     powerNetTotal: powerNetTotal,
     addSaved: addSaved,
     removeSaved: removeSaved,
+    iconFile: iconFile,
   };
 
   if (typeof module !== 'undefined' && module.exports) {
