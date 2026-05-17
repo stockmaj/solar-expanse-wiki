@@ -824,7 +824,16 @@ fn fmt_build_cost(cost: &[ResourceCost], resource_name: &BTreeMap<&str, &str>) -
     cost.iter()
         .map(|c| {
             let label = resource_name.get(c.resource_id.as_str()).copied().unwrap_or(c.resource_id.as_str());
-            format!("{} {}", fmt_abbrev(c.amount), label)
+            // Render each item as a small game icon followed by the abbreviated
+            // amount.  The icons live in /images/resources/<id>.png and were
+            // cropped out of the game's sprite atlas by extract-icons.
+            // `alt` covers screen readers / icon-load failures.
+            format!(
+                "<img src=\"../images/resources/{id}.png\" width=\"16\" alt=\"{label}\" title=\"{label}\"/>&nbsp;{amount}",
+                id = c.resource_id,
+                label = label,
+                amount = fmt_abbrev(c.amount),
+            )
         })
         .collect::<Vec<_>>()
         .join("<br>")

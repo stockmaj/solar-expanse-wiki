@@ -8,6 +8,7 @@ csv = "1.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 [dev-dependencies]
 tempfile = "3"
@@ -27,6 +28,10 @@ path = "src/bin/parse_sirenix.rs"
 [[bin]]
 name = "gen-pages"
 path = "src/bin/gen_pages.rs"
+
+[[bin]]
+name = "extract-icons"
+path = "src/bin/extract_icons.rs"
 
 [profile.release]
 lto = true

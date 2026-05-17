@@ -121,6 +121,9 @@ run_pipeline() {
     log "parse-sirenix"
     "$bindir/parse-sirenix" "$CACHE/sirenix-dump.json" "$CACHE/sirenix.json"
 
+    log "extract-icons"
+    "$bindir/extract-icons" "$CACHE/project/ExportedProject" "$WIKI_ROOT/docs/images/resources"
+
     log "gen-pages"
     "$bindir/gen-pages" "$CACHE/locale.json" "$CACHE/stats.json" "$CACHE/sirenix.json" "$WIKI_ROOT/docs"
 
