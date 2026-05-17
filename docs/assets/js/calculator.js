@@ -47,6 +47,50 @@
     return totals;
   }
 
+  function matches(reduction, facility) {
+    return reduction.affects_all === true ||
+      (Array.isArray(reduction.affects) && reduction.affects.indexOf(facility.id) !== -1);
+  }
+
+  function crewMultiplier(facility, checkedReductions) {
+    var sum = 0;
+    for (var i = 0; i < checkedReductions.length; i++) {
+      var r = checkedReductions[i];
+      if (r.kind === 'ReduceCrewRequirements' && matches(r, facility)) sum += r.percent;
+    }
+    var m = (100 - sum) / 100;
+    return m < 0 ? 0 : m;
+  }
+
+  function powerProductionMultiplier(facility, checkedReductions) {
+    var sum = 0;
+    for (var i = 0; i < checkedReductions.length; i++) {
+      var r = checkedReductions[i];
+      if (r.kind === 'PowerProduction' && matches(r, facility)) sum += r.percent;
+    }
+    return (100 + sum) / 100;
+  }
+
+  function workerTotal(placed, checkedReductions) {
+    var total = 0;
+    placed.forEach(function (p) {
+      var m = crewMultiplier(p.facility, checkedReductions);
+      total += (p.facility.workers_required || 0) * m * p.count;
+    });
+    return Math.round(total);
+  }
+
+  // Net power need = consumption − (production × PowerProduction bonus).
+  // Positive → deficit, negative → surplus.
+  function powerNetTotal(placed, checkedReductions) {
+    var net = 0;
+    placed.forEach(function (p) {
+      var m = powerProductionMultiplier(p.facility, checkedReductions);
+      net += ((p.facility.energy_consumption || 0) - (p.facility.power_production || 0) * m) * p.count;
+    });
+    return Math.round(net);
+  }
+
   // ----- DOM binding -----------------------------------------------------
 
   var STORAGE_KEY = 'solar-expanse-calc-v1';
@@ -210,8 +254,7 @@
 
     return '<details class="calc-bonuses">' +
       '<summary>Tech bonuses</summary>' +
-      '<p class="calc-hint">Only construction reductions affect the resource totals below today. ' +
-      'Power and crew reductions are listed so you can see what research the game ships.</p>' +
+      '<p class="calc-hint">Stacks additively, matching the game.</p>' +
       sections +
       '</details>';
   }
@@ -422,10 +465,9 @@
       .filter(Boolean);
 
     var totals = totalResources(placed, checked);
-    var rows = Object.keys(totals)
+    var resourceRows = Object.keys(totals)
       .map(function (rid) {
         return {
-          rid: rid,
           name: (ctx.resById[rid] && ctx.resById[rid].name) || rid,
           amount: totals[rid],
         };
@@ -433,14 +475,21 @@
       .filter(function (r) { return r.amount > 0; })
       .sort(function (a, b) { return b.amount - a.amount; });
 
-    if (rows.length === 0) {
+    var workers = workerTotal(placed, checked);
+    var powerNet = powerNetTotal(placed, checked);
+
+    var grand = resourceRows.reduce(function (sum, r) { return sum + r.amount; }, 0);
+
+    var extraRows = [];
+    if (workers > 0) extraRows.push({ name: 'Humans', amount: workers });
+    if (powerNet !== 0) extraRows.push({ name: 'Power (net)', amount: powerNet });
+
+    if (resourceRows.length === 0 && extraRows.length === 0) {
       return '<p class="calc-empty"><em>All costs reduced to 0.</em></p>';
     }
 
-    var grand = rows.reduce(function (sum, r) { return sum + r.amount; }, 0);
-
     return '<table class="calc-totals"><thead><tr><th>Resource</th><th>Amount</th></tr></thead><tbody>' +
-      rows.map(function (r) {
+      resourceRows.concat(extraRows).map(function (r) {
         return '<tr><td>' + escapeHtml(r.name) + '</td>' +
           '<td class="calc-num">' + r.amount.toLocaleString() + '</td></tr>';
       }).join('') +
@@ -472,6 +521,8 @@
     applyReductions: applyReductions,
     buildCostMultiplier: buildCostMultiplier,
     totalResources: totalResources,
+    workerTotal: workerTotal,
+    powerNetTotal: powerNetTotal,
   };
 
   if (typeof module !== 'undefined' && module.exports) {

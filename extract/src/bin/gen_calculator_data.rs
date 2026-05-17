@@ -187,6 +187,20 @@ fn build_calculator_data(sirenix: &Sirenix, locale: &Locale) -> CalculatorData {
         });
     }
 
+    // Disambiguate `_big` variants that share a display name with the basic
+    // facility. The game gives the late-game variant the same in-game name;
+    // appending "(Advanced)" lets the calculator distinguish them.
+    let mut name_counts: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    for f in &facilities {
+        *name_counts.entry(f.name.clone()).or_insert(0) += 1;
+    }
+    for f in facilities.iter_mut() {
+        if f.id.ends_with("_big") && name_counts.get(&f.name).copied().unwrap_or(0) > 1 {
+            f.name = format!("{} (Advanced)", f.name);
+        }
+    }
+
     let used_resources: BTreeSet<&str> = facilities
         .iter()
         .flat_map(|f| f.build_cost.iter().map(|c| c.resource.as_str()))
@@ -660,5 +674,65 @@ mod tests {
         let data = build_calculator_data(&sirenix, &locale);
         let f = &data.facilities[0];
         assert_eq!(f.power_production, 0.0);
+    }
+
+    #[test]
+    fn big_variant_gets_advanced_suffix_when_basic_shares_name() {
+        let sirenix: Sirenix = from_json(serde_json::json!({
+            "facilities": [
+                {
+                    "id": "build_carbonmine",
+                    "descriptor": "Ground",
+                    "placement": "Surface",
+                    "facility_type": "Mining",
+                    "build_cost": [{"resource_id": "metal", "amount": 125.0}]
+                },
+                {
+                    "id": "build_carbonmine_big",
+                    "descriptor": "Ground",
+                    "placement": "Surface",
+                    "facility_type": "Mining",
+                    "build_cost": [{"resource_id": "metal", "amount": 1250.0}]
+                }
+            ],
+            "resources": [{"id": "metal"}]
+        }));
+        let locale = locale_with(
+            vec![
+                ("carbonmine", "CARBON MINE"),
+                ("carbonmine_big", "CARBON MINE"),
+            ],
+            vec![],
+            vec![("metal", "Metals")],
+        );
+
+        let data = build_calculator_data(&sirenix, &locale);
+        let names: Vec<&str> = data.facilities.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, vec!["Carbon Mine", "Carbon Mine (Advanced)"]);
+    }
+
+    #[test]
+    fn big_variant_keeps_plain_name_when_basic_is_filtered_out() {
+        // If the small variant gets excluded (e.g. missing locale), the _big
+        // variant shouldn't be renamed since there's nothing to disambiguate from.
+        let sirenix: Sirenix = from_json(serde_json::json!({
+            "facilities": [{
+                "id": "build_carbonmine_big",
+                "descriptor": "Ground",
+                "placement": "Surface",
+                "facility_type": "Mining",
+                "build_cost": [{"resource_id": "metal", "amount": 1250.0}]
+            }],
+            "resources": [{"id": "metal"}]
+        }));
+        let locale = locale_with(
+            vec![("carbonmine_big", "CARBON MINE")],
+            vec![],
+            vec![("metal", "Metals")],
+        );
+
+        let data = build_calculator_data(&sirenix, &locale);
+        assert_eq!(data.facilities.len(), 1);
+        assert_eq!(data.facilities[0].name, "Carbon Mine");
     }
 }

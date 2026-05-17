@@ -30,7 +30,7 @@
     },
     {
       "id": "build_alloysmelting_big",
-      "name": "Alloy Smelting",
+      "name": "Alloy Smelting (Advanced)",
       "category": "Production",
       "build_cost": [
         {
@@ -72,7 +72,7 @@
     },
     {
       "id": "build_carbonmine_big",
-      "name": "Carbon Mine",
+      "name": "Carbon Mine (Advanced)",
       "category": "Mining",
       "build_cost": [
         {
@@ -248,7 +248,7 @@
     },
     {
       "id": "build_electrolysis_big",
-      "name": "Electrolysis Plant",
+      "name": "Electrolysis Plant (Advanced)",
       "category": "Production",
       "build_cost": [
         {
@@ -280,7 +280,7 @@
     },
     {
       "id": "build_electronicsfactory_big",
-      "name": "Electronics Factory",
+      "name": "Electronics Factory (Advanced)",
       "category": "Production",
       "build_cost": [
         {
@@ -334,7 +334,7 @@
     },
     {
       "id": "build_exoticalloy_big",
-      "name": "Exotic Alloy Production",
+      "name": "Exotic Alloy Production (Advanced)",
       "category": "Production",
       "build_cost": [
         {
@@ -388,7 +388,7 @@
     },
     {
       "id": "build_fuel_big",
-      "name": "Fuel Refinery",
+      "name": "Fuel Refinery (Advanced)",
       "category": "Production",
       "build_cost": [
         {
@@ -448,7 +448,7 @@
     },
     {
       "id": "build_glass_big",
-      "name": "Glass Kiln",
+      "name": "Glass Kiln (Advanced)",
       "category": "Production",
       "build_cost": [
         {
@@ -640,7 +640,7 @@
     },
     {
       "id": "build_icemine_big",
-      "name": "Water Ice Extractor",
+      "name": "Water Ice Extractor (Advanced)",
       "category": "Mining",
       "build_cost": [
         {
@@ -828,7 +828,7 @@
     },
     {
       "id": "build_metalmine_big",
-      "name": "Metal Mining Base",
+      "name": "Metal Mining Base (Advanced)",
       "category": "Mining",
       "build_cost": [
         {
@@ -898,7 +898,7 @@
     },
     {
       "id": "build_noblegasmine_big",
-      "name": "Noble Gas Extractor",
+      "name": "Noble Gas Extractor (Advanced)",
       "category": "Mining",
       "build_cost": [
         {
@@ -1142,7 +1142,7 @@
     },
     {
       "id": "build_power_geothermal_big",
-      "name": "Geothermal Power",
+      "name": "Geothermal Power (Advanced)",
       "category": "Power",
       "build_cost": [
         {
@@ -1200,7 +1200,7 @@
     },
     {
       "id": "build_power_nuke_big",
-      "name": "Nuclear Reactor",
+      "name": "Nuclear Reactor (Advanced)",
       "category": "Power",
       "build_cost": [
         {
@@ -1284,7 +1284,7 @@
     },
     {
       "id": "build_power_solar_big",
-      "name": "Solar Array",
+      "name": "Solar Array (Advanced)",
       "category": "Power",
       "build_cost": [
         {
@@ -1360,7 +1360,7 @@
     },
     {
       "id": "build_power_wind_big",
-      "name": "Wind Power",
+      "name": "Wind Power (Advanced)",
       "category": "Power",
       "build_cost": [
         {
@@ -1402,7 +1402,7 @@
     },
     {
       "id": "build_raremine_big",
-      "name": "Rare Metal Extractors",
+      "name": "Rare Metal Extractors (Advanced)",
       "category": "Mining",
       "build_cost": [
         {
@@ -1444,7 +1444,7 @@
     },
     {
       "id": "build_siliconmine_big",
-      "name": "Silicon Mine",
+      "name": "Silicon Mine (Advanced)",
       "category": "Mining",
       "build_cost": [
         {
@@ -1762,7 +1762,7 @@
     },
     {
       "id": "build_uranmine_big",
-      "name": "Fissiles Mine",
+      "name": "Fissiles Mine (Advanced)",
       "category": "Mining",
       "build_cost": [
         {

@@ -1,7 +1,7 @@
 // Node-only unit tests for calculator.js — additive-stacking math.
 // Run with `node docs/assets/js/calculator.test.js` from anywhere.
 
-const { applyReductions } = require('./calculator.js');
+const { applyReductions, workerTotal, powerNetTotal } = require('./calculator.js');
 
 let passed = 0;
 let failed = 0;
@@ -112,6 +112,116 @@ eq(
   ),
   { r: 33 },
   'half-up rounding (32.5 -> 33)'
+);
+
+// ----- Worker total (ReduceCrewRequirements) ------------------------------
+
+const habitat = {
+  id: 'build_habitat',
+  workers_required: 100,
+  energy_consumption: 1,
+  power_production: 0,
+};
+const powerPlant = {
+  id: 'build_power_chemical',
+  workers_required: 100,
+  energy_consumption: 0,
+  power_production: 400,
+};
+const mine = {
+  id: 'build_alloymine',
+  workers_required: 5,
+  energy_consumption: 0.5,
+  power_production: 0,
+};
+
+eq(
+  workerTotal([{ facility: habitat, count: 1 }, { facility: mine, count: 2 }], []),
+  110,
+  'worker total: no reductions sums workers × count'
+);
+
+eq(
+  workerTotal(
+    [{ facility: habitat, count: 1 }],
+    [{ id: 'r', kind: 'ReduceCrewRequirements', percent: 10, affects: [], affects_all: true }]
+  ),
+  90,
+  'worker total: 10% crew reduction applies to all'
+);
+
+eq(
+  workerTotal(
+    [{ facility: habitat, count: 1 }],
+    [
+      { id: 'r1', kind: 'ReduceCrewRequirements', percent: 60, affects: [], affects_all: true },
+      { id: 'r2', kind: 'ReduceCrewRequirements', percent: 50, affects: [], affects_all: true },
+    ]
+  ),
+  0,
+  'worker total: sum >= 100% clamps to 0'
+);
+
+eq(
+  workerTotal(
+    [{ facility: habitat, count: 1 }, { facility: mine, count: 1 }],
+    [{ id: 'r', kind: 'ReduceCrewRequirements', percent: 20, affects: ['build_habitat'], affects_all: false }]
+  ),
+  85,
+  'worker total: targeted reduction only affects matching facility'
+);
+
+eq(
+  workerTotal(
+    [{ facility: habitat, count: 1 }],
+    [{ id: 'r', kind: 'BuildCost', percent: 99, affects: [], affects_all: true }]
+  ),
+  100,
+  'worker total: non-crew reductions are ignored'
+);
+
+// ----- Power net total (PowerProduction) ----------------------------------
+
+eq(
+  powerNetTotal(
+    [{ facility: powerPlant, count: 1 }, { facility: mine, count: 4 }],
+    []
+  ),
+  -398,
+  'power net: no reductions → consumption (2) minus production (400) = -398 (surplus)'
+);
+
+eq(
+  powerNetTotal([{ facility: mine, count: 4 }], []),
+  2,
+  'power net: positive value means deficit (need to import power)'
+);
+
+eq(
+  powerNetTotal(
+    [{ facility: powerPlant, count: 1 }],
+    [{ id: 'r', kind: 'PowerProduction', percent: 50, affects: [], affects_all: true }]
+  ),
+  -600,
+  'power net: PowerProduction bonus scales production up (400 × 1.5 = 600)'
+);
+
+eq(
+  powerNetTotal(
+    [{ facility: powerPlant, count: 1 }],
+    [{ id: 'r', kind: 'PowerProduction', percent: 25, affects: ['build_other'], affects_all: false }]
+  ),
+  -400,
+  'power net: targeted production bonus skips non-matching facility'
+);
+
+eq(
+  powerNetTotal(
+    [{ facility: powerPlant, count: 1 }],
+    [{ id: 'r', kind: 'BuildCost', percent: 99, affects: [], affects_all: true }]
+  ),
+  -400,
+  'power net: non-power reductions are ignored'
 );
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
