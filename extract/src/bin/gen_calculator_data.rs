@@ -22,6 +22,12 @@ struct FacilityStat {
     facility_type: String,
     #[serde(default)]
     build_cost: Vec<ResourceCost>,
+    #[serde(default)]
+    workers_required: i64,
+    #[serde(default)]
+    energy_consumption: f64,
+    #[serde(default)]
+    produces: Vec<ResourceCost>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -79,6 +85,9 @@ struct CalcFacility {
     name: String,
     category: String,
     build_cost: Vec<CalcCost>,
+    workers_required: i64,
+    energy_consumption: f64,
+    power_production: f64,
 }
 
 #[derive(Serialize, Debug, PartialEq)]
@@ -161,11 +170,20 @@ fn build_calculator_data(sirenix: &Sirenix, locale: &Locale) -> CalculatorData {
                 amount: c.amount,
             })
             .collect();
+        let power_production = f
+            .produces
+            .iter()
+            .find(|p| p.resource_id == "energy")
+            .map(|p| p.amount)
+            .unwrap_or(0.0);
         facilities.push(CalcFacility {
             id: f.id.clone(),
             name,
             category: f.facility_type.clone(),
             build_cost,
+            workers_required: f.workers_required,
+            energy_consumption: f.energy_consumption,
+            power_production,
         });
     }
 
@@ -561,5 +579,86 @@ mod tests {
         assert_eq!(data.facilities.len(), 1);
         assert_eq!(data.facilities[0].id, "build_alloymine");
         assert_eq!(data.facilities[0].name, "Exotic Alloy Extractor");
+    }
+
+    #[test]
+    fn facility_exposes_workers_and_energy_fields() {
+        let sirenix: Sirenix = from_json(serde_json::json!({
+            "facilities": [{
+                "id": "build_alloymine",
+                "descriptor": "Ground",
+                "placement": "Surface",
+                "facility_type": "Mining",
+                "workers_required": 5,
+                "energy_consumption": 0.5,
+                "build_cost": [{"resource_id": "metal", "amount": 125.0}]
+            }],
+            "resources": [{"id": "metal"}]
+        }));
+        let locale = locale_with(
+            vec![("alloymine", "EXOTIC ALLOY EXTRACTOR")],
+            vec![],
+            vec![("metal", "Metals")],
+        );
+
+        let data = build_calculator_data(&sirenix, &locale);
+        let f = &data.facilities[0];
+        assert_eq!(f.workers_required, 5);
+        assert_eq!(f.energy_consumption, 0.5);
+        assert_eq!(f.power_production, 0.0);
+    }
+
+    #[test]
+    fn facility_with_energy_in_produces_reports_power_production() {
+        let sirenix: Sirenix = from_json(serde_json::json!({
+            "facilities": [{
+                "id": "build_power_chemical",
+                "descriptor": "Ground",
+                "placement": "Surface",
+                "facility_type": "Power",
+                "workers_required": 100,
+                "energy_consumption": 0.0,
+                "produces": [{"resource_id": "energy", "amount": 400.0}],
+                "build_cost": [{"resource_id": "steel", "amount": 400.0}]
+            }],
+            "resources": [{"id": "steel"}]
+        }));
+        let locale = locale_with(
+            vec![("power_chemical", "CHEMICAL REACTOR")],
+            vec![],
+            vec![("steel", "Alloy")],
+        );
+
+        let data = build_calculator_data(&sirenix, &locale);
+        let f = &data.facilities[0];
+        assert_eq!(f.power_production, 400.0);
+        assert_eq!(f.energy_consumption, 0.0);
+        assert_eq!(f.workers_required, 100);
+    }
+
+    #[test]
+    fn facility_without_energy_in_produces_has_zero_power_production() {
+        let sirenix: Sirenix = from_json(serde_json::json!({
+            "facilities": [{
+                "id": "build_alloysmelting",
+                "descriptor": "Ground",
+                "placement": "Surface",
+                "facility_type": "Other",
+                "workers_required": 10,
+                "energy_consumption": 2.5,
+                "produces": [{"resource_id": "alloy", "amount": 0.0}],
+                "build_cost": [{"resource_id": "metal", "amount": 100.0}]
+            }],
+            "resources": [{"id": "metal"}]
+        }));
+        let locale = locale_with(
+            vec![("alloysmelting", "ALLOY SMELTING")],
+            vec![],
+            vec![("metal", "Metals")],
+        );
+
+        let data = build_calculator_data(&sirenix, &locale);
+        let f = &data.facilities[0];
+        assert_eq!(f.power_production, 0.0);
     }
 }

@@ -9,7 +9,10 @@
           "resource": "metal",
           "amount": 125.0
         }
-      ]
+      ],
+      "workers_required": 5,
+      "energy_consumption": 0.5,
+      "power_production": 0.0
     },
     {
       "id": "build_alloysmelting",
@@ -20,7 +23,10 @@
           "resource": "metal",
           "amount": 300.0
         }
-      ]
+      ],
+      "workers_required": 10,
+      "energy_consumption": 2.5,
+      "power_production": 0.0
     },
     {
       "id": "build_alloysmelting_big",
@@ -31,7 +37,10 @@
           "resource": "metal",
           "amount": 300000.0
         }
-      ]
+      ],
+      "workers_required": 100,
+      "energy_consumption": 15.0,
+      "power_production": 0.0
     },
     {
       "id": "build_carbon_deposition",
@@ -42,7 +51,10 @@
           "resource": "metal",
           "amount": 125.0
         }
-      ]
+      ],
+      "workers_required": 5,
+      "energy_consumption": 0.5,
+      "power_production": 0.0
     },
     {
       "id": "build_carbonmine",
@@ -53,7 +65,10 @@
           "resource": "metal",
           "amount": 125.0
         }
-      ]
+      ],
+      "workers_required": 5,
+      "energy_consumption": 0.5,
+      "power_production": 0.0
     },
     {
       "id": "build_carbonmine_big",
@@ -64,7 +79,10 @@
           "resource": "metal",
           "amount": 1250.0
         }
-      ]
+      ],
+      "workers_required": 50,
+      "energy_consumption": 5.0,
+      "power_production": 0.0
     },
     {
       "id": "build_co2_deposition",
@@ -75,7 +93,10 @@
           "resource": "metal",
           "amount": 125.0
         }
-      ]
+      ],
+      "workers_required": 5,
+      "energy_consumption": 0.5,
+      "power_production": 0.0
     },
     {
       "id": "build_co2_splitting",
@@ -86,7 +107,10 @@
           "resource": "metal",
           "amount": 50.0
         }
-      ]
+      ],
+      "workers_required": 10,
+      "energy_consumption": 2.5,
+      "power_production": 0.0
     },
     {
       "id": "build_co2mine",
@@ -97,7 +121,10 @@
           "resource": "metal",
           "amount": 125.0
         }
-      ]
+      ],
+      "workers_required": 5,
+      "energy_consumption": 0.5,
+      "power_production": 0.0
     },
     {
       "id": "build_consumergoods_big",
@@ -116,7 +143,10 @@
           "resource": "plastic",
           "amount": 40000.0
         }
-      ]
+      ],
+      "workers_required": 0,
+      "energy_consumption": 1.5,
+      "power_production": 0.0
     },
     {
       "id": "build_earthfarm",
@@ -139,7 +169,10 @@
           "resource": "plastic",
           "amount": 200.0
         }
-      ]
+      ],
+      "workers_required": 100,
+      "energy_consumption": 20.0,
+      "power_production": 0.0
     },
     {
       "id": "build_earthhe3",
@@ -158,7 +191,10 @@
           "resource": "uran",
           "amount": 20.0
         }
-      ]
+      ],
+      "workers_required": 0,
+      "energy_consumption": 0.0,
+      "power_production": 0.0
     },
     {
       "id": "build_earthmine",
@@ -173,7 +209,10 @@
           "resource": "chips",
           "amount": 10.0
         }
-      ]
+      ],
+      "workers_required": 0,
+      "energy_consumption": 0.0,
+      "power_production": 0.0
     },
     {
       "id": "build_earthnuke",
@@ -188,7 +227,10 @@
           "resource": "chips",
           "amount": 20.0
         }
-      ]
+      ],
+      "workers_required": 0,
+      "energy_consumption": 0.0,
+      "power_production": 0.0
     },
     {
       "id": "build_electrolysis",
@@ -199,7 +241,10 @@
           "resource": "metal",
           "amount": 50.0
         }
-      ]
+      ],
+      "workers_required": 10,
+      "energy_consumption": 2.5,
+      "power_production": 0.0
     },
     {
       "id": "build_electrolysis_big",
@@ -210,7 +255,10 @@
           "resource": "metal",
           "amount": 50000.0
         }
-      ]
+      ],
+      "workers_required": 100,
+      "energy_consumption": 25.0,
+      "power_production": 0.0
     },
     {
       "id": "build_electronicsfactory",
@@ -225,7 +273,10 @@
           "resource": "chips",
           "amount": 10.0
         }
-      ]
+      ],
+      "workers_required": 40,
+      "energy_consumption": 2.0,
+      "power_production": 0.0
     },
     {
       "id": "build_electronicsfactory_big",
@@ -240,7 +291,10 @@
           "resource": "chips",
           "amount": 10000.0
         }
-      ]
+      ],
+      "workers_required": 100,
+      "energy_consumption": 15.0,
+      "power_production": 0.0
     },
     {
       "id": "build_electronicsmine",
@@ -251,7 +305,10 @@
           "resource": "metal",
           "amount": 125.0
         }
-      ]
+      ],
+      "workers_required": 5,
+      "energy_consumption": 0.5,
+      "power_production": 0.0
     },
     {
       "id": "build_exoticalloy",
@@ -270,7 +327,10 @@
           "resource": "raremetal",
           "amount": 50.0
         }
-      ]
+      ],
+      "workers_required": 20,
+      "energy_consumption": 1.5,
+      "power_production": 0.0
     },
     {
       "id": "build_exoticalloy_big",
@@ -289,7 +349,10 @@
           "resource": "raremetal",
           "amount": 50000.0
         }
-      ]
+      ],
+      "workers_required": 100,
+      "energy_consumption": 15.0,
+      "power_production": 0.0
     },
     {
       "id": "build_farm",
@@ -300,7 +363,10 @@
           "resource": "metal",
           "amount": 50.0
         }
-      ]
+      ],
+      "workers_required": 5,
+      "energy_consumption": 0.5,
+      "power_production": 0.0
     },
     {
       "id": "build_fuel",
@@ -315,7 +381,10 @@
           "resource": "raremetal",
           "amount": 10.0
         }
-      ]
+      ],
+      "workers_required": 5,
+      "energy_consumption": 1.0,
+      "power_production": 0.0
     },
     {
       "id": "build_fuel_big",
@@ -330,7 +399,10 @@
           "resource": "raremetal",
           "amount": 10000.0
         }
-      ]
+      ],
+      "workers_required": 50,
+      "energy_consumption": 10.0,
+      "power_production": 0.0
     },
     {
       "id": "build_fuelmine",
@@ -341,7 +413,10 @@
           "resource": "metal",
           "amount": 125.0
         }
-      ]
+      ],
+      "workers_required": 5,
+      "energy_consumption": 0.5,
+      "power_production": 0.0
     },
     {
       "id": "build_fuelmine_big",
@@ -352,7 +427,10 @@
           "resource": "metal",
           "amount": 1250.0
         }
-      ]
+      ],
+      "workers_required": 100,
+      "energy_consumption": 5.0,
+      "power_production": 0.0
     },
     {
       "id": "build_glass",
@@ -363,7 +441,10 @@
           "resource": "steel",
           "amount": 300.0
         }
-      ]
+      ],
+      "workers_required": 10,
+      "energy_consumption": 2.0,
+      "power_production": 0.0
     },
     {
       "id": "build_glass_big",
@@ -374,7 +455,10 @@
           "resource": "steel",
           "amount": 300000.0
         }
-      ]
+      ],
+      "workers_required": 100,
+      "energy_consumption": 20.0,
+      "power_production": 0.0
     },
     {
       "id": "build_glassmine",
@@ -385,7 +469,10 @@
           "resource": "metal",
           "amount": 125.0
         }
-      ]
+      ],
+      "workers_required": 5,
+      "energy_consumption": 0.5,
+      "power_production": 0.0
     },
     {
       "id": "build_habitat",
@@ -400,7 +487,10 @@
           "resource": "supply",
           "amount": 20.0
         }
-      ]
+      ],
+      "workers_required": 0,
+      "energy_consumption": 1.0,
+      "power_production": 0.0
     },
     {
       "id": "build_habitatcity",
@@ -419,7 +509,10 @@
           "resource": "supply",
           "amount": 100.0
         }
-      ]
+      ],
+      "workers_required": 0,
+      "energy_consumption": 200.0,
+      "power_production": 0.0
     },
     {
       "id": "build_habitatdome",
@@ -438,7 +531,10 @@
           "resource": "supply",
           "amount": 40.0
         }
-      ]
+      ],
+      "workers_required": 0,
+      "energy_consumption": 10.0,
+      "power_production": 0.0
     },
     {
       "id": "build_habitatunder",
@@ -453,7 +549,10 @@
           "resource": "supply",
           "amount": 20.0
         }
-      ]
+      ],
+      "workers_required": 0,
+      "energy_consumption": 1.0,
+      "power_production": 0.0
     },
     {
       "id": "build_he3mine",
@@ -464,7 +563,10 @@
           "resource": "metal",
           "amount": 125.0
         }
-      ]
+      ],
+      "workers_required": 20,
+      "energy_consumption": 1.25,
+      "power_production": 0.0
     },
     {
       "id": "build_hel3_deposition",
@@ -475,7 +577,10 @@
           "resource": "metal",
           "amount": 125.0
         }
-      ]
+      ],
+      "workers_required": 5,
+      "energy_consumption": 0.5,
+      "power_production": 0.0
     },
     {
       "id": "build_hq",
@@ -486,7 +591,10 @@
           "resource": "metal",
           "amount": 1000.0
         }
-      ]
+      ],
+      "workers_required": 0,
+      "energy_consumption": 0.0,
+      "power_production": 0.0
     },
     {
       "id": "build_hydrogen_deposition",
@@ -497,7 +605,10 @@
           "resource": "metal",
           "amount": 125.0
         }
-      ]
+      ],
+      "workers_required": 5,
+      "energy_consumption": 0.5,
+      "power_production": 0.0
     },
     {
       "id": "build_hydrogenmine",
@@ -508,7 +619,10 @@
           "resource": "metal",
           "amount": 125.0
         }
-      ]
+      ],
+      "workers_required": 5,
+      "energy_consumption": 0.5,
+      "power_production": 0.0
     },
     {
       "id": "build_icemine",
@@ -519,7 +633,10 @@
           "resource": "metal",
           "amount": 125.0
         }
-      ]
+      ],
+      "workers_required": 5,
+      "energy_consumption": 0.5,
+      "power_production": 0.0
     },
     {
       "id": "build_icemine_big",
@@ -530,7 +647,10 @@
           "resource": "metal",
           "amount": 1250.0
         }
-      ]
+      ],
+      "workers_required": 50,
+      "energy_consumption": 5.0,
+      "power_production": 0.0
     },
     {
       "id": "build_lab",
@@ -553,7 +673,10 @@
           "resource": "glass",
           "amount": 10.0
         }
-      ]
+      ],
+      "workers_required": 20,
+      "energy_consumption": 2.0,
+      "power_production": 0.0
     },
     {
       "id": "build_launch_elevator",
@@ -572,7 +695,10 @@
           "resource": "steel",
           "amount": 40000.0
         }
-      ]
+      ],
+      "workers_required": 50,
+      "energy_consumption": 4.0,
+      "power_production": 0.0
     },
     {
       "id": "build_launch_magnetic_catapult",
@@ -591,7 +717,10 @@
           "resource": "raremetal",
           "amount": 300.0
         }
-      ]
+      ],
+      "workers_required": 20,
+      "energy_consumption": 2.5,
+      "power_production": 0.0
     },
     {
       "id": "build_launch_magrails",
@@ -610,7 +739,10 @@
           "resource": "raremetal",
           "amount": 100.0
         }
-      ]
+      ],
+      "workers_required": 20,
+      "energy_consumption": 2.5,
+      "power_production": 0.0
     },
     {
       "id": "build_launch_massdriver",
@@ -629,7 +761,10 @@
           "resource": "raremetal",
           "amount": 50.0
         }
-      ]
+      ],
+      "workers_required": 0,
+      "energy_consumption": 2.5,
+      "power_production": 0.0
     },
     {
       "id": "build_launch_pad",
@@ -640,7 +775,10 @@
           "resource": "metal",
           "amount": 120.0
         }
-      ]
+      ],
+      "workers_required": 0,
+      "energy_consumption": 0.0,
+      "power_production": 0.0
     },
     {
       "id": "build_launch_spin",
@@ -655,7 +793,10 @@
           "resource": "chips",
           "amount": 20.0
         }
-      ]
+      ],
+      "workers_required": 20,
+      "energy_consumption": 1.5,
+      "power_production": 0.0
     },
     {
       "id": "build_metal_deposition",
@@ -666,7 +807,10 @@
           "resource": "metal",
           "amount": 125.0
         }
-      ]
+      ],
+      "workers_required": 5,
+      "energy_consumption": 0.5,
+      "power_production": 0.0
     },
     {
       "id": "build_metalmine",
@@ -677,7 +821,10 @@
           "resource": "metal",
           "amount": 125.0
         }
-      ]
+      ],
+      "workers_required": 5,
+      "energy_consumption": 0.5,
+      "power_production": 0.0
     },
     {
       "id": "build_metalmine_big",
@@ -688,7 +835,10 @@
           "resource": "metal",
           "amount": 125.0
         }
-      ]
+      ],
+      "workers_required": 50,
+      "energy_consumption": 5.0,
+      "power_production": 0.0
     },
     {
       "id": "build_nitrogen_deposition",
@@ -699,7 +849,10 @@
           "resource": "metal",
           "amount": 125.0
         }
-      ]
+      ],
+      "workers_required": 5,
+      "energy_consumption": 0.5,
+      "power_production": 0.0
     },
     {
       "id": "build_nitrogenmine",
@@ -710,7 +863,10 @@
           "resource": "metal",
           "amount": 125.0
         }
-      ]
+      ],
+      "workers_required": 5,
+      "energy_consumption": 0.5,
+      "power_production": 0.0
     },
     {
       "id": "build_noblegas_deposition",
@@ -721,7 +877,10 @@
           "resource": "metal",
           "amount": 125.0
         }
-      ]
+      ],
+      "workers_required": 5,
+      "energy_consumption": 0.5,
+      "power_production": 0.0
     },
     {
       "id": "build_noblegasmine",
@@ -732,7 +891,10 @@
           "resource": "metal",
           "amount": 125.0
         }
-      ]
+      ],
+      "workers_required": 5,
+      "energy_consumption": 0.5,
+      "power_production": 0.0
     },
     {
       "id": "build_noblegasmine_big",
@@ -743,7 +905,10 @@
           "resource": "metal",
           "amount": 125.0
         }
-      ]
+      ],
+      "workers_required": 50,
+      "energy_consumption": 5.0,
+      "power_production": 0.0
     },
     {
       "id": "build_observatory",
@@ -762,7 +927,10 @@
           "resource": "chips",
           "amount": 10.0
         }
-      ]
+      ],
+      "workers_required": 5,
+      "energy_consumption": 1.0,
+      "power_production": 0.0
     },
     {
       "id": "build_outpost",
@@ -777,7 +945,10 @@
           "resource": "supply",
           "amount": 10.0
         }
-      ]
+      ],
+      "workers_required": 0,
+      "energy_consumption": 0.0,
+      "power_production": 0.0
     },
     {
       "id": "build_oxygen_deposition",
@@ -788,7 +959,10 @@
           "resource": "metal",
           "amount": 125.0
         }
-      ]
+      ],
+      "workers_required": 5,
+      "energy_consumption": 0.5,
+      "power_production": 0.0
     },
     {
       "id": "build_oxygenmine",
@@ -799,7 +973,10 @@
           "resource": "metal",
           "amount": 125.0
         }
-      ]
+      ],
+      "workers_required": 5,
+      "energy_consumption": 0.5,
+      "power_production": 0.0
     },
     {
       "id": "build_plasticmine",
@@ -810,7 +987,10 @@
           "resource": "metal",
           "amount": 125.0
         }
-      ]
+      ],
+      "workers_required": 5,
+      "energy_consumption": 0.5,
+      "power_production": 0.0
     },
     {
       "id": "build_polymerproduction",
@@ -821,7 +1001,10 @@
           "resource": "steel",
           "amount": 200.0
         }
-      ]
+      ],
+      "workers_required": 20,
+      "energy_consumption": 1.5,
+      "power_production": 0.0
     },
     {
       "id": "build_polymerproduction_big",
@@ -832,7 +1015,10 @@
           "resource": "steel",
           "amount": 200.0
         }
-      ]
+      ],
+      "workers_required": 10,
+      "energy_consumption": 15.0,
+      "power_production": 0.0
     },
     {
       "id": "build_power_battery",
@@ -851,7 +1037,10 @@
           "resource": "chips",
           "amount": 10.0
         }
-      ]
+      ],
+      "workers_required": 0,
+      "energy_consumption": 0.0,
+      "power_production": 0.0
     },
     {
       "id": "build_power_carbon",
@@ -866,7 +1055,10 @@
           "resource": "alloy",
           "amount": 70.0
         }
-      ]
+      ],
+      "workers_required": 200,
+      "energy_consumption": 0.0,
+      "power_production": 350.0
     },
     {
       "id": "build_power_chemical",
@@ -885,7 +1077,10 @@
           "resource": "chips",
           "amount": 50.0
         }
-      ]
+      ],
+      "workers_required": 100,
+      "energy_consumption": 0.0,
+      "power_production": 400.0
     },
     {
       "id": "build_power_fuel_big",
@@ -896,7 +1091,10 @@
           "resource": "steel",
           "amount": 200000.0
         }
-      ]
+      ],
+      "workers_required": 0,
+      "energy_consumption": 0.0,
+      "power_production": 1300.0
     },
     {
       "id": "build_power_fusion",
@@ -915,7 +1113,10 @@
           "resource": "chips",
           "amount": 300.0
         }
-      ]
+      ],
+      "workers_required": 200,
+      "energy_consumption": 0.0,
+      "power_production": 5000.0
     },
     {
       "id": "build_power_geothermal",
@@ -934,7 +1135,10 @@
           "resource": "chips",
           "amount": 100.0
         }
-      ]
+      ],
+      "workers_required": 100,
+      "energy_consumption": 0.0,
+      "power_production": 400.0
     },
     {
       "id": "build_power_geothermal_big",
@@ -945,7 +1149,10 @@
           "resource": "steel",
           "amount": 200000.0
         }
-      ]
+      ],
+      "workers_required": 0,
+      "energy_consumption": 0.0,
+      "power_production": 5000.0
     },
     {
       "id": "build_power_hydrogen",
@@ -964,7 +1171,10 @@
           "resource": "chips",
           "amount": 70.0
         }
-      ]
+      ],
+      "workers_required": 150,
+      "energy_consumption": 0.0,
+      "power_production": 270.0
     },
     {
       "id": "build_power_nuke",
@@ -983,7 +1193,10 @@
           "resource": "chips",
           "amount": 100.0
         }
-      ]
+      ],
+      "workers_required": 200,
+      "energy_consumption": 0.0,
+      "power_production": 500.0
     },
     {
       "id": "build_power_nuke_big",
@@ -1002,7 +1215,10 @@
           "resource": "chips",
           "amount": 50000.0
         }
-      ]
+      ],
+      "workers_required": 0,
+      "energy_consumption": 0.0,
+      "power_production": 20000.0
     },
     {
       "id": "build_power_receiver",
@@ -1021,7 +1237,10 @@
           "resource": "raremetal",
           "amount": 20.0
         }
-      ]
+      ],
+      "workers_required": 0,
+      "energy_consumption": 0.0,
+      "power_production": 0.0
     },
     {
       "id": "build_power_receiver_orbit",
@@ -1040,7 +1259,10 @@
           "resource": "raremetal",
           "amount": 20.0
         }
-      ]
+      ],
+      "workers_required": 0,
+      "energy_consumption": 0.0,
+      "power_production": 0.0
     },
     {
       "id": "build_power_solar",
@@ -1055,7 +1277,10 @@
           "resource": "steel",
           "amount": 10.0
         }
-      ]
+      ],
+      "workers_required": 2,
+      "energy_consumption": 0.0,
+      "power_production": 5.0
     },
     {
       "id": "build_power_solar_big",
@@ -1070,7 +1295,10 @@
           "resource": "silicon",
           "amount": 20000.0
         }
-      ]
+      ],
+      "workers_required": 0,
+      "energy_consumption": 0.0,
+      "power_production": 2000.0
     },
     {
       "id": "build_power_transfer",
@@ -1093,7 +1321,10 @@
           "resource": "steel",
           "amount": 150.0
         }
-      ]
+      ],
+      "workers_required": 0,
+      "energy_consumption": 1000.0,
+      "power_production": 0.0
     },
     {
       "id": "build_power_transfer_orbit",
@@ -1108,7 +1339,10 @@
           "resource": "steel",
           "amount": 30.0
         }
-      ]
+      ],
+      "workers_required": 0,
+      "energy_consumption": 0.0,
+      "power_production": 20.0
     },
     {
       "id": "build_power_wind",
@@ -1119,7 +1353,10 @@
           "resource": "steel",
           "amount": 80.0
         }
-      ]
+      ],
+      "workers_required": 2,
+      "energy_consumption": 0.0,
+      "power_production": 5.0
     },
     {
       "id": "build_power_wind_big",
@@ -1130,7 +1367,10 @@
           "resource": "steel",
           "amount": 60000.0
         }
-      ]
+      ],
+      "workers_required": 0,
+      "energy_consumption": 0.0,
+      "power_production": 1500.0
     },
     {
       "id": "build_raremetal_deposition",
@@ -1141,7 +1381,10 @@
           "resource": "metal",
           "amount": 125.0
         }
-      ]
+      ],
+      "workers_required": 5,
+      "energy_consumption": 0.5,
+      "power_production": 0.0
     },
     {
       "id": "build_raremine",
@@ -1152,7 +1395,10 @@
           "resource": "metal",
           "amount": 125.0
         }
-      ]
+      ],
+      "workers_required": 5,
+      "energy_consumption": 0.5,
+      "power_production": 0.0
     },
     {
       "id": "build_raremine_big",
@@ -1163,7 +1409,10 @@
           "resource": "metal",
           "amount": 1250.0
         }
-      ]
+      ],
+      "workers_required": 50,
+      "energy_consumption": 5.0,
+      "power_production": 0.0
     },
     {
       "id": "build_silicon_deposition",
@@ -1174,7 +1423,10 @@
           "resource": "metal",
           "amount": 125.0
         }
-      ]
+      ],
+      "workers_required": 5,
+      "energy_consumption": 0.5,
+      "power_production": 0.0
     },
     {
       "id": "build_siliconmine",
@@ -1185,7 +1437,10 @@
           "resource": "metal",
           "amount": 125.0
         }
-      ]
+      ],
+      "workers_required": 5,
+      "energy_consumption": 0.5,
+      "power_production": 0.0
     },
     {
       "id": "build_siliconmine_big",
@@ -1196,7 +1451,10 @@
           "resource": "metal",
           "amount": 1250.0
         }
-      ]
+      ],
+      "workers_required": 50,
+      "energy_consumption": 5.0,
+      "power_production": 0.0
     },
     {
       "id": "build_space_0gcity",
@@ -1219,7 +1477,10 @@
           "resource": "glass",
           "amount": 400.0
         }
-      ]
+      ],
+      "workers_required": 0,
+      "energy_consumption": 0.0,
+      "power_production": 0.0
     },
     {
       "id": "build_space_0gcolony",
@@ -1238,7 +1499,10 @@
           "resource": "supply",
           "amount": 20.0
         }
-      ]
+      ],
+      "workers_required": 0,
+      "energy_consumption": 0.0,
+      "power_production": 0.0
     },
     {
       "id": "build_space_0gdome",
@@ -1261,7 +1525,10 @@
           "resource": "supply",
           "amount": 40.0
         }
-      ]
+      ],
+      "workers_required": 0,
+      "energy_consumption": 0.0,
+      "power_production": 0.0
     },
     {
       "id": "build_space_atmoscoop",
@@ -1280,7 +1547,10 @@
           "resource": "chips",
           "amount": 10.0
         }
-      ]
+      ],
+      "workers_required": 0,
+      "energy_consumption": 0.0,
+      "power_production": 0.0
     },
     {
       "id": "build_space_construction",
@@ -1295,7 +1565,10 @@
           "resource": "chips",
           "amount": 10.0
         }
-      ]
+      ],
+      "workers_required": 0,
+      "energy_consumption": 0.0,
+      "power_production": 0.0
     },
     {
       "id": "build_space_drydock",
@@ -1314,7 +1587,10 @@
           "resource": "chips",
           "amount": 25.0
         }
-      ]
+      ],
+      "workers_required": 0,
+      "energy_consumption": 0.0,
+      "power_production": 0.0
     },
     {
       "id": "build_space_fuel",
@@ -1329,7 +1605,10 @@
           "resource": "raremetal",
           "amount": 30.0
         }
-      ]
+      ],
+      "workers_required": 0,
+      "energy_consumption": 0.0,
+      "power_production": 0.0
     },
     {
       "id": "build_space_interstellarconstruction",
@@ -1340,7 +1619,10 @@
           "resource": "steel",
           "amount": 200.0
         }
-      ]
+      ],
+      "workers_required": 0,
+      "energy_consumption": 0.0,
+      "power_production": 0.0
     },
     {
       "id": "build_space_telescope",
@@ -1359,7 +1641,10 @@
           "resource": "chips",
           "amount": 5.0
         }
-      ]
+      ],
+      "workers_required": 0,
+      "energy_consumption": 0.0,
+      "power_production": 0.0
     },
     {
       "id": "build_steelmine",
@@ -1370,7 +1655,10 @@
           "resource": "metal",
           "amount": 125.0
         }
-      ]
+      ],
+      "workers_required": 5,
+      "energy_consumption": 0.5,
+      "power_production": 0.0
     },
     {
       "id": "build_terraform_magnet",
@@ -1381,7 +1669,10 @@
           "resource": "metal",
           "amount": 36000.0
         }
-      ]
+      ],
+      "workers_required": 0,
+      "energy_consumption": 240.0,
+      "power_production": 0.0
     },
     {
       "id": "build_terraform_space_magnet",
@@ -1392,7 +1683,10 @@
           "resource": "steel",
           "amount": 30000.0
         }
-      ]
+      ],
+      "workers_required": 0,
+      "energy_consumption": 228.0,
+      "power_production": 0.0
     },
     {
       "id": "build_terraform_space_mirror",
@@ -1411,7 +1705,10 @@
           "resource": "steel",
           "amount": 1000.0
         }
-      ]
+      ],
+      "workers_required": 0,
+      "energy_consumption": 0.0,
+      "power_production": 0.0
     },
     {
       "id": "build_terraform_space_shade",
@@ -1430,7 +1727,10 @@
           "resource": "alloy",
           "amount": 1000.0
         }
-      ]
+      ],
+      "workers_required": 0,
+      "energy_consumption": 0.0,
+      "power_production": 0.0
     },
     {
       "id": "build_uran_deposition",
@@ -1441,7 +1741,10 @@
           "resource": "metal",
           "amount": 125.0
         }
-      ]
+      ],
+      "workers_required": 5,
+      "energy_consumption": 0.5,
+      "power_production": 0.0
     },
     {
       "id": "build_uranmine",
@@ -1452,7 +1755,10 @@
           "resource": "metal",
           "amount": 125.0
         }
-      ]
+      ],
+      "workers_required": 10,
+      "energy_consumption": 1.0,
+      "power_production": 0.0
     },
     {
       "id": "build_uranmine_big",
@@ -1463,7 +1769,10 @@
           "resource": "metal",
           "amount": 125.0
         }
-      ]
+      ],
+      "workers_required": 50,
+      "energy_consumption": 5.0,
+      "power_production": 0.0
     },
     {
       "id": "build_veh_assembly",
@@ -1478,7 +1787,10 @@
           "resource": "raremetal",
           "amount": 50.0
         }
-      ]
+      ],
+      "workers_required": 10,
+      "energy_consumption": 0.5,
+      "power_production": 0.0
     }
   ],
   "resources": [
