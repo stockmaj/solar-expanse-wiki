@@ -1538,41 +1538,6 @@ fn extract_epoch_year(s: &str) -> Option<String> {
     }
 }
 
-/// Render the "Opens" column for a contract row.  Input is the raw
-/// `dateStartActive` string from the dump (`MM/DD/YYYY`); we return just
-/// the year, or "—" if missing/empty/malformed.
-fn format_contract_opens(date_start_active: Option<&str>) -> String {
-    let s = match date_start_active {
-        Some(s) if !s.is_empty() => s,
-        _ => return "—".to_string(),
-    };
-    let parts: Vec<&str> = s.split('/').collect();
-    if parts.len() != 3 {
-        return "—".to_string();
-    }
-    let year = parts[2];
-    if year.len() == 4 && year.chars().all(|c| c.is_ascii_digit()) {
-        year.to_string()
-    } else {
-        "—".to_string()
-    }
-}
-
-/// Render the "Expires in" column.  `0` (or any non-positive) means the
-/// contract never expires; we show "—" in that case.  Anything positive
-/// rounds to the nearest year and appends " yr".
-fn format_contract_expires(years_to_expire: f64) -> String {
-    if !years_to_expire.is_finite() || years_to_expire <= 0.0 {
-        return "—".to_string();
-    }
-    let rounded = years_to_expire.round() as i64;
-    if rounded <= 0 {
-        "—".to_string()
-    } else {
-        format!("{} yr", rounded)
-    }
-}
-
 fn page_corporations(locale: &Locale, sirenix: &Sirenix) -> String {
     // Build research id → display name lookup from locale (e.g.
     // "research_nukeprop_2" → "Solid-core nuclear-thermal engines").
@@ -2565,15 +2530,11 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
             };
 
             let order_cell = depth.get(c.id.as_str()).copied().unwrap_or(0).to_string();
-            let opens_cell = format_contract_opens(c.date_start_active.as_deref());
-            let expires_cell = format_contract_expires(c.years_to_expire);
 
             vec![
                 order_cell,
                 name_cell,
                 prereq_cell,
-                opens_cell,
-                expires_cell,
                 requirements,
                 rewards,
                 escape_cell(&premise),
@@ -2581,13 +2542,11 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
         })
         .collect();
     let table = md_table_with_tips(
-        &["Order", "Contract", "Prereq", "Opens", "Expires in", "Requirements", "Rewards", "Premise"],
+        &["Order", "Contract", "Prereq", "Requirements", "Rewards", "Premise"],
         &[
             Some("Dependency depth: 0 = no prereq, N = unlocked after an Order N-1 contract"),
             None,
             Some("Contracts that must complete before this one is offered"),
-            Some("In-game year the contract first becomes offerable"),
-            Some("Years the contract stays offerable before it disappears (— = never expires)"),
             Some("Objectives that must be completed to claim the rewards"),
             Some("Cash, resources, unlocks, and follow-up contracts granted on completion"),
             None,
@@ -3873,31 +3832,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn contract_row_shows_opens_year_from_date_start_active() {
-        let locale = contracts_fixture_locale();
-        let mut c = make_contract("contract_tutorial_moonlanding", vec![], vec![]);
-        c.date_start_active = Some("01/01/2050".into());
-        c.years_to_expire = 5.0;
-        let sirenix = Sirenix {
-            contracts: vec![c],
-            ..Default::default()
-        };
-        let page = page_contracts(&locale, &sirenix);
-        let row = page
-            .lines()
-            .find(|l| l.contains("Lunar Landing"))
-            .expect("Lunar Landing row present");
-        assert!(
-            row.contains("2050"),
-            "Opens column should render year 2050: {row}"
-        );
-        assert!(
-            row.contains("5 yr"),
-            "Expires column should render '5 yr': {row}"
-        );
-    }
-
     // ---------- Navigation fixes: cross-page links wherever they apply ----------
 
     fn nav_fixture_locale() -> Locale {
@@ -4068,37 +4002,6 @@ mod tests {
         assert!(
             page.contains("Sentinel Industries"),
             "page should render the corp name from locale:\n{page}"
-        );
-    }
-
-    #[test]
-    fn contract_row_renders_dash_for_zero_expiry_and_missing_date() {
-        let locale = contracts_fixture_locale();
-        let mut c = make_contract("contract_tutorial_moonlanding", vec![], vec![]);
-        c.date_start_active = None;
-        c.years_to_expire = 0.0;
-        let sirenix = Sirenix {
-            contracts: vec![c],
-            ..Default::default()
-        };
-        let page = page_contracts(&locale, &sirenix);
-        let row = page
-            .lines()
-            .find(|l| l.contains("Lunar Landing"))
-            .expect("Lunar Landing row present");
-        // The row must include the Opens and Expires cells; both should be "—"
-        // when nothing is known.  The cell separator count tells us they're
-        // present at all.
-        let cell_count = row.matches(" | ").count();
-        assert!(
-            cell_count >= 7,
-            "expected Opens + Expires columns present, got row: {row}"
-        );
-        // Look for "—" appearing at least twice in this row (Opens + Expires).
-        let dash_count = row.matches('—').count();
-        assert!(
-            dash_count >= 2,
-            "expected '—' in Opens and Expires columns, got row: {row}"
         );
     }
 
