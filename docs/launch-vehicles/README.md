@@ -5,7 +5,7 @@ has to ride one of these to reach orbit, and the launch cost paid here is paid
 on **every** launch — reusable vehicles amortise their build cost over many
 flights.
 
-| Launch Vehicle | Payload (t) | Reusable | Crew | Build cost | Time (d) | Launch | Maint | Description |
+| Launch Vehicle | <span title="Max payload to low orbit, in tonnes">Payload (t)</span> | <span title="Survives reentry and can fly again (Yes / Partial / No)">Reusable</span> | <span title="Crew-rated for human passengers">Crew</span> | <span title="Resources required to construct">Build cost</span> | <span title="Build time in days">Time (d)</span> | <span title="Cash fee paid on every launch">Launch</span> | <span title="Daily maintenance cost while idle on the pad">Maint</span> | Description |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | <a id="lv-id-Rocket-RocketType1"></a>**Sparrow** | 10 | No | Yes | <span style="white-space:nowrap" title="Metals"><img src="../images/resources/metal.png" width="16" alt="Metals"/>&nbsp;50</span> | 50 | 150 | 10 | Cheap, simple, single use small Launch Vehicle. |
 | <a id="lv-id-Rocket-RocketType5"></a>**Al-Ice Rocket** | 40 | No | Yes | <span style="white-space:nowrap" title="Metals"><img src="../images/resources/metal.png" width="16" alt="Metals"/>&nbsp;20</span><br><span style="white-space:nowrap" title="Water"><img src="../images/resources/water.png" width="16" alt="Water"/>&nbsp;20</span> | 25 | 0 | 0 | Aluminium-Ice LV. Low efficiency but easily assembled from local resources. |

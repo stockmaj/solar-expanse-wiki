@@ -382,9 +382,25 @@ fn fmt_km(v: Option<f64>) -> String {
 }
 
 fn md_table(headers: &[&str], rows: &[Vec<String>]) -> String {
+    md_table_with_tips(headers, &[], rows)
+}
+
+/// Same as md_table but each header gets wrapped in a `<span title="…">` when a
+/// tooltip is provided.  The CSS-only hover popup in default.html surfaces the
+/// description as an instant tooltip; the same prose still appears in the
+/// "Reading the table" section below each table for reference.
+fn md_table_with_tips(headers: &[&str], tooltips: &[Option<&str>], rows: &[Vec<String>]) -> String {
+    let labels: Vec<String> = headers
+        .iter()
+        .enumerate()
+        .map(|(i, h)| match tooltips.get(i).and_then(|x| *x) {
+            Some(t) => format!("<span title=\"{}\">{}</span>", t, h),
+            None => h.to_string(),
+        })
+        .collect();
     let mut out = String::new();
     out.push_str("| ");
-    out.push_str(&headers.join(" | "));
+    out.push_str(&labels.join(" | "));
     out.push_str(" |\n| ");
     out.push_str(&vec!["---"; headers.len()].join(" | "));
     out.push_str(" |\n");
@@ -951,7 +967,7 @@ lift them to space.\n\n",
             return;
         }
         out.push_str(&format!("## {header}\n\n"));
-        out.push_str(&md_table(
+        out.push_str(&md_table_with_tips(
             &[
                 "Spacecraft",
                 "Mass (t)",
@@ -964,6 +980,19 @@ lift them to space.\n\n",
                 "Build cost",
                 "Time (d)",
                 "Description",
+            ],
+            &[
+                None,
+                Some("Dry mass in tonnes"),
+                Some("Cargo capacity in tonnes"),
+                Some("Fuel capacity in tonnes"),
+                Some("Default engine thrust"),
+                Some("Effective exhaust velocity — chemical ~3-5 km/s, nuclear ~8-15, fusion 20+"),
+                Some("Survives the trip and can fly again (Yes / Partial / No)"),
+                Some("Where the spacecraft is assembled — Orbit means built in an orbital shipyard; Surface means built on a planet"),
+                Some("Resources required to construct"),
+                Some("Build time in days"),
+                None,
             ],
             rows,
         ));
@@ -1088,7 +1117,7 @@ fn page_launch_vehicles(locale: &Locale, sirenix: &Sirenix) -> String {
             ]
         })
         .collect();
-    let table = md_table(
+    let table = md_table_with_tips(
         &[
             "Launch Vehicle",
             "Payload (t)",
@@ -1099,6 +1128,17 @@ fn page_launch_vehicles(locale: &Locale, sirenix: &Sirenix) -> String {
             "Launch",
             "Maint",
             "Description",
+        ],
+        &[
+            None,
+            Some("Max payload to low orbit, in tonnes"),
+            Some("Survives reentry and can fly again (Yes / Partial / No)"),
+            Some("Crew-rated for human passengers"),
+            Some("Resources required to construct"),
+            Some("Build time in days"),
+            Some("Cash fee paid on every launch"),
+            Some("Daily maintenance cost while idle on the pad"),
+            None,
         ],
         &rows,
     );
@@ -1249,13 +1289,20 @@ fn page_resources(locale: &Locale, sirenix: &Sirenix) -> String {
             ]
         })
         .collect();
-    let table = md_table(
+    let table = md_table_with_tips(
         &[
             "Resource",
             "Type",
             "Price",
             "Producers",
             "Description",
+        ],
+        &[
+            None,
+            Some("Normal (physical), Energy (real-time power), or Human (colonists)"),
+            Some("Starting market clearing price; supply and demand move it from there"),
+            None,
+            None,
         ],
         &rows,
     );
@@ -1626,8 +1673,18 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
         .map(|f| row_for(f, &facility_name, &research_name, &resource_name))
         .collect();
 
-    let ground_table = md_table(&header, &ground_rows);
-    let orbital_table = md_table(&header, &orbital_rows);
+    let header_tips: [Option<&str>; 8] = [
+        None,
+        Some("Facility category — Production / Mining / Power / Habitation / …"),
+        Some("Resources required to construct"),
+        Some("On-site population required for full output"),
+        Some("Energy consumed per day"),
+        Some("Daily maintenance cost"),
+        Some("Research that unlocks this facility"),
+        None,
+    ];
+    let ground_table = md_table_with_tips(&header, &header_tips, &ground_rows);
+    let orbital_table = md_table_with_tips(&header, &header_tips, &orbital_rows);
 
     format!(
         "# Facilities\n\n\
@@ -1818,8 +1875,15 @@ Physics, Biotech), each subdivided into focused sub-branches.\n\n",
                     ]
                 })
                 .collect();
-            out.push_str(&md_table(
+            out.push_str(&md_table_with_tips(
                 &["Research", "Cost (h)", "Prereqs", "Unlocks", "Description"],
+                &[
+                    None,
+                    Some("Cost in work-hours; divide by your labs' research output to get the actual research time in days"),
+                    None,
+                    None,
+                    None,
+                ],
                 &rows,
             ));
             out.push('\n');

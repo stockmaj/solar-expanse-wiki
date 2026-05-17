@@ -8,7 +8,7 @@ types exist:
 - **Energy** — power; produced and consumed in real time, with limited storage in batteries.
 - **Human** — colonists; produced over time by habitats and consumed by jobs.
 
-| Resource | Type | Price | Producers | Description |
+| Resource | <span title="Normal (physical), Energy (real-time power), or Human (colonists)">Type</span> | <span title="Starting market clearing price; supply and demand move it from there">Price</span> | Producers | Description |
 | --- | --- | --- | --- | --- |
 | **Energy** | Energy | 11.5 | Geothermal Power | The lifeblood of modern infrastructure. Must be generated or stored continuously to prevent system failure. |
 | **Humans** | Human | 200 | — | The driving force of expansion, they need supplies to be able to work. Their survival depends on stable life support and habitability. |
