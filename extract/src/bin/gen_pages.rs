@@ -1504,17 +1504,6 @@ const DIFFICULTY_MONEY_MULT: &[f64] = &[1.25, 1.0, 0.75];
 const DIFFICULTY_UPKEEP_MULT: &[f64] = &[0.5, 1.0, 1.5];
 const DIFFICULTY_SUPPLY_MULT: &[f64] = &[0.5, 1.0, 1.5];
 
-fn scenario_display_name(scenario_id: &str) -> String {
-    // Maps StartGameData.$name → the human-facing name from the New Game
-    // customization screen (Game.UI.CustomizationScreen.StartDateSettings.*).
-    match scenario_id {
-        "StartGameColonization" => "Colonization Era".to_string(),
-        "StartGameExpansion" => "The Expansion".to_string(),
-        "StartGameRaceBeyond" => "Race Beyond".to_string(),
-        other => other.to_string(),
-    }
-}
-
 /// Map a `StartGameEpoch_*` id to the human-facing name shown on the New
 /// Game customization screen.  No locale entry exists for these in the
 /// shipped strings; the names mirror the in-game UI labels.
@@ -1596,13 +1585,13 @@ fn page_corporations(locale: &Locale, sirenix: &Sirenix) -> String {
     let mut out = String::from(
         "# Corporations\n\n\
 The five playable starting factions in Solar Expanse. Each scenario\n\
-(Colonization Era / The Expansion / Race Beyond) ships a different\n\
-pre-built save where every corporation starts with its own completed\n\
-research, funding, and fleet. Difficulty further scales starting money\n\
-and ongoing costs.\n\n\
-_Prelude and Early-Exploration scenarios are procedural and not listed\n\
-in the comparison table — they have no pre-built save data, but they\n\
-do appear in the epoch timeline below._\n\n",
+(Early Exploration / The Expansion / Colonization Era / Race Beyond)\n\
+ships a different pre-built save where every corporation starts with\n\
+its own completed research, funding, and fleet. Difficulty further\n\
+scales starting money and ongoing costs.\n\n\
+_Prelude is a procedural epoch with no pre-built save and is not\n\
+listed in the comparison table; it still appears in the epoch\n\
+timeline below._\n\n",
     );
 
     // ── Epoch / Timeline ──────────────────────────────────────────────────
@@ -1614,9 +1603,9 @@ do appear in the epoch timeline below._\n\n",
         out.push_str("## Epoch / Timeline\n\n");
         out.push_str(
             "Solar Expanse ships five start epochs, each with its own roster of\n\
-playable corporations. Three of them — Colonization Era, The Expansion,\n\
-and Race Beyond — ship pre-built saves that drive the comparison table\n\
-above; the other two start procedurally.\n\n\
+playable corporations. Four of them — Early Exploration, The Expansion,\n\
+Colonization Era, and Race Beyond — ship pre-built saves that drive the\n\
+comparison table above; Prelude starts procedurally.\n\n\
 *The shipped data files carry start-year values and lock flags that\n\
 don't match what the game UI currently shows (start years drift with\n\
 patches, and lock states change as you progress), so they're not in\n\
@@ -1723,7 +1712,7 @@ this table. The names and corp rosters below are stable.*\n\n",
         }
         scenarios_json.push(serde_json::json!({
             "id": s.scenario_id,
-            "name": scenario_display_name(&s.scenario_id),
+            "name": epoch_display_name(&s.scenario_id),
             "corps": corps_json,
         }));
     }
@@ -1747,14 +1736,16 @@ this table. The names and corp rosters below are stable.*\n\n",
     out.push_str(
         "Pick a scenario and difficulty to compare starting funding, fleet, and completed research across all five corporations side-by-side. Only research held by at least one corporation at the selected scenario is listed.\n\n",
     );
-    // <select> elements use Colonization Era + Pioneer as defaults; the JS
+    // <select> elements use Early Exploration + Pioneer as defaults; the JS
     // layer reads the current value and re-renders the table on change.
+    // Early Exploration is the most playable starting point (no pre-built
+    // fleet, full progression ahead), so it's the natural default.
     out.push_str("<div class=\"calc\">\n");
     out.push_str("<label>Scenario:\n<select id=\"corp-scenario\">\n");
     for s in &sirenix.scenario_starts {
         let id = &s.scenario_id;
-        let name = scenario_display_name(id);
-        let selected = if id == "StartGameColonization" {
+        let name = epoch_display_name(id);
+        let selected = if id == "StartGameEpoch_EarlyExploration" {
             " selected"
         } else {
             ""
@@ -4005,6 +3996,203 @@ mod tests {
             !page.contains("| Start year |"),
             "Start year column should not render: data is unreliable"
         );
+    }
+
+    /// Shared fixture: five-corp locale matching the in-game customization
+    /// roster, so corp ordering in the comparison view is deterministic.
+    fn corp_compare_locale() -> Locale {
+        let corp = |id: &str, name: &str| Corporation {
+            id: id.into(),
+            name: name.into(),
+            description: format!("{name} description."),
+            traits: String::new(),
+        };
+        Locale {
+            celestial_bodies: vec![],
+            spacecraft: vec![],
+            launch_vehicles: vec![],
+            research: vec![
+                ResearchEntry { id: "research_chem_main1".into(), category: "chem".into(), name: "Kerolox".into(), description: String::new() },
+                ResearchEntry { id: "research_chem_main2".into(), category: "chem".into(), name: "Hydrolox".into(), description: String::new() },
+                ResearchEntry { id: "research_lv_main1".into(), category: "lv".into(), name: "Small LV".into(), description: String::new() },
+                ResearchEntry { id: "research_sc_iris".into(), category: "sc".into(), name: "Iris SC".into(), description: String::new() },
+            ],
+            corporations: vec![
+                corp("solex", "SoleX"),
+                corp("nasa", "NASA"),
+                corp("esa", "ESA"),
+                corp("cnsa", "CNSA"),
+                corp("roscosmos", "Roscosmos"),
+            ],
+            contracts: vec![],
+            resources: vec![],
+            facilities: vec![],
+            habitability_scales: BTreeMap::new(),
+            cargo: vec![],
+        }
+    }
+
+    #[test]
+    fn corporations_page_renders_all_four_epoch_scenario_labels() {
+        // Once Early Exploration is a real scenario, the page must surface the
+        // human-facing labels for all four pre-built saves — no internal ids,
+        // and no stale "Early-Exploration scenarios are procedural" copy.
+        let locale = corp_compare_locale();
+        let mk = |epoch: &str, money: f64| ScenarioStartStat {
+            scenario_id: epoch.into(),
+            corp_starts: vec![CorpStartStat {
+                company_id: "Solex".into(),
+                starting_money: money,
+                completed_research: vec!["research_chem_main1".into()],
+                starting_launch_vehicles: 0,
+                starting_spacecraft: 0,
+            }],
+        };
+        let sirenix = Sirenix {
+            scenario_starts: vec![
+                mk("StartGameEpoch_EarlyExploration", 5_000_000.0),
+                mk("StartGameEpoch_TheExpansion", 27_200_000.0),
+                mk("StartGameEpoch_Colonization", 33_700_000.0),
+                mk("StartGameEpoch_RaceBeyond", 42_125_000.0),
+            ],
+            ..Default::default()
+        };
+        let page = page_corporations(&locale, &sirenix);
+        for label in ["Early Exploration", "The Expansion", "Colonization Era", "Race Beyond"] {
+            assert!(page.contains(label), "missing {label}:\n{page}");
+        }
+        // Internal epoch ids may appear only inside the data-binding
+        // (the <option value=…> attribute and the JS CORP_DATA blob), never
+        // as bare text. Strip those out and confirm no leakage in prose.
+        let prose: String = page
+            .lines()
+            .filter(|l| !l.contains("window.CORP_DATA")
+                && !l.starts_with("<option ")
+                && !l.contains("<select"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            !prose.contains("StartGameEpoch_"),
+            "internal epoch id leaked into player-facing prose:\n{prose}"
+        );
+        // The default-selected scenario must be Early Exploration.
+        assert!(
+            page.contains("value=\"StartGameEpoch_EarlyExploration\" selected"),
+            "Early Exploration should be the default-selected option:\n{page}"
+        );
+        // No other scenario should carry the selected attribute.
+        for other in ["StartGameEpoch_TheExpansion", "StartGameEpoch_Colonization", "StartGameEpoch_RaceBeyond"] {
+            assert!(
+                !page.contains(&format!("value=\"{other}\" selected")),
+                "only Early Exploration should be selected, but {other} is:\n{page}"
+            );
+        }
+        // Scenario order in the dropdown must be Early → Expansion → Colonization → RaceBeyond.
+        let pos = |needle: &str| page.find(needle).unwrap_or(usize::MAX);
+        let p_early = pos("value=\"StartGameEpoch_EarlyExploration\"");
+        let p_exp = pos("value=\"StartGameEpoch_TheExpansion\"");
+        let p_col = pos("value=\"StartGameEpoch_Colonization\"");
+        let p_race = pos("value=\"StartGameEpoch_RaceBeyond\"");
+        assert!(p_early < p_exp && p_exp < p_col && p_col < p_race,
+            "expected dropdown order Early < Expansion < Colonization < RaceBeyond, got {:?}",
+            (p_early, p_exp, p_col, p_race));
+    }
+
+    #[test]
+    fn corporations_page_shows_solex_early_exploration_starting_cash() {
+        // The Early Exploration save (testStartGAme in the dump) starts SoleX
+        // with $5M. That value must appear in the JSON blob the JS layer reads.
+        let locale = corp_compare_locale();
+        let sirenix = Sirenix {
+            scenario_starts: vec![ScenarioStartStat {
+                scenario_id: "StartGameEpoch_EarlyExploration".into(),
+                corp_starts: vec![CorpStartStat {
+                    company_id: "Solex".into(),
+                    starting_money: 5_000_000.0,
+                    completed_research: vec!["research_chem_main1".into()],
+                    starting_launch_vehicles: 0,
+                    starting_spacecraft: 0,
+                }],
+            }],
+            ..Default::default()
+        };
+        let page = page_corporations(&locale, &sirenix);
+        // The CORP_DATA JSON blob carries `starting_money` verbatim.
+        assert!(
+            page.contains("\"starting_money\":5000000"),
+            "expected SoleX Early Exploration starting cash in CORP_DATA blob:\n{page}"
+        );
+    }
+
+    #[test]
+    fn solex_has_fewer_research_in_early_exploration_than_expansion() {
+        // Pre-built saves get richer with each successive epoch. Early
+        // Exploration should ship fewer completed research items than The
+        // Expansion for the same corp — a sanity check that the new scenario
+        // surfaces a smaller starting tree (and matches the in-game
+        // progression curve).
+        let locale = corp_compare_locale();
+        let sirenix = Sirenix {
+            scenario_starts: vec![
+                ScenarioStartStat {
+                    scenario_id: "StartGameEpoch_EarlyExploration".into(),
+                    corp_starts: vec![CorpStartStat {
+                        company_id: "Solex".into(),
+                        starting_money: 5_000_000.0,
+                        completed_research: vec!["research_chem_main1".into()],
+                        starting_launch_vehicles: 0,
+                        starting_spacecraft: 0,
+                    }],
+                },
+                ScenarioStartStat {
+                    scenario_id: "StartGameEpoch_TheExpansion".into(),
+                    corp_starts: vec![CorpStartStat {
+                        company_id: "Solex".into(),
+                        starting_money: 27_200_000.0,
+                        completed_research: vec![
+                            "research_chem_main1".into(),
+                            "research_chem_main2".into(),
+                            "research_lv_main1".into(),
+                            "research_sc_iris".into(),
+                        ],
+                        starting_launch_vehicles: 2,
+                        starting_spacecraft: 4,
+                    }],
+                },
+            ],
+            ..Default::default()
+        };
+        let page = page_corporations(&locale, &sirenix);
+        // Parse the embedded JSON blob and walk its `scenarios` array so the
+        // assertion isn't sensitive to serde_json's key ordering.
+        let blob_pos = page.find("window.CORP_DATA = ").expect("CORP_DATA blob present");
+        let blob_tail = &page[blob_pos + "window.CORP_DATA = ".len()..];
+        let blob_end = blob_tail.find("};").expect("CORP_DATA blob ends with `};`");
+        let blob_json = format!("{}{}", &blob_tail[..blob_end], "}");
+        let parsed: serde_json::Value = serde_json::from_str(&blob_json)
+            .unwrap_or_else(|e| panic!("CORP_DATA JSON parse failed: {e}\n{blob_json}"));
+        let scenarios = parsed["scenarios"].as_array().expect("scenarios array");
+        let find_corp_research_len = |epoch_id: &str| -> usize {
+            let scen = scenarios
+                .iter()
+                .find(|s| s["id"].as_str() == Some(epoch_id))
+                .unwrap_or_else(|| panic!("missing scenario {epoch_id} in {scenarios:?}"));
+            let solex = scen["corps"]
+                .as_array()
+                .expect("corps array")
+                .iter()
+                .find(|c| c["name"].as_str() == Some("SoleX"))
+                .expect("SoleX corp");
+            solex["research"].as_array().expect("research array").len()
+        };
+        let early_n = find_corp_research_len("StartGameEpoch_EarlyExploration");
+        let expansion_n = find_corp_research_len("StartGameEpoch_TheExpansion");
+        assert!(
+            early_n < expansion_n,
+            "Early Exploration ({early_n}) should ship fewer SoleX research items than The Expansion ({expansion_n})"
+        );
+        assert_eq!(early_n, 1, "Early Exploration SoleX should have 1 research");
+        assert_eq!(expansion_n, 4, "The Expansion SoleX should have 4 research");
     }
 
     #[test]

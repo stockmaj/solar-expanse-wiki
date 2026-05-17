@@ -151,7 +151,7 @@ struct ContractObjective {
 }
 
 /// Per-corporation starting state for a single pre-built save scenario
-/// (StartGameColonization / StartGameExpansion / StartGameRaceBeyond).
+/// (Early Exploration / The Expansion / Colonization Era / Race Beyond).
 /// The values are read out of `StartGameData[].companyDataSave[]` — these
 /// are the canonical pre-rolled saves shipped with the game.
 #[derive(Serialize, Debug, Default, PartialEq)]
@@ -171,10 +171,12 @@ struct CorpStart {
 }
 
 /// One pre-built save scenario, listing every playable corp's starting state.
-/// `scenario_id` matches the `$name` field in StartGameData entries.
+/// `scenario_id` is the `StartGameEpoch_*` id resolved via
+/// `PlanetarySystem_Realistic.mapEpochToToStartData` — NOT the (sometimes
+/// misnamed) `$name` of the underlying StartGameData asset.
 #[derive(Serialize, Debug, Default, PartialEq)]
 struct ScenarioStart {
-    scenario_id: String, // e.g. "StartGameColonization", "StartGameExpansion", "StartGameRaceBeyond"
+    scenario_id: String, // e.g. "StartGameEpoch_EarlyExploration", "StartGameEpoch_TheExpansion", "StartGameEpoch_Colonization", "StartGameEpoch_RaceBeyond"
     corp_starts: Vec<CorpStart>,
 }
 
@@ -852,6 +854,40 @@ fn parse_epoch(v: &Value) -> Option<Epoch> {
     })
 }
 
+/// Walk the dump's `PlanetarySystemDescriptor` array, locate the
+/// `PlanetarySystem_Realistic` entry, and build a routing dict that maps each
+/// `StartGameData $name` to the `StartGameEpoch_*` id that uses it in the Sol
+/// (Realistic) timeline. Returns `None` if the descriptor or its
+/// `mapEpochToToStartData` field is absent.
+///
+/// Sirenix encodes dictionary keys as type-qualified strings such as
+/// `"StartGameEpoch_EarlyExploration (ScriptableObjectScripts.StartGameConfiguration.StartGameEpoch)"`,
+/// so we strip the parenthesised type suffix and trim whitespace to recover the
+/// plain epoch id. The dict values are `$ref` objects whose `name` field
+/// carries the StartGameData asset $name.
+fn build_scenario_routing(
+    descriptors: &Value,
+) -> Option<std::collections::HashMap<String, String>> {
+    let arr = descriptors.as_array()?;
+    let realistic = arr.iter().find(|d| {
+        d.get("$name").and_then(|v| v.as_str()) == Some("PlanetarySystem_Realistic")
+    })?;
+    let map = realistic.get("mapEpochToToStartData")?.as_object()?;
+    let mut routing = std::collections::HashMap::new();
+    for (raw_key, value) in map {
+        let epoch_id = raw_key.split_whitespace().next()?.to_string();
+        if !epoch_id.starts_with("StartGameEpoch_") {
+            continue;
+        }
+        let save_name = match value.get("name").and_then(|v| v.as_str()) {
+            Some(s) if !s.is_empty() => s.to_string(),
+            _ => continue,
+        };
+        routing.insert(save_name, epoch_id);
+    }
+    Some(routing)
+}
+
 /// Parse a single `StartGameData` entry from the Sirenix dump into a
 /// `ScenarioStart` (per-corp starting research / funding / fleet counts).
 ///
@@ -863,17 +899,20 @@ fn parse_epoch(v: &Value) -> Option<Epoch> {
 ///   * `launchVehicles[]` / `spacecrafts[]` array counts → starting fleet
 ///   * `money`                      → starting funding (Pioneer/Normal base)
 ///
-/// Returns `None` if the entry has no populated `companyDataSave` (the
-/// Kepler/Trapist/PerfectSystem placeholders, and the empty SceneJSON).
-fn parse_scenario_start(entry: &Value) -> Option<ScenarioStart> {
-    let scenario_id = entry.get("$name").and_then(|v| v.as_str())?.to_string();
-    // Skip non-scenario / placeholder entries. Pre-built saves are
-    // exactly the three real epoch scenarios; everything else is a
-    // test/dev artifact or an empty placeholder.
-    let scenario_kind = match scenario_id.as_str() {
-        "StartGameColonization" | "StartGameExpansion" | "StartGameRaceBeyond" => scenario_id.clone(),
-        _ => return None,
-    };
+/// `routing` maps the StartGameData $name (e.g. `testStartGAme`,
+/// `StartGameColonization`) to the corresponding `StartGameEpoch_*` id from
+/// `PlanetarySystem_Realistic.mapEpochToToStartData`. Entries whose $name is
+/// not in the routing are skipped — that filters out test/Kepler/Trappist
+/// placeholders and the `StartGameDataSceneJSON` non-Sol save.
+///
+/// Returns `None` if the entry has no populated `companyDataSave` or isn't
+/// in the routing.
+fn parse_scenario_start(
+    entry: &Value,
+    routing: &std::collections::HashMap<String, String>,
+) -> Option<ScenarioStart> {
+    let save_name = entry.get("$name").and_then(|v| v.as_str())?;
+    let epoch_id = routing.get(save_name)?.clone();
 
     let nodes = entry.pointer("/serializationData/SerializationNodes")?.as_array()?;
 
@@ -920,7 +959,7 @@ fn parse_scenario_start(entry: &Value) -> Option<ScenarioStart> {
     corp_starts.sort_by(|a, b| a.company_id.cmp(&b.company_id));
 
     Some(ScenarioStart {
-        scenario_id: scenario_kind,
+        scenario_id: epoch_id,
         corp_starts,
     })
 }
@@ -1140,20 +1179,34 @@ fn main() -> Result<()> {
         .unwrap_or_default();
     contracts.sort_by(|a, b| a.id.cmp(&b.id));
 
-    // Pre-built starting saves (Colonization / Expansion / RaceBeyond).
-    // Each StartGameData entry encodes one full pre-rolled save scene; we
-    // pluck out just the per-company starting research / money / fleet.
+    // Pre-built starting saves for the Sol (Realistic) timeline. The
+    // PlanetarySystem_Realistic descriptor's `mapEpochToToStartData` dict is
+    // the source of truth: it maps each playable epoch (Early Exploration,
+    // The Expansion, Colonization, Race Beyond) to the StartGameData asset
+    // that holds the corresponding pre-rolled save. Note that the asset for
+    // Early Exploration is misnamed `testStartGAme` in the dump — the
+    // routing tells us it's actually the 2020 save shipped to players.
+    let scenario_routing = raw
+        .get("PlanetarySystemDescriptor")
+        .and_then(build_scenario_routing)
+        .unwrap_or_default();
     let mut scenario_starts: Vec<ScenarioStart> = raw
         .get("StartGameData")
         .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(parse_scenario_start).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|e| parse_scenario_start(e, &scenario_routing))
+                .collect()
+        })
         .unwrap_or_default();
-    // Order scenarios by in-game timeline (Colonization → Expansion → RaceBeyond).
+    // Order scenarios by in-game timeline
+    // (Early Exploration → The Expansion → Colonization Era → Race Beyond).
     let timeline = |s: &ScenarioStart| -> u8 {
         match s.scenario_id.as_str() {
-            "StartGameColonization" => 0,
-            "StartGameExpansion" => 1,
-            "StartGameRaceBeyond" => 2,
+            "StartGameEpoch_EarlyExploration" => 0,
+            "StartGameEpoch_TheExpansion" => 1,
+            "StartGameEpoch_Colonization" => 2,
+            "StartGameEpoch_RaceBeyond" => 3,
             _ => 99,
         }
     };
@@ -1480,10 +1533,24 @@ mod tests {
         })
     }
 
+    /// Routing that mirrors what the real PlanetarySystem_Realistic dump carries:
+    /// four StartGameData $name values mapped to their epoch ids.
+    fn realistic_routing() -> std::collections::HashMap<String, String> {
+        let mut m = std::collections::HashMap::new();
+        m.insert("testStartGAme".to_string(), "StartGameEpoch_EarlyExploration".to_string());
+        m.insert("StartGameExpansion".to_string(), "StartGameEpoch_TheExpansion".to_string());
+        m.insert("StartGameColonization".to_string(), "StartGameEpoch_Colonization".to_string());
+        m.insert("StartGameRaceBeyond".to_string(), "StartGameEpoch_RaceBeyond".to_string());
+        m
+    }
+
     #[test]
     fn parses_scenario_start_for_colonization() {
-        let s = parse_scenario_start(&scenario_fixture()).expect("colonization should parse");
-        assert_eq!(s.scenario_id, "StartGameColonization");
+        let routing = realistic_routing();
+        let s = parse_scenario_start(&scenario_fixture(), &routing)
+            .expect("colonization should parse");
+        // scenario_id is now the epoch id, not the StartGameData $name.
+        assert_eq!(s.scenario_id, "StartGameEpoch_Colonization");
         // WorldGovernment must be filtered out — only NASA remains.
         assert_eq!(s.corp_starts.len(), 1);
         let nasa = &s.corp_starts[0];
@@ -1498,19 +1565,86 @@ mod tests {
     }
 
     #[test]
-    fn skips_placeholder_and_test_scenarios() {
-        // Kepler/Trapist/PerfectSystem placeholders have $name like
-        // "StartGameKepler"; only the three real epoch scenarios should parse.
+    fn parses_planetary_system_realistic_epoch_routing() {
+        // The Sirenix dump's PlanetarySystem_Realistic descriptor has a
+        // `mapEpochToToStartData` dict whose keys are stringified type-qualified
+        // epoch ids (e.g. "StartGameEpoch_EarlyExploration (…StartGameEpoch)")
+        // and whose values are $ref objects with `name` pointing at a
+        // StartGameData $name. We extract a `save name → epoch id` routing.
+        let descriptors = serde_json::json!([
+            {
+                "$name": "PlanetarySystem_Dummy",
+                "mapEpochToToStartData": {}
+            },
+            {
+                "$name": "PlanetarySystem_Realistic",
+                "mapEpochToToStartData": {
+                    "StartGameEpoch_EarlyExploration (ScriptableObjectScripts.StartGameConfiguration.StartGameEpoch)": {
+                        "$ref": true, "type": "StartGameData", "name": "testStartGAme"
+                    },
+                    "StartGameEpoch_TheExpansion (ScriptableObjectScripts.StartGameConfiguration.StartGameEpoch)": {
+                        "$ref": true, "type": "StartGameData", "name": "StartGameExpansion"
+                    },
+                    "StartGameEpoch_Colonization (ScriptableObjectScripts.StartGameConfiguration.StartGameEpoch)": {
+                        "$ref": true, "type": "StartGameData", "name": "StartGameColonization"
+                    },
+                    "StartGameEpoch_RaceBeyond (ScriptableObjectScripts.StartGameConfiguration.StartGameEpoch)": {
+                        "$ref": true, "type": "StartGameData", "name": "StartGameRaceBeyond"
+                    }
+                }
+            }
+        ]);
+        let routing = build_scenario_routing(&descriptors)
+            .expect("PlanetarySystem_Realistic should be present");
+        assert_eq!(routing.len(), 4);
+        assert_eq!(
+            routing.get("testStartGAme").map(|s| s.as_str()),
+            Some("StartGameEpoch_EarlyExploration")
+        );
+        assert_eq!(
+            routing.get("StartGameExpansion").map(|s| s.as_str()),
+            Some("StartGameEpoch_TheExpansion")
+        );
+        assert_eq!(
+            routing.get("StartGameColonization").map(|s| s.as_str()),
+            Some("StartGameEpoch_Colonization")
+        );
+        assert_eq!(
+            routing.get("StartGameRaceBeyond").map(|s| s.as_str()),
+            Some("StartGameEpoch_RaceBeyond")
+        );
+    }
+
+    #[test]
+    fn parse_scenario_start_uses_epoch_id_via_routing() {
+        // testStartGAme (the misnamed Early Exploration save) routes through the
+        // PlanetarySystem_Realistic map to `StartGameEpoch_EarlyExploration`.
+        // We change the fixture's $name to confirm the routing — not $name — drives
+        // the resulting scenario_id.
+        let mut fixture = scenario_fixture();
+        fixture["$name"] = serde_json::Value::String("testStartGAme".into());
+        let routing = realistic_routing();
+        let s = parse_scenario_start(&fixture, &routing)
+            .expect("testStartGAme should route to Early Exploration");
+        assert_eq!(s.scenario_id, "StartGameEpoch_EarlyExploration");
+    }
+
+    #[test]
+    fn parse_scenario_start_skips_unmapped_savedata() {
+        // StartGameKepler isn't in PlanetarySystem_Realistic's epoch map, so
+        // it gets skipped even if its serializationData were populated.
+        let routing = realistic_routing();
         let placeholder = serde_json::json!({
             "$name": "StartGameKepler",
             "serializationData": { "SerializationNodes": [] }
         });
-        assert!(parse_scenario_start(&placeholder).is_none());
-        let test = serde_json::json!({
-            "$name": "testStartGAme",
+        assert!(parse_scenario_start(&placeholder, &routing).is_none());
+        // StartGameData (the empty default) is also unmapped.
+        let bare = serde_json::json!({
+            "$name": "StartGameData",
             "serializationData": { "SerializationNodes": [] }
         });
-        assert!(parse_scenario_start(&test).is_none());
+        assert!(parse_scenario_start(&bare, &routing).is_none());
     }
 
     #[test]
