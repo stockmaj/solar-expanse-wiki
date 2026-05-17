@@ -22,8 +22,10 @@ the names, descriptions, and stat tables here match exactly what you see in-game
 
 ## How to use this wiki
 
-Every page is plain Markdown that renders directly on GitHub — no static-site
-generator, no theme, no JS. Browse by clicking section links above.
+Every page is plain Markdown. Jekyll renders the site on GitHub Pages, with a
+custom layout, a sortable-table snippet, and three small browser-side modules
+that power the launch-window, gravity-assist, and corporation-comparison
+calculators. Browse by clicking section links above.
 
 ## Contributing
 
