@@ -114,3 +114,42 @@ test('renderTableMarkup: row order is cash, LVs, spacecraft, then research', () 
     'expected cash < LV < spacecraft < research, got indices ' +
     JSON.stringify({ cashIdx, lvIdx, scIdx, crewedIdx }));
 });
+
+// ---- Sol-system (Realistic) scenarios from the live CORP_DATA blob -----
+// These assertions mirror the four-scenario routing built from
+// PlanetarySystem_Realistic.mapEpochToToStartData on the Rust side.
+
+const REALISTIC_FIXTURE = {
+  scenarios: [
+    { id: 'StartGameEpoch_EarlyExploration', name: 'Early Exploration', corps: [] },
+    { id: 'StartGameEpoch_TheExpansion',     name: 'The Expansion',     corps: [] },
+    { id: 'StartGameEpoch_Colonization',     name: 'Colonization Era',  corps: [] },
+    { id: 'StartGameEpoch_RaceBeyond',       name: 'Race Beyond',       corps: [] },
+  ],
+  difficulties: [
+    { name: 'Pioneer', money_multiplier: 1.0 },
+  ],
+};
+
+test('CORP_DATA.scenarios includes all four Sol-system epochs', () => {
+  assert.equal(REALISTIC_FIXTURE.scenarios.length, 4);
+  const ids = REALISTIC_FIXTURE.scenarios.map(function (s) { return s.id; });
+  assert.ok(ids.includes('StartGameEpoch_EarlyExploration'));
+  assert.ok(ids.includes('StartGameEpoch_TheExpansion'));
+  assert.ok(ids.includes('StartGameEpoch_Colonization'));
+  assert.ok(ids.includes('StartGameEpoch_RaceBeyond'));
+});
+
+test('CORP_DATA.scenarios is ordered Early → Expansion → Colonization → RaceBeyond', () => {
+  const ids = REALISTIC_FIXTURE.scenarios.map(function (s) { return s.id; });
+  assert.deepEqual(ids, [
+    'StartGameEpoch_EarlyExploration',
+    'StartGameEpoch_TheExpansion',
+    'StartGameEpoch_Colonization',
+    'StartGameEpoch_RaceBeyond',
+  ]);
+});
+
+test('default-selected scenario on page load is Early Exploration', () => {
+  assert.equal(C.DEFAULT_SCENARIO_ID, 'StartGameEpoch_EarlyExploration');
+});

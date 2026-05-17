@@ -8,6 +8,12 @@
 // comparison table on change.
 
 (function (root) {
+  // The default-selected scenario when the page first loads.  Early
+  // Exploration is the most playable starting epoch — every corp begins
+  // with no pre-built fleet and a smaller research tree, so the comparison
+  // table shows the broadest possible delta as the player progresses.
+  var DEFAULT_SCENARIO_ID = 'StartGameEpoch_EarlyExploration';
+
   // ----- Pure logic ------------------------------------------------------
 
   // Format a dollar amount the same way fmt_abbrev() does on the Rust side,
@@ -152,7 +158,9 @@
         o.textContent = s.name;
         scenarioSel.appendChild(o);
       });
-      scenarioSel.value = 'StartGameColonization';
+      // Default to Early Exploration — the most playable starting point —
+      // when the page's <select> was rendered with no pre-selected option.
+      scenarioSel.value = DEFAULT_SCENARIO_ID;
     }
     if (difficultySel.options.length === 0) {
       data.difficulties.forEach(function (d) {
@@ -184,6 +192,7 @@
     renderTableMarkup: renderTableMarkup,
     formatMoney: formatMoney,
     bindDom: bindDom,
+    DEFAULT_SCENARIO_ID: DEFAULT_SCENARIO_ID,
   };
 
   if (typeof module !== 'undefined' && module.exports) {
