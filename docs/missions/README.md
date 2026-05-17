@@ -1,7 +1,17 @@
 # Missions
 
-A *mission* is a planned trip from one body's orbit to another. The Plan
-Mission flow walks you through five steps:
+A *mission* in Solar Expanse is one of two things, both shown here.
+
+1. **Funding missions** (the game's *Contracts* — listed in the table below): a fixed set of
+objectives that pay out cash, resources, or unlocks when complete. These
+are the primary income source in single-player.
+2. **Flight missions**: an individual scheduled trip you plan in Plan Mission
+(Earth → Mars on day N). Flight missions are runtime state, not static
+data — see the **planning flow** section below.
+
+## Planning flow
+
+Plan Mission walks you through five steps:
 
 1. **Destination** — pick the target body (and landing type if applicable).
 2. **Spacecraft** — pick the craft to send.
@@ -9,7 +19,7 @@ Mission flow walks you through five steps:
 4. **Launch Vehicle** — pick the lifter (only required for missions launching from a planet's surface).
 5. **Flight Plan** — pick the launch and arrival windows from the porkchop plot.
 
-## Mission types (from in-game UI)
+### Mission types (from in-game UI)
 
 | Type | Notes |
 | --- | --- |
@@ -19,7 +29,67 @@ Mission flow walks you through five steps:
 | **Asteroid Pulling** | Specialised mission to push an asteroid into a different orbit using an Asteroid Engine Module. |
 | **Probe Deployment** | Drops a small probe at a destination (typically the first thing you send anywhere). |
 
+For launch-window timing for any destination, see [Launch Windows](../celestial-bodies/launch-windows.md).
+
+## Funding missions (contracts)
+
+| Contract | Flag | Requirements | Rewards | Premise |
+| --- | --- | --- | --- | --- |
+| **Asteroid Base** |  | Have 1× Rare Metal Extractors<br>Have 1× Launch Pad | ₡750000 | Now that we know that asteroids are worthwhile, we need better infrastructure to capitalize on their resources. An extraction and refueling base for our resource carriers is needed to deliver riches mined in the belt. |
+| **Asteroid Supply Chain** |  | Deliver: 2000× Rare Metals | ₡45000000<br>Next: Trading on Earth | With asteroid mining underway, we still have to complete the last part of the profit chain - deliver it to our customers for sale. A set of cyclical missions bringing rare metals towards Earth will give us a large surplus to sell on the mar… |
+| **Asteroid Drop** |  | Deliver | ₡1000000000.0 | Now that we have tested our technology, it's time to use it for terraforming. Bring a water-rich asteroid to Mars in a controlled impact. |
+| **Probing Lutetia** |  | SelectLayer<br>Deliver: 5× Rare Metals | ₡3600000<br>Next: Beyond Mars<br>Next: Asteroid Mining | If we want to establish a solid economy, we need to experiment with other places for resource extraction. Lutetia is one of the closest major asteroids. With the spectral signature of a metallic type asteroid, it has potential to be rich in… |
+| **Avoiding Armageddon** |  | Deliver: 1× contractitem<br>DetonateNuclearDevice | ₡1500000 | We have just detected an asteroid on an impact course with Earth! The impact is calculated to happen in several years, and will wipe out all life from our planet. This might be the most dreadful extinction event in history, a death sentence… |
+| **Asteroid Mining** |  | Deliver: 1× construction<br>Deliver: 1× basemining<br>Have 1× Rare Metal Extractors | ₡7000000<br>Next: Asteroid Colony | While we have examined the potential of mining asteroids, we still need to establish a permanent mining base on one. Deploy construction equipment to the asteroid belt so that we may begin building mining infrastructure. |
+| **Asteroid Colony** |  | Have 1× Outpost<br>Have 10× Humans | ₡4500000<br>Next: Asteroid Supply Chain | To oversee our mining enterprise, we require a crew of miners and the facilities to house them. This way, we will be able to establish a 24/7 resource extraction and an uninterrupted supply. |
+| **Asteroid Pulling** |  | Build 1× Asteroid Engine<br>Deliver: 1× Asteroid Engine<br>Deliver | ₡15000000<br>Next: Asteroid Drop | Our most recent engine design will allow us to move entire asteroids at the small price of building the engine itself and many tons of useless regolith. It's time to demonstrate this capability, and we've found a perfect little rock to show… |
+| **Asteroid Sample** |  | Deliver: 5× Rare Metals | ₡150000<br>Next: Asteroid Mining | Strike the rock! We found great potential on Lutetia, so it's time to take advantage of that. Mine out what you can and bring it back to Earth for examination. There's much money to be made if this goes well. |
+| **Trading on Earth** |  | MarketPlaceOffers: 0× Rare Metals | ₡15000 | Extra resources extracted in space can be sold back on Earth to the World Governments for profit. Rarer and more expensive resources such as Rare Metals, Fissiles, or Helium-3 are particularly good choices, as well as manufactured goods suc… |
+| **Exoplanet Search** |  | ExplorationInterstellar<br>MakeResearch: 0× research_category_interstellar | ₡1000000<br>Next: First Step to Interstellar | If we are to leave the Solar System, we'd better have a place worth visiting. We need to find a potentially habitable exoplanet to send an interstellar mission to. |
+| **Fleet Expansion** |  | Possess 10 | ₡200000 | As our population and influence grow, we're reaching the limit of our space flight capabilities. We need to expand our spacecraft fleet to handle more missions in the near future. |
+| **Fusion Power** |  | MakeResearch: 0× research_electromag_2<br>Build 1× Fusion Reactor | ₡40000000 | For many decades, nuclear fusion seemed to be just out of our grasp, promising unlimited energy if we just managed to push through. Finally, we're on the verge of this breakthrough that will power our future. |
+| **First Step to Interstellar** |  | Build 1× Interstellar Vehicle Assembly | ₡1000000<br>Next: Beyond the Solar System | We are ready to begin humanity's grandest project yet - to travel beyond our solar system and reach new stars. To do so, we'll need to engineer something greater than ever before - a spacecraft capable of travelling interstellar spaces with… |
+| **Beyond the Solar System** |  | Build 1× Main Structure<br>Build 3× Drive Assembly (1/3)<br>Build 8× Habitat Segment (1/8)<br>Build 1× Prepare the Habitats<br>Deliver<br>ScheduleFly | ₡820000000 | The great work has begun. It will take riches of many planets and asteroids to construct, but it shall be one of humanity's greatest achievements. |
+| **Space Laboratories** |  | Have 5× Research Laboratory | ₡28000000 | To expand our knowledge we need to expand our research. Laboratory complexes on other planets will allow us to study every little detail of these new worlds, and let us understand them better. |
+| **Improve Launch Methods** |  | MakeResearch: 0× research_launch_magrail<br>Build 1× Magnetic Launch Rails | ₡200000 | The growing needs of transportation call for better means of it. To further accelerate our spaceflights, a new system of reusable launch infrastructure is needed. |
+| **Mars Colony** |  | Build 1× Habitat<br>Deliver | ₡5500000<br>Next: Mars City | The time has come to colonize Mars. Now that we can provide our population and industry with everything they need, we should begin construction of habitats to house newcomers and their future families. |
+| **Mars City** |  | Have 1000× Humans | ₡33000000<br>Next: Artificial Magnetosphere for Mars | With an early colony established, we need to look towards expanding our base of operations on Mars. Being self-sufficient is not enough for us - the colony needs to prosper, bring profits, and serve as an example for the future establishmen… |
+| **Life on Mars** |  | Build 1× Water Ice Extractor<br>Build 1× Hydroponic Farm | ₡5000000<br>Next: Mars Colony | If we wish to inhabit Mars, we need to make sure that the basic necessities - such as food and air - are taken care of. If our people are able to live there, our chances to colonize it will increase drastically. |
+| **Martian Industry** |  | Build 1× Alloy Smelting | ₡5000000<br>Next: Trading on Other Planets | Production and processing of metal alloys will allow us to build more on site. Mars' system's diverse resources are perfect to establish a production base which will satisfy our resource needs. |
+| **Humans on Mars** | Final | Deliver: 100× Alloy<br>Deliver: 25× Electronics<br>Deliver: 40× Rare Metals<br>Deliver: 10× Fissiles<br>MakeResearch: 0× research_sc_hermes<br>CreateSpaceCraft: 1× Spacecraft4Hermes<br>Deliver: 1× crew compartment | ₡6000000<br>Next: Life on Mars<br>Next: Martian Industry<br>Next: Beyond Mars<br>Next: Probing Lutetia | With the preparations made, it's time to send our brave astronauts to be the first to set foot on Mars. Nobody has ever done it before. If we can do it, the entire space sector will change forever. |
+| **Preparation for Human Landing on Mars** |  | Deliver: 1× basemining<br>Deliver: 1× construction<br>Have 90× Metals<br>Have 10× Rare Metals<br>Have 20× Supplies<br>Have 50× Glass<br>Have 10× Alloy | ₡5500000<br>Next: Preparation for Human Landing on Mars 2 | Sending probes to Mars is easy, but sending humans is a lot harder when you know they have to survive and return. We cannot fail this mission. Let's start with establishing facilities necessary for the safe expedition of our crew to the Red… |
+| **Preparation for Human Landing on Mars 2** |  | Build 0× Fuel Refinery<br>Build 0× Outpost<br>MakeEnergyProduction | ₡5500000<br>Next: Humans on Mars | With the resources ready, we need to construct a self-sufficient shelter and means of energy production for our crew on Mars, so that they can survive and begin operations there. |
+| **Mars Early Atmosphere** |  | Adjust habitability parameter | ₡800000000<br>Next: Mars Atmosphere<br>Next: Blue Mars<br>Next: Deliver water to Mars | The first phase of terraforming only requires a thin atmosphere to be established - uncomfortable and unbreathable, but survivable with just an oxygen mask. It will create a warming effect and let some of the most resilient flora and microb… |
+| **Mars Atmosphere** |  | Adjust habitability parameter | ₡1000000000.0 | Establishing a full and breathable atmosphere is no easy task, but an essential one if we want to live on Mars comfortably. We should commence the second phase of atmosphere adjustment. |
+| **Artificial Magnetosphere for Mars** |  | Build 0× Planetary Magnetosphere Generator<br>Adjust habitability parameter | ₡800000000<br>Next: Mars Early Atmosphere<br>Next: Warming Mars | For Mars to maintain an atmosphere and our colonists to be safe from radiation, we need to create an artificial magnetosphere. A network of field generators around the planet will let us settle and terraform more easily. They will be costly… |
+| **Warming Mars** |  | Adjust habitability parameter | ₡1500000000.0<br>Next: Mars Atmosphere<br>Next: Blue Mars<br>Next: Deliver water to Mars | Raising temperature will make the surface more habitable, and allow lower temperature gases and liquids to exist on the planet. As we warm Mars, dry ice and trapped water will be released from frozen rocks. |
+| **Blue Mars** |  | ChangeDeposit: 0× Water<br>Adjust habitability parameter | ₡100000000 | Bringing enough water to Mars will make it possible for many organisms to thrive and help regulate temperature. Doing it will require a large-scale operation, but with enough persistence and good planning, we'll wipe the name Red Planet" fr… |
+| **Deliver water to Mars** |  | MakeResearch: 0× research_launch_massengine<br>Deliver | ₡100000000 | A great way to deliver water to Mars is by pushing water-rich asteroids onto its surface. If we research engines to do it, and find an appropriate asteroid, we'll be able to bring water to the Red Planet. |
+| **Trading on Other Planets** |  | MarketPlaceOffers: 0× Alloy | ₡15000 | If we have an excess of a resource, or perhaps are in need of some more, we can always trade with other space corporations. Make a marketplace offer with our excess steel on Mars. |
+| **Lunar Depot** | Final | Deliver: 1× fuel<br>Deliver: 1× basemining<br>ScheduleCyclicalMission | ₡1500000<br>Next: Moonbase Alpha | It was once said that once you're in orbit you're halfway to anywhere - this makes it the ideal place for a refueling point for any flights to the outer system. To keep the depot stocked, make sure to set up cyclic flights from a fuel produ… |
+| **Moonbase Alpha** |  | Have 1× construction<br>Build 1× Outpost<br>Build 1× Fuel Refinery<br>Build 1× Water Ice Extractor<br>Build 1× Solar Array<br>Deliver | ₡6500000<br>Next: Probing Lutetia<br>Next: Research Laboratories | A moonbase will greatly benefit our exploration efforts as a forward base outside of Earth's deep gravity well. Establishing such a foothold on our satellite will help us to reach further in space. |
+| **Callisto Landing** |  | Deliver: 5× Humans | ₡5500000 | Now that we have gone that far, we are able to reach beyond. Callisto is an obvious choice for the first human landing in the Outer System. Let's go there, and make history. |
+| **Beyond Mars** |  | ScheduleFly | ₡5500000<br>Next: Reaching Saturn<br>Next: Callisto Landing | Now that Mars is conquered, it is time for us to reach even further, towards the gas giants. The technology to make use of them is within our reach, so let's strike the iron while it's still hot. |
+| **Reaching Saturn** |  | ScheduleFly | ₡5500000<br>Next: Titan Landing | After reaching Jupiter, Saturn is the obvious next step in our expansion outwards. We will need to plan carefully in order to minimize costs and mitigate risks - it will be no easy task to reach it and start our operations there. |
+| **Titan Landing** |  | Deliver: 5× Humans | ₡5500000 | Titan is a great place to start, as the only moon of Saturn with an atmosphere, and the only body in the Solar System besides Earth known to have surface bodies of liquid. It is of great interest to astrobiology, and an excellent place for … |
+| **Propellant Depot** |  | Deliver: 100× Chemical Fuel | ₡200000 | It was once said that once you're in orbit you're halfway to anywhere - this makes it the ideal place for a refueling point for any flights to the outer system. To keep the depot stocked, make sure to set up cyclic flights from a fuel produ… |
+| **First Orbit** |  | Deliver: 1× hubel telescope cargo<br>ExplorationObject | ₡15000<br>Next: Explore Luna | We're ready for our big launch! To start off, we need to put a brand new space telescope in Low Earth Orbit. It will let us look above and beyond, and scout out suitable locations for future missions. |
+| **Research Laboratories** |  | Build 1× Research Laboratory | ₡3000000 | To improve our research efforts we need to learn more about the worlds we're trying to explore. You can do this by constructing and crewing laboratories on other objects. You can only build 1 on each object, and they provide diminishing ret… |
+| **Explore Mars** |  | CreateVehicle: 0× lv_chem_large<br>CreateSpaceCraft: 0× Spacecraft1Iris<br>Build 1× space probe<br>Deliver: 1× space probe | ₡1200000<br>Next: Preparation for Human Landing on Mars <br>Next: Gravitational Slingshot | Luna was only the beginning - our next stop will be a greater one. The Red Planet awaits somebody brave enough to reach it. Let's examine it up close and see what we might find there. |
+| **Lunar Landing** |  | MakeResearch: 0× research_sc_helios<br>CreateSpaceCraft: 0× Spacecraft3Helios<br>CreateVehicle: 0× lv_chem_superlarge<br>Deliver: 1× crew compartment | ₡2200000<br>Next: Explore Mars<br>Next: Space Dock | It's time for a grand return to the moon. Let's construct our most powerful launch vehicle, and a spacecraft capable of bringing crew to the moon and back. We might not be the first humans there, but we will make sure to be the ones remembe… |
+| **Explore Luna** |  | CreateSpaceCraft: 0× Spacecraft1Iris<br>Build 0× space probe<br>Deliver: 1× space probe | ₡150000<br>Next: Lunar Landing | We cannot hope to reach farther, if we don't start in our closest neighbourhood. It's time to send a probe to Earth's companion. Prepare a spacecraft to deliver a probe to Luna, it will allow us to search for resource deposits on the lunar … |
+| **Gravitational Slingshot** |  | ScheduleFly<br>ScheduleFlyGravityAssist | ₡200000 | With clever use of planetary alignments we can slingshot our spacecraft farther than they would reach otherwise. We recommend using a Selene spacecraft loaded with a probe to fly through Jupiter orbit and reach Pluto - a mission that wouldn… |
+| **Space Dock** |  | Deliver: 1× space construction cargo<br>Deliver: 150× Alloy<br>Deliver: 50× Polymers<br>Deliver: 25× Electronics<br>Build 1× Orbital Shipyard | ₡1600000<br>Next: Lunar Depot<br>Next: Humans on Mars | Having to launch our spacecraft from the surface severely limits our designs. A way to construct them directly in orbit will allow for spacecraft specialized exclusively for navigating from orbit to orbit. |
+
+## Reading the table
+
+- **Flag**: *Final* marks the contract that ends a campaign.
+- **Requirements**: the objectives you have to complete to claim the payout. Body-specific objectives ("deliver 100 t to Mars") list the *what* but not the destination — the premise text describes the target.
+- **Rewards**: cash, resources, facility / spacecraft / launch-vehicle unlocks, and the next contract in the chain.
+- **Premise**: the in-game flavor text introducing the contract.
+
 ## See also
 
 - [Spacecraft](../spacecraft/)
-- [Contracts](../contracts/)
+- [Launch Vehicles](../launch-vehicles/)
+- [Launch Windows](../celestial-bodies/launch-windows.md)

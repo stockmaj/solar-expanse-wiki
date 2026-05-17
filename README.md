@@ -2,8 +2,11 @@
 
 An unofficial, community-maintained reference for **[Solar Expanse](https://store.steampowered.com/app/1369700/)**.
 
-The wiki itself lives in [`docs/`](docs/) and is served at GitHub Pages.
-This top-level README is for contributors who want to fix or extend the wiki.
+**📖 Read the wiki: https://stockmaj.github.io/solar-expanse-wiki/**
+
+The wiki content itself lives in [`docs/`](docs/) and is served at the link
+above via GitHub Pages.  This top-level README is for contributors who want
+to fix or extend the wiki — readers should head to the live site instead.
 
 ## How the wiki is built
 

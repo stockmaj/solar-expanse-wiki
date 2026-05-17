@@ -108,12 +108,21 @@ struct ContractStat {
     #[allow(dead_code)]
     is_locked: bool,
     is_final: bool,
+    #[serde(default)]
+    objectives: Vec<ContractObjectiveStat>,
     money_reward: f64,
     unlock_rewards: Vec<String>,
     facility_grants: Vec<String>,
     spacecraft_grants: Vec<String>,
     launch_vehicle_grants: Vec<String>,
     resource_grants: Vec<ResourceCost>,
+}
+
+#[derive(Deserialize, Clone)]
+struct ContractObjectiveStat {
+    kind: String,
+    quantity: f64,
+    target: Option<String>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -1257,6 +1266,43 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
                 premise.to_string()
             };
 
+            // Objectives: dedupe identical lines (same kind + target + qty).
+            let mut obj_bits: Vec<String> = Vec::new();
+            let mut seen_obj: std::collections::BTreeSet<String> = Default::default();
+            for o in &c.objectives {
+                let pretty_target = o.target.as_deref().map(|t| {
+                    if let Some(rest) = t.strip_prefix("build_") {
+                        smart_title_case(fac_name.get(rest).copied().unwrap_or(rest))
+                    } else if let Some(rest) = t.strip_prefix("id_resource_") {
+                        resource_name.get(rest).copied().unwrap_or(rest).to_string()
+                    } else if let Some(rest) = t.strip_prefix("module_") {
+                        smart_title_case(&rest.replace('_', " "))
+                    } else {
+                        sc_name
+                            .get(t)
+                            .copied()
+                            .or_else(|| lv_name.get(t).copied())
+                            .unwrap_or(t)
+                            .to_string()
+                    }
+                });
+                let line = match (o.kind.as_str(), pretty_target.as_deref()) {
+                    ("BuildFacility", Some(t)) => format!("Build {}× {}", fmt_amount(o.quantity), t),
+                    ("Possession", Some(t)) => format!("Have {}× {}", fmt_amount(o.quantity), t),
+                    ("Possession", None) => format!("Possess {}", fmt_amount(o.quantity)),
+                    ("MarketsOffers", Some(t)) => format!("Market trade {}× {}", fmt_amount(o.quantity), t),
+                    ("ChangeHabitabilityParameters", _) => "Adjust habitability parameter".into(),
+                    ("ChangeDepositParameters", Some(t)) => format!("Survey {} deposit", t),
+                    ("Exploration", _) => "Explore".into(),
+                    (kind, Some(t)) => format!("{}: {}× {}", kind, fmt_amount(o.quantity), t),
+                    (kind, None) => kind.into(),
+                };
+                if seen_obj.insert(line.clone()) {
+                    obj_bits.push(line);
+                }
+            }
+            let requirements = if obj_bits.is_empty() { "—".to_string() } else { obj_bits.join("<br>") };
+
             let mut reward_bits: Vec<String> = Vec::new();
             if c.money_reward > 0.0 {
                 reward_bits.push(format!("₡{}", fmt_amount(c.money_reward)));
@@ -1298,24 +1344,29 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
             vec![
                 format!("**{}**", escape_cell(display)),
                 flags.into(),
+                requirements,
                 rewards,
                 escape_cell(&premise),
             ]
         })
         .collect();
-    let table = md_table(&["Contract", "Flag", "Rewards", "Premise"], &rows);
+    let table = md_table(
+        &["Contract", "Flag", "Requirements", "Rewards", "Premise"],
+        &rows,
+    );
     format!(
         "# Contracts\n\n\
-Story and freelance contracts drive progression in Solar Expanse. Each\n\
-contract has a set of objectives — usually \"deliver X to body Y\" or \"build\n\
-facility Z\" — and pays out a fixed reward when complete. Many contracts\n\
-also unlock the *next* contract in a chain (Mars Phase 1 → Mars Phase 2 → …),\n\
-new spacecraft, or new launch vehicles.\n\n\
+Story and freelance contracts are the **funding missions** that drive\n\
+progression in Solar Expanse. Each contract is a set of objectives — usually\n\
+\"build facility X on body Y\" or \"deliver Z to a destination\" — that pay\n\
+out cash, resources, or unlocks when complete. Many contracts also unlock\n\
+the next link in a chain (Mars Phase 1 → Mars Phase 2 → …), a new spacecraft,\n\
+or a new launch vehicle.\n\n\
 {table}\n\
 ## Reading the table\n\n\
 - **Flag**: *Final* marks the contract that ends a campaign.\n\
-- **Rewards**: cash, resources, and unlocks granted on completion. Reward objectives\n\
-  (\"deliver 100 t of metal\") aren't shown here — the premise text describes them.\n\
+- **Requirements**: the objectives you have to complete to claim the payout. Body-specific objectives (\"deliver 100 t to Mars\") list the *what* but not the destination — the premise text describes the target.\n\
+- **Rewards**: cash, resources, facility / spacecraft / launch-vehicle unlocks, and the next contract in the chain.\n\
 - **Premise**: the in-game flavor text introducing the contract.\n"
     )
 }
@@ -1652,17 +1703,34 @@ Physics, Biotech), each subdivided into focused sub-branches.\n\n",
     out
 }
 
-fn page_missions() -> String {
-    String::from(
+fn page_missions(locale: &Locale, sirenix: &Sirenix) -> String {
+    // Missions in this wiki = the in-game contract list (your "funding missions").
+    // Reuse the contracts page's table generator and prepend a planning-flow primer.
+    let contracts_table = page_contracts(locale, sirenix);
+    // Strip the "# Contracts\n\n…\n\n" preamble — we want just the table + reading notes.
+    let table_only = contracts_table
+        .find("\n\n|")
+        .map(|i| &contracts_table[i..])
+        .unwrap_or(&contracts_table)
+        .trim_start();
+
+    format!(
         "# Missions\n\n\
-A *mission* is a planned trip from one body's orbit to another. The Plan\n\
-Mission flow walks you through five steps:\n\n\
+A *mission* in Solar Expanse is one of two things, both shown here.\n\n\
+1. **Funding missions** (the game's *Contracts* — listed in the table below): a fixed set of\n\
+   objectives that pay out cash, resources, or unlocks when complete. These\n\
+   are the primary income source in single-player.\n\
+2. **Flight missions**: an individual scheduled trip you plan in Plan Mission\n\
+   (Earth → Mars on day N). Flight missions are runtime state, not static\n\
+   data — see the **planning flow** section below.\n\n\
+## Planning flow\n\n\
+Plan Mission walks you through five steps:\n\n\
 1. **Destination** — pick the target body (and landing type if applicable).\n\
 2. **Spacecraft** — pick the craft to send.\n\
 3. **Cargo** — pick the payload.\n\
 4. **Launch Vehicle** — pick the lifter (only required for missions launching from a planet's surface).\n\
 5. **Flight Plan** — pick the launch and arrival windows from the porkchop plot.\n\n\
-## Mission types (from in-game UI)\n\n\
+### Mission types (from in-game UI)\n\n\
 | Type | Notes |\n\
 | --- | --- |\n\
 | **Direct** | Single Hohmann-style transfer to the destination. |\n\
@@ -1670,9 +1738,13 @@ Mission flow walks you through five steps:\n\n\
 | **Cyclical** | A repeating supply route between two or more bodies. |\n\
 | **Asteroid Pulling** | Specialised mission to push an asteroid into a different orbit using an Asteroid Engine Module. |\n\
 | **Probe Deployment** | Drops a small probe at a destination (typically the first thing you send anywhere). |\n\n\
+For launch-window timing for any destination, see [Launch Windows](../celestial-bodies/launch-windows.md).\n\n\
+## Funding missions (contracts)\n\n\
+{table_only}\n\
 ## See also\n\n\
 - [Spacecraft](../spacecraft/)\n\
-- [Contracts](../contracts/)\n",
+- [Launch Vehicles](../launch-vehicles/)\n\
+- [Launch Windows](../celestial-bodies/launch-windows.md)\n"
     )
 }
 
@@ -1895,6 +1967,6 @@ fn main() -> Result<()> {
     write_file(&wiki_root, "resources/README.md", &page_resources(&locale, &sirenix))?;
     write_file(&wiki_root, "contracts/README.md", &page_contracts(&locale, &sirenix))?;
     write_file(&wiki_root, "research/README.md", &page_research(&locale, &sirenix))?;
-    write_file(&wiki_root, "missions/README.md", &page_missions())?;
+    write_file(&wiki_root, "missions/README.md", &page_missions(&locale, &sirenix))?;
     Ok(())
 }

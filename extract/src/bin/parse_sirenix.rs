@@ -98,10 +98,18 @@ struct Resource {
 }
 
 #[derive(Serialize, Debug, Default, PartialEq)]
+struct ContractObjective {
+    kind: String,                 // Possession / BuildFacility / MarketsOffers / etc.
+    quantity: f64,
+    target: Option<String>,       // facility id, resource id, etc.
+}
+
+#[derive(Serialize, Debug, Default, PartialEq)]
 struct Contract {
     id: String,
     is_locked: bool,
     is_final: bool,
+    objectives: Vec<ContractObjective>,
     money_reward: f64,                    // sum of Money-type rewards
     unlock_rewards: Vec<String>,          // ids of contracts / research / SC / LV unlocked on completion
     facility_grants: Vec<String>,         // facility ids granted on completion
@@ -446,10 +454,39 @@ fn parse_contract(v: &Value) -> Option<Contract> {
         }
     }
 
+    let mut objectives: Vec<ContractObjective> = Vec::new();
+    if let Some(obj_arr) = v.get("objectives").and_then(|x| x.as_array()) {
+        for o in obj_arr {
+            let kind = o
+                .get("objectiveType")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string();
+            if kind.is_empty() {
+                continue;
+            }
+            let quantity = o.get("howMuch").and_then(|x| x.as_f64()).unwrap_or(0.0);
+            // Target is whichever of productItem / marketsOffersObjectiveData.rd is populated.
+            let target = o
+                .pointer("/productItem/name")
+                .and_then(|x| x.as_str())
+                .or_else(|| o.pointer("/marketsOffersObjectiveData/rd/name").and_then(|x| x.as_str()))
+                .or_else(|| o.pointer("/changeDepositParametersObjectiveData/rd/name").and_then(|x| x.as_str()))
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string());
+            objectives.push(ContractObjective {
+                kind,
+                quantity,
+                target,
+            });
+        }
+    }
+
     Some(Contract {
         id,
         is_locked: lookup_bool(v, &["isLocked"]).unwrap_or(false),
         is_final: lookup_bool(v, &["isFinalContract"]).unwrap_or(false),
+        objectives,
         money_reward,
         unlock_rewards,
         facility_grants,
