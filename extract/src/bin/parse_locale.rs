@@ -102,7 +102,8 @@ fn celestial_bodies(keys: &BTreeMap<String, String>) -> Vec<CelestialBody> {
         .filter_map(|(k, v)| {
             k.strip_prefix("CelestialBodiesNames.").map(|id| CelestialBody {
                 id: id.to_string(),
-                name: v.clone(),
+                // Some locale entries have stray trailing whitespace ("81P Wild ").
+                name: v.trim().to_string(),
             })
         })
         .collect()

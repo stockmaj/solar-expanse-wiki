@@ -774,9 +774,20 @@ mod tests {
 
     #[test]
     fn skips_non_lv_and_test_launch_vehicles() {
+        // Cheat / Fake / cyclical-mission entries should be filtered out.
         assert!(parse_launch_vehicle(&serde_json::json!({"id": "id_Rocket_Cheat"})).is_none());
         assert!(parse_launch_vehicle(&serde_json::json!({"id": "id_LV_launch_spin_Fake"})).is_none());
-        assert!(parse_launch_vehicle(&serde_json::json!({"id": "id_Rocket_RocketType5"})).is_none());
+        assert!(parse_launch_vehicle(&serde_json::json!({"id": "id_Rocket_ForCycleMision"})).is_none());
+        // Things that don't look like a launch vehicle at all
+        assert!(parse_launch_vehicle(&serde_json::json!({"id": "spacecraft_chem_small"})).is_none());
+    }
+
+    #[test]
+    fn accepts_id_Rocket_RocketType_namespace() {
+        // Core campaign rockets (Sparrow, Falcon, Eagle, ...) use this id shape.
+        let r = serde_json::json!({"id": "id_Rocket_RocketType1", "maxPayload": 10});
+        let parsed = parse_launch_vehicle(&r).expect("RocketType1 should parse");
+        assert_eq!(parsed.max_payload, 10.0);
     }
 
     #[test]

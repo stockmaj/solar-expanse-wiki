@@ -9,7 +9,7 @@ Periodic comets that pass through the inner system on highly eccentric orbits.
 | **3D Biela** | — | — | — | — |
 | **4P Faye** | 1.8 | 3.8382 | 0.5696 | 9.07 |
 | **2P Encke** | 2.4 | 2.2151 | 0.8483 | 11.78 |
-| **81P Wild ** | — | — | — | — |
+| **81P Wild** | — | — | — | — |
 | **67P/C-G** | — | — | — | — |
 | **9P Tempel** | — | — | — | — |
 
