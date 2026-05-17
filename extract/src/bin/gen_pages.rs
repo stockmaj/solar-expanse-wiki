@@ -802,6 +802,8 @@ fn page_launch_windows(ctx: &WikiCtx) -> String {
 
     // Embed every body's orbital data for the calculator so the user can
     // pick any from/to pair.  Includes Earth so it can be on either side.
+    // Also includes the Sun as a synthetic flyby body (a = 0) — the
+    // gravity-assist calculator treats this as a solar Oberth maneuver.
     let mut calc_bodies: Vec<String> = Vec::new();
     // Earth first
     calc_bodies.push(format!(
@@ -809,6 +811,10 @@ fn page_launch_windows(ctx: &WikiCtx) -> String {
         a = earth_a,
         lng = earth.longitude_deg.unwrap_or(0.0),
     ));
+    // Sun next — a = 0 signals "solar Oberth" to the JS code.  Name chosen
+    // to match the game's "Solar (orbit)" route node terminology while
+    // still reading naturally in the typeahead.
+    calc_bodies.push("{\"name\":\"Sun\",\"a\":0,\"longitude\":0}".to_string());
     for (display, a, _t, _syn, longitude, _type) in &data {
         calc_bodies.push(format!(
             "{{\"name\":\"{name}\",\"a\":{a},\"longitude\":{lng}}}",
@@ -917,17 +923,16 @@ lowest-cost single-flyby trajectory it can find.\n\n\
 The reported \"Δv proxy\" is `|v_spacecraft − v_origin|` at launch plus\n\
 `|v_spacecraft − v_target|` at arrival, both expressed in km/s; it\n\
 ignores escape Δv from low Earth orbit and capture Δv at the target.\n\n\
-### Suggested trajectories\n\n\
-These are well-known flyby routes the calculator picks out as advantageous\n\
-versus a direct transfer in the same launch window.  Computed on page load —\n\
-expect a second or two for the table to populate.\n\n\
-<button id=\"ga-suggest-btn\" type=\"button\">Calculate suggestions</button>\n\
-<div id=\"ga-suggestions\"><em>Click the button to compute — this runs entirely in your browser and may take 10–20 seconds for outer-planet routes.</em></div>\n\n\
-### Custom trajectory\n\n\
+### Trajectory calculator\n\n\
+Pick a *from* body and a *to* body and the calculator scans every other\n\
+body in the game as a candidate flyby (planets, asteroids, comets, and the\n\
+Sun itself as a solar-Oberth maneuver).  It returns the **direct** (no-flyby)\n\
+trajectory plus the top five flyby routes that beat direct by the most Δv.\n\
+The scan runs entirely in your browser — expect 5–30 seconds depending on\n\
+window length.\n\n\
 <div class=\"calc\">\n\
 <label>From: <input id=\"ga-from\" list=\"calc-bodies\" autocomplete=\"off\" placeholder=\"Body name…\" value=\"Earth\"></label>\n\
-<label>Flyby: <input id=\"ga-flyby\" list=\"calc-bodies\" autocomplete=\"off\" placeholder=\"Body name…\" value=\"Venus\"></label>\n\
-<label>To: <input id=\"ga-to\" list=\"calc-bodies\" autocomplete=\"off\" placeholder=\"Body name…\" value=\"Ceres\"></label>\n\
+<label>To: <input id=\"ga-to\" list=\"calc-bodies\" autocomplete=\"off\" placeholder=\"Body name…\" value=\"Pluto\"></label>\n\
 <label>Search from: <input type=\"date\" id=\"ga-date\" value=\"2020-01-01\"></label>\n\
 <button id=\"ga-submit\" type=\"button\">Calculate</button>\n\
 <div id=\"ga-result\"></div>\n\
