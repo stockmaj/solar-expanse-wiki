@@ -761,7 +761,7 @@ The start date defaults to **2020-01-01**, the game's campaign start year.\n\n\
 window.LAUNCH_WINDOW_ALL_BODIES = {data};\n\
 window.LAUNCH_WINDOW_EARTH = {{\"a\":{earth_a},\"longitude\":{earth_lng}}};\n\
 </script>\n\
-<script src=\"{{{{ '/assets/js/launch-windows.js' | relative_url }}}}\"></script>\n\n\
+<script src=\"{{{{ '/assets/js/launch-windows.js' | relative_url }}}}?v={{{{ site.data.wiki.generated_at }}}}\"></script>\n\n\
 ## What counts as a launch window\n\n\
 A *launch window* here is the moment when an idealized **Hohmann transfer**\n\
 launched from one body's orbit will arrive at the target body just as that\n\
@@ -842,7 +842,7 @@ expect a second or two for the table to populate.\n\n\
 <button id=\"ga-submit\" type=\"button\">Calculate</button>\n\
 <div id=\"ga-result\"></div>\n\
 </div>\n\n\
-<script src=\"{{{{ '/assets/js/gravity-assist.js' | relative_url }}}}\"></script>\n\n\
+<script src=\"{{{{ '/assets/js/gravity-assist.js' | relative_url }}}}?v={{{{ site.data.wiki.generated_at }}}}\"></script>\n\n\
 ## See also\n\n\
 - [Planets](planets.md)\n\
 - [Celestial Bodies overview](README.md)\n",
