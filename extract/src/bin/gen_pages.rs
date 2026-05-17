@@ -772,7 +772,6 @@ window.LAUNCH_WINDOW_EARTH = {{\"a\":{earth_a},\"longitude\":{earth_lng}}};\n\
         earth_a = earth_a,
         earth_lng = earth.longitude_deg.unwrap_or(0.0),
     )
-    )
 }
 
 fn page_celestial_index() -> String {
