@@ -155,6 +155,20 @@ struct ContractStat {
     /// "never expires" → rendered as "—".
     #[serde(default)]
     years_to_expire: f64,
+    /// Distinct non-None `layer` values from this contract's objectives.  In
+    /// production data the only non-None value seen is `"Asteroid"`.  Used to
+    /// bump depth/Order in the contracts table so asteroid-layer contracts
+    /// appear after the asteroid-belt gate even when their `unlock_rewards`
+    /// chain has no upstream entries.
+    #[serde(default)]
+    objective_layers: Vec<String>,
+    /// True iff at least one of this contract's objectives carries
+    /// `layer: "None"`.  Used together with `objective_layers` to identify
+    /// the bridge contracts (currently Humans on Mars + Space Dock) whose
+    /// completion takes the player into the asteroid belt — see the
+    /// gate-identification logic in `page_contracts`.
+    #[serde(default)]
+    has_layer_none_objective: bool,
 }
 
 #[derive(Deserialize, Clone)]
@@ -2173,6 +2187,8 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
                 && !c.id.contains("_test")
         })
         .collect();
+    let entry_ids: std::collections::BTreeSet<&str> =
+        entries.iter().map(|c| c.id.as_str()).collect();
 
     // Topological depth on the research DAG: a research with no prereqs has
     // depth 0; otherwise 1 + max(depth of each prereq).
@@ -2274,6 +2290,143 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
         );
     }
 
+    // Layer-Asteroid gating fix-up.
+    //
+    // In-game, every asteroid-themed contract is gated by getting the player
+    // out to the asteroid belt — that's not encoded as a contract→contract
+    // `unlock_rewards` edge, it's encoded on the *objective* via the
+    // `layer: "Asteroid"` field.  Without this fix, contracts like
+    // "Asteroid Base" sit at Order 0 because nothing precedes them in
+    // unlock_rewards, even though the player can't physically attempt them
+    // until they've reached the belt via the Moon/Mars chain.
+    //
+    // A contract is considered "asteroid-layer" iff it has at least one
+    // objective with `layer: "Asteroid"` AND none of its objectives have
+    // `layer: "None"`.  In the Sirenix dump, `layer` defaults to "Asteroid"
+    // on every objective; the handful of contracts whose authors went out of
+    // their way to mark an objective as `layer: "None"` (Humans on Mars,
+    // Space Dock) are exactly the bridge contracts that take the player out
+    // of the asteroid belt's gating, so we treat them as "non-asteroid" for
+    // the purposes of bumping.
+    //
+    // The fix:
+    // 1. Identify the **asteroid gate**: the asteroid-layer contract that
+    //    carries a `SelectLayer` objective with `layer: "Asteroid"`.  Only
+    //    one contract in production has this objective —
+    //    `contract_asteroid_first` (Probing Lutetia) — which is exactly the
+    //    in-game contract that asks the player to *physically choose* the
+    //    asteroid layer for the first time.  Its computed depth is the gate
+    //    depth.  (We don't use "min depth of asteroid-layer contract with a
+    //    non-asteroid parent" because the dump's default `layer: "Asteroid"`
+    //    bleeds into moon/mars campaign contracts and produces false gates.)
+    // 2. Bump every standalone "stranded" asteroid contract — one whose
+    //    current depth is below the gate AND that has no contract or research
+    //    parent — up to the gate depth.  Contracts that are already deeper
+    //    than the gate, or that sit inside the moon/mars chain, are left
+    //    alone so we don't disturb the legitimate pre-asteroid sequence.
+    // 3. Re-propagate forward via a fixed-point pass so descendants of any
+    //    bumped contract get their depth recomputed from their parents.
+    //
+    // Build the lookup keyed on ALL contracts (not just rendered entries) so
+    // that parents which are filtered out (e.g. `_test` contracts whose
+    // locale name is empty) are still classified correctly.
+    //
+    // The literal `objective_layers` test (contains "Asteroid", no "None")
+    // matches nearly every production contract because the Sirenix dump
+    // serializes the `Layer` enum's default value ("Asteroid") on every
+    // unset objective.  To avoid bumping unrelated tutorial/Moon/Mars
+    // contracts, we additionally require the id to start with
+    // `contract_asteroid_` — an unambiguous marker for the asteroid-belt
+    // contracts the game writers actually authored as such (matches the
+    // user-facing examples Asteroid Base, Pulling, Sample, etc.).
+    let is_asteroid_layer: BTreeMap<&str, bool> = sirenix
+        .contracts
+        .iter()
+        .map(|c| {
+            let asteroid = c.objective_layers.iter().any(|l| l == "Asteroid")
+                && !c.has_layer_none_objective
+                && c.id.starts_with("contract_asteroid_");
+            (c.id.as_str(), asteroid)
+        })
+        .collect();
+    // The gate is the asteroid-layer contract carrying a `SelectLayer`
+    // objective.  In production only `contract_asteroid_first` qualifies.
+    let gate_depth: Option<u32> = entries
+        .iter()
+        .filter(|c| *is_asteroid_layer.get(c.id.as_str()).unwrap_or(&false))
+        .filter(|c| {
+            c.objectives
+                .iter()
+                .any(|o| o.kind.eq_ignore_ascii_case("SelectLayer"))
+        })
+        .filter_map(|c| depth.get(c.id.as_str()).copied())
+        .min();
+    if let Some(gate) = gate_depth {
+        for c in &entries {
+            if !*is_asteroid_layer.get(c.id.as_str()).unwrap_or(&false) {
+                continue;
+            }
+            // Only bump "stranded" asteroid contracts — those that have no
+            // contract or research parent (so they currently sit at Order 0
+            // for the wrong reason).  Contracts that are already part of a
+            // chain keep their natural depth; the fixed-point pass below will
+            // bring descendants of any bumped node forward.
+            let has_parent = unlocked_by
+                .get(c.id.as_str())
+                .map_or(false, |parents| {
+                    parents.iter().any(|p| entry_ids.contains(*p))
+                })
+                || research_unlockers_of_contract
+                    .get(c.id.as_str())
+                    .map_or(false, |rs| !rs.is_empty());
+            if has_parent {
+                continue;
+            }
+            let cur = depth.get(c.id.as_str()).copied().unwrap_or(0);
+            if cur < gate {
+                depth.insert(c.id.as_str(), gate);
+            }
+        }
+        // Fixed-point re-propagation: a bumped contract's descendants need
+        // their depth pushed forward too (depth[child] >= depth[parent] + 1
+        // for every contract or research parent).
+        loop {
+            let mut changed = false;
+            for c in &entries {
+                let id = c.id.as_str();
+                let cur = depth.get(id).copied().unwrap_or(0);
+                let mut max_parent = 0u32;
+                let mut has_parent = false;
+                if let Some(parents) = unlocked_by.get(id) {
+                    for p in parents {
+                        has_parent = true;
+                        let pd = depth.get(*p).copied().unwrap_or(0);
+                        if pd > max_parent {
+                            max_parent = pd;
+                        }
+                    }
+                }
+                if let Some(rs) = research_unlockers_of_contract.get(id) {
+                    for r in rs {
+                        has_parent = true;
+                        let rd = research_depth.get(*r).copied().unwrap_or(0);
+                        if rd > max_parent {
+                            max_parent = rd;
+                        }
+                    }
+                }
+                let need = if has_parent { max_parent + 1 } else { cur };
+                if need > cur {
+                    depth.insert(id, need);
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+    }
+
     // Display order: chain-DFS traversal so each campaign chain reads
     // top-to-bottom as a progression instead of getting flattened by depth.
     //
@@ -2290,8 +2443,6 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
 
     // Forward map: parent contract id → its child contract ids.
     let mut children: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-    let entry_ids: std::collections::BTreeSet<&str> =
-        entries.iter().map(|c| c.id.as_str()).collect();
     for c in &sirenix.contracts {
         if !entry_ids.contains(c.id.as_str()) {
             continue;
@@ -3527,7 +3678,42 @@ mod tests {
             resource_grants: vec![],
             date_start_active: None,
             years_to_expire: 0.0,
+            objective_layers: vec![],
+            has_layer_none_objective: false,
         }
+    }
+
+    fn make_contract_with_layers(
+        id: &str,
+        unlock_rewards: Vec<String>,
+        objective_layers: Vec<String>,
+    ) -> ContractStat {
+        ContractStat {
+            id: id.into(),
+            is_locked: false,
+            is_final: false,
+            objectives: vec![],
+            money_reward: 0.0,
+            unlock_rewards,
+            facility_grants: vec![],
+            spacecraft_grants: vec![],
+            launch_vehicle_grants: vec![],
+            resource_grants: vec![],
+            date_start_active: None,
+            years_to_expire: 0.0,
+            objective_layers,
+            has_layer_none_objective: false,
+        }
+    }
+
+    fn make_contract_with_none_layer(
+        id: &str,
+        unlock_rewards: Vec<String>,
+        objective_layers: Vec<String>,
+    ) -> ContractStat {
+        let mut c = make_contract_with_layers(id, unlock_rewards, objective_layers);
+        c.has_layer_none_objective = true;
+        c
     }
 
     fn obj(kind: &str, quantity: f64, target: Option<&str>) -> ContractObjectiveStat {
@@ -4695,6 +4881,207 @@ mod tests {
         assert_eq!(
             occurrences, 1,
             "Multi Parent should render exactly once even with multiple parents; got {occurrences}\npage:\n{page}"
+        );
+    }
+
+    // ---------- Layer-Asteroid depth bumping ----------
+
+    /// Pull the Order-cell (first column) from a contract's row in the
+    /// rendered page, returning it parsed as u32.  Used by the layer-bump
+    /// tests below to assert on the *Order column* (not just row position).
+    fn contract_order(page: &str, display: &str) -> u32 {
+        let row = page
+            .lines()
+            .find(|l| {
+                l.starts_with("| ")
+                    && l.contains(&format!("**{display}**"))
+            })
+            .unwrap_or_else(|| panic!("contract row `{display}` not found in:\n{page}"));
+        // Format: "| <order> | <contract> | ..."; first cell after the leading "| "
+        // is the Order column.
+        let parts: Vec<&str> = row.splitn(3, " | ").collect();
+        let order_str = parts
+            .first()
+            .map(|s| s.trim_start_matches('|').trim())
+            .unwrap_or("");
+        order_str
+            .parse::<u32>()
+            .unwrap_or_else(|_| panic!("order cell `{order_str}` not a u32 in row: {row}"))
+    }
+
+    /// Build the asteroid-belt gate contract for these tests: it carries a
+    /// `SelectLayer` objective on the Asteroid layer (the only contract in
+    /// production with this objective is Probing Lutetia, and that's the cue
+    /// the gen_pages depth-bump logic keys off).
+    fn asteroid_gate_contract(id: &str, unlock_rewards: Vec<String>) -> ContractStat {
+        let mut c = make_contract_with_layers(
+            id,
+            unlock_rewards,
+            vec!["Asteroid".into()],
+        );
+        c.objectives = vec![obj("SelectLayer", 0.0, None)];
+        c
+    }
+
+    #[test]
+    fn layer_asteroid_contract_bumps_to_gate_depth() {
+        // Chain: First Orbit (0) → Explore Luna (1) → Lunar Landing (2).
+        // contract_asteroid_first has a SelectLayer:Asteroid objective and is
+        // unlocked by Lunar Landing → its natural depth is 3.  That's the
+        // asteroid gate.
+        // contract_asteroid_base has layer:Asteroid but NO contract prereqs —
+        // its natural depth is 0, but it must be bumped to ≥ 3 (gate depth)
+        // because the player can't physically attempt it until they reach the
+        // asteroid belt.
+        let locale = contracts_fixture_locale();
+        let sirenix = Sirenix {
+            contracts: vec![
+                make_contract(
+                    "contract_tutorial_firstorbit",
+                    vec![],
+                    vec!["contract_tutorial_moonorbit".into()],
+                ),
+                make_contract(
+                    "contract_tutorial_moonorbit",
+                    vec![],
+                    vec!["contract_tutorial_moonlanding".into()],
+                ),
+                make_contract(
+                    "contract_tutorial_moonlanding",
+                    vec![],
+                    vec!["contract_asteroid_first".into()],
+                ),
+                asteroid_gate_contract("contract_asteroid_first", vec![]),
+                make_contract_with_layers(
+                    "contract_asteroid_base",
+                    vec![],
+                    vec!["Asteroid".into()],
+                ),
+            ],
+            ..Default::default()
+        };
+        let mut locale = locale;
+        locale.contracts.push(NameDesc {
+            id: "contract_asteroid_first".into(),
+            name: "Probing Lutetia".into(),
+            description: "Land on an asteroid.".into(),
+        });
+        locale.contracts.push(NameDesc {
+            id: "contract_asteroid_base".into(),
+            name: "Asteroid Base".into(),
+            description: "Build an asteroid base.".into(),
+        });
+        let page = page_contracts(&locale, &sirenix);
+        let gate = contract_order(&page, "Probing Lutetia");
+        let base = contract_order(&page, "Asteroid Base");
+        assert!(
+            base >= gate,
+            "Asteroid Base order ({base}) must be ≥ Probing Lutetia gate order ({gate})\npage:\n{page}"
+        );
+        assert_eq!(gate, 3, "Probing Lutetia natural depth should be 3 (after Lunar Landing@2)\npage:\n{page}");
+    }
+
+    #[test]
+    fn layer_asteroid_does_not_affect_non_asteroid_contracts() {
+        // A contract WITHOUT layer:Asteroid keeps its natural topological depth
+        // even when other contracts in the graph are being bumped.
+        let locale = contracts_fixture_locale();
+        let sirenix = Sirenix {
+            contracts: vec![
+                make_contract(
+                    "contract_tutorial_firstorbit",
+                    vec![],
+                    vec!["contract_tutorial_moonorbit".into()],
+                ),
+                make_contract(
+                    "contract_tutorial_moonorbit",
+                    vec![],
+                    vec!["contract_tutorial_moonlanding".into()],
+                ),
+                make_contract(
+                    "contract_tutorial_moonlanding",
+                    vec![],
+                    vec!["contract_asteroid_first".into()],
+                ),
+                asteroid_gate_contract("contract_asteroid_first", vec![]),
+                // Root Alpha — a non-tutorial, non-asteroid-layer root
+                make_contract("contract_root_a", vec![], vec![]),
+            ],
+            ..Default::default()
+        };
+        let mut locale = locale;
+        locale.contracts.push(NameDesc {
+            id: "contract_asteroid_first".into(),
+            name: "Probing Lutetia".into(),
+            description: "Land on an asteroid.".into(),
+        });
+        let page = page_contracts(&locale, &sirenix);
+        let root_a_order = contract_order(&page, "Root Alpha");
+        assert_eq!(
+            root_a_order, 0,
+            "Root Alpha has no prereqs and no asteroid layer; should stay at depth 0\npage:\n{page}"
+        );
+    }
+
+    #[test]
+    fn layer_bump_propagates_to_descendants() {
+        // contract_asteroid_base has layer:Asteroid, no contract prereq → it
+        // gets bumped to gate depth (3 here).  Its child via unlock_rewards
+        // (contract_asteroid_mining, which ALSO has layer:Asteroid) must be
+        // re-propagated: depth(child) = depth(asteroid_base) + 1 = 4.
+        let locale = contracts_fixture_locale();
+        let sirenix = Sirenix {
+            contracts: vec![
+                make_contract(
+                    "contract_tutorial_firstorbit",
+                    vec![],
+                    vec!["contract_tutorial_moonorbit".into()],
+                ),
+                make_contract(
+                    "contract_tutorial_moonorbit",
+                    vec![],
+                    vec!["contract_tutorial_moonlanding".into()],
+                ),
+                make_contract(
+                    "contract_tutorial_moonlanding",
+                    vec![],
+                    vec!["contract_asteroid_first".into()],
+                ),
+                asteroid_gate_contract("contract_asteroid_first", vec![]),
+                make_contract_with_layers(
+                    "contract_asteroid_base",
+                    vec!["contract_asteroid_mining".into()],
+                    vec!["Asteroid".into()],
+                ),
+                make_contract_with_layers(
+                    "contract_asteroid_mining",
+                    vec![],
+                    vec!["Asteroid".into()],
+                ),
+            ],
+            ..Default::default()
+        };
+        let mut locale = locale;
+        locale.contracts.push(NameDesc {
+            id: "contract_asteroid_first".into(),
+            name: "Probing Lutetia".into(),
+            description: "Land on an asteroid.".into(),
+        });
+        locale.contracts.push(NameDesc {
+            id: "contract_asteroid_base".into(),
+            name: "Asteroid Base".into(),
+            description: "Build an asteroid base.".into(),
+        });
+        let page = page_contracts(&locale, &sirenix);
+        let base = contract_order(&page, "Asteroid Base");
+        let mining = contract_order(&page, "Asteroid Mining");
+        assert_eq!(
+            base, 3,
+            "Asteroid Base should be bumped to gate depth 3\npage:\n{page}"
+        );
+        assert!(
+            mining > base,
+            "Asteroid Mining (order {mining}) must propagate past its parent Asteroid Base (order {base})\npage:\n{page}"
         );
     }
 }
