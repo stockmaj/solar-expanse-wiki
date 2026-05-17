@@ -1,100 +1,168 @@
-// Launch-window calculator for the Earth ↔ planet pairs.
+// Launch-window calculator for arbitrary body-to-body transfers.
 //
-// Given a start date, compute the next five Earth-departure Hohmann-style
-// launch windows for each other planet.  Math:
-//
-//   T_years  = a_AU^1.5                          (Kepler's third)
-//   n        = 2π / T_years                       (mean motion)
-//   t_transfer = 0.5 * ((a_earth + a_body) / 2)^1.5  (Hohmann half-orbit, years)
-//   θ_required = π - n_body * t_transfer          (relative lead/lag at launch)
-//   Δθ_current = θ_body(t) - θ_earth(t)
-//   wait_years = ((θ_required - Δθ_current) mod 2π) / (n_earth - n_body)
-//
-// The body's longitude at the epoch the game ships in its orbital data is
-// our anchor; we assume that epoch is 1959-01-01 (the game's earliest
-// playable start), which matches the contract.dateStartActive baseline.
-// The *spacing* between windows is reliable regardless of epoch choice; the
-// *absolute dates* may drift by days to weeks vs. the in-game porkchop plot.
+// Pure logic + DOM binding in the same file.  The pure functions are exposed
+// on `globalThis.LaunchWindows` so the Node test harness can import them
+// without a DOM.
 
-(function () {
-  if (!window.LAUNCH_WINDOW_BODIES || !window.LAUNCH_WINDOW_EARTH) return;
-  var EPOCH_MS = Date.UTC(1959, 0, 1);  // 1959-01-01 UTC
+(function (root) {
+  // Default epoch is the game's earliest contract baseline (1959-01-01).
+  // Override via the `epochMs` param to nextWindow() / nextNWindows() when
+  // testing against real-world J2000-anchored data.
+  var EPOCH_MS = Date.UTC(1959, 0, 1);
   var DAY_MS = 86400000;
   var YEAR_DAYS = 365.25;
   var TWO_PI = Math.PI * 2;
   var DEG = Math.PI / 180;
-
-  var earth = window.LAUNCH_WINDOW_EARTH;
-  var n_earth = TWO_PI / Math.pow(earth.a, 1.5);
 
   function angleAt(longitudeDeg, n, daysSinceEpoch) {
     var theta = longitudeDeg * DEG + n * (daysSinceEpoch / YEAR_DAYS);
     return ((theta % TWO_PI) + TWO_PI) % TWO_PI;
   }
 
-  function nextWindow(body, fromDate) {
-    // A "launch window" here = the time when an idealized minimum-energy
-    // Hohmann transfer launched from Earth's orbit would arrive at the target
-    // body just as the body reaches the transfer's aphelion (for outer) or
-    // perihelion (for inner).  In phase-space terms: the relative angle
-    // (theta_body - theta_earth) at launch must equal `required` below.
-    var daysSinceEpoch = (fromDate.getTime() - EPOCH_MS) / DAY_MS;
-    var n_body = TWO_PI / Math.pow(body.a, 1.5);
-    var theta_earth = angleAt(earth.longitude, n_earth, daysSinceEpoch);
-    var theta_body = angleAt(body.longitude, n_body, daysSinceEpoch);
-    var rel = ((theta_body - theta_earth) % TWO_PI + TWO_PI) % TWO_PI;
-    var t_transfer_years = 0.5 * Math.pow((earth.a + body.a) / 2, 1.5);
-    var required = Math.PI - n_body * t_transfer_years;
+  function hohmannTransferYears(a_from, a_to) {
+    return 0.5 * Math.pow((a_from + a_to) / 2, 1.5);
+  }
+
+  // Given (from, to, fromDate), return the next Hohmann-transfer launch
+  // window for from → to.  Bodies are {a, longitude} objects in AU and
+  // degrees-at-EPOCH respectively.
+  function nextWindow(from, to, fromDate, epochMs) {
+    if (Math.abs(from.a - to.a) < 1e-9) return null;
+    var epoch = (typeof epochMs === 'number') ? epochMs : EPOCH_MS;
+    var daysSinceEpoch = (fromDate.getTime() - epoch) / DAY_MS;
+    var n_from = TWO_PI / Math.pow(from.a, 1.5);
+    var n_to = TWO_PI / Math.pow(to.a, 1.5);
+    var theta_from = angleAt(from.longitude, n_from, daysSinceEpoch);
+    var theta_to = angleAt(to.longitude, n_to, daysSinceEpoch);
+    var rel = ((theta_to - theta_from) % TWO_PI + TWO_PI) % TWO_PI;
+    var t_transfer_years = hohmannTransferYears(from.a, to.a);
+    // Required relative angle at launch so that target reaches transfer
+    // far-side just as the spacecraft does.
+    var required = Math.PI - n_to * t_transfer_years;
     required = ((required % TWO_PI) + TWO_PI) % TWO_PI;
-    // rel changes at rate R = n_body - n_earth per year.  For outer bodies
-    // R < 0 (Earth laps the target); for inner bodies R > 0.  Solve
-    //    rel + R * t  ≡  required  (mod 2π)
-    // for smallest positive t.  This is equivalent to t = (rel - required) /
-    // (n_earth - n_body), with wrap-around to keep t in [0, synodic).
-    var omega = n_earth - n_body;
+    // rel changes at rate (n_to - n_from) per year; solve for next positive t.
+    var omega = n_from - n_to;
+    if (Math.abs(omega) < 1e-12) return null;
     var synodic_years = TWO_PI / Math.abs(omega);
     var delta = (rel - required) / omega;
     while (delta < 0) delta += synodic_years;
     while (delta >= synodic_years) delta -= synodic_years;
-    var waitDays = delta * YEAR_DAYS;
-    return new Date(fromDate.getTime() + waitDays * DAY_MS);
+    return new Date(fromDate.getTime() + delta * YEAR_DAYS * DAY_MS);
+  }
+
+  function nextNWindows(from, to, fromDate, n, epochMs) {
+    var out = [];
+    var cursor = fromDate;
+    for (var i = 0; i < n; i++) {
+      var w = nextWindow(from, to, cursor, epochMs);
+      if (!w) break;
+      out.push(w);
+      cursor = new Date(w.getTime() + DAY_MS);
+    }
+    return out;
   }
 
   function fmtDate(d) {
-    if (isNaN(d)) return '—';
+    if (!d || isNaN(d)) return '—';
     return d.toISOString().slice(0, 10);
   }
 
-  function update() {
-    var input = document.getElementById('calc-date');
-    var tbody = document.querySelector('#calc-result tbody');
-    if (!input || !tbody) return;
-    var v = input.value;
-    if (!v) return;
-    var start = new Date(v + 'T00:00:00Z');
-    if (isNaN(start)) return;
-    tbody.innerHTML = '';
-    window.LAUNCH_WINDOW_BODIES.forEach(function (body) {
-      var tr = document.createElement('tr');
-      var nameTd = document.createElement('td');
-      nameTd.innerHTML = '<strong>' + body.name + '</strong>';
-      tr.appendChild(nameTd);
-      var cursor = start;
-      for (var i = 0; i < 5; i++) {
-        var win = nextWindow(body, cursor);
-        var td = document.createElement('td');
-        td.textContent = fmtDate(win);
-        tr.appendChild(td);
-        // Step past this window by 1 day so the same one isn't returned twice.
-        cursor = new Date(win.getTime() + DAY_MS);
+  // ----- DOM binding -----------------------------------------------------
+
+  function bindDom() {
+    var bodies = root.LAUNCH_WINDOW_ALL_BODIES;
+    var earth = root.LAUNCH_WINDOW_EARTH;
+    if (!bodies || !earth) return;
+
+    var dateInput = document.getElementById('calc-date');
+    var fromSelect = document.getElementById('calc-from');
+    var toSelect = document.getElementById('calc-to');
+    var resultBox = document.getElementById('calc-result');
+    if (!dateInput || !fromSelect || !toSelect || !resultBox) return;
+
+    // Populate dropdowns sorted by semi-major axis.
+    var sorted = bodies.slice().sort(function (a, b) { return a.a - b.a; });
+    sorted.forEach(function (b) {
+      [fromSelect, toSelect].forEach(function (sel) {
+        var opt = document.createElement('option');
+        opt.value = b.name;
+        opt.textContent = b.name;
+        sel.appendChild(opt);
+      });
+    });
+    fromSelect.value = 'Earth';
+    toSelect.value = 'Mars';
+
+    function findBody(name) {
+      for (var i = 0; i < bodies.length; i++) {
+        if (bodies[i].name === name) return bodies[i];
       }
-      tbody.appendChild(tr);
+      return null;
+    }
+
+    function update() {
+      var v = dateInput.value;
+      if (!v) return;
+      var start = new Date(v + 'T00:00:00Z');
+      if (isNaN(start)) return;
+      var from = findBody(fromSelect.value);
+      var to = findBody(toSelect.value);
+      if (!from || !to) return;
+      var windows = nextNWindows(from, to, start, 5);
+      if (windows.length === 0) {
+        resultBox.innerHTML = '<em>No transfer between identical orbits.</em>';
+        return;
+      }
+      var transfer_days = hohmannTransferYears(from.a, to.a) * YEAR_DAYS;
+      resultBox.innerHTML =
+        '<p><strong>' + from.name + ' → ' + to.name + '</strong> &middot; ' +
+        'transfer time ≈ ' + Math.round(transfer_days) + ' days</p>' +
+        '<table><thead><tr><th>#</th><th>Launch date</th><th>Arrival date</th></tr></thead><tbody>' +
+        windows.map(function (w, i) {
+          var arr = new Date(w.getTime() + transfer_days * DAY_MS);
+          return '<tr><td>' + (i + 1) + '</td><td>' + fmtDate(w) +
+                 '</td><td>' + fmtDate(arr) + '</td></tr>';
+        }).join('') +
+        '</tbody></table>';
+    }
+
+    dateInput.addEventListener('change', update);
+    fromSelect.addEventListener('change', update);
+    toSelect.addEventListener('change', update);
+    update();
+  }
+
+  // Body-name filter on the big synodic table.
+  function bindFilter() {
+    var input = document.getElementById('body-filter');
+    var table = document.querySelector('#body-table table');
+    if (!input || !table) return;
+    input.addEventListener('input', function () {
+      var q = input.value.trim().toLowerCase();
+      table.querySelectorAll('tbody tr').forEach(function (tr) {
+        var first = tr.cells[0] ? (tr.cells[0].textContent || '').toLowerCase() : '';
+        tr.style.display = !q || first.indexOf(q) !== -1 ? '' : 'none';
+      });
     });
   }
 
-  document.addEventListener('DOMContentLoaded', function () {
-    var input = document.getElementById('calc-date');
-    if (input) input.addEventListener('change', update);
-    update();
-  });
-})();
+  if (typeof document !== 'undefined') {
+    document.addEventListener('DOMContentLoaded', function () {
+      bindDom();
+      bindFilter();
+    });
+  }
+
+  // Expose pure functions for tests / external use.
+  root.LaunchWindows = {
+    nextWindow: nextWindow,
+    nextNWindows: nextNWindows,
+    hohmannTransferYears: hohmannTransferYears,
+    angleAt: angleAt,
+    EPOCH_MS: EPOCH_MS,
+  };
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = root.LaunchWindows;
+  }
+})(typeof globalThis !== 'undefined' ? globalThis : this);

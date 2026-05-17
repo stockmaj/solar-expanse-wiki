@@ -700,22 +700,20 @@ fn page_launch_windows(ctx: &WikiCtx) -> String {
         &table_rows,
     );
 
-    // Embed body data for the JS calculator (planets only — too many asteroids
-    // to surface next-window dates for everything without overwhelming the page).
+    // Embed every body's orbital data for the calculator so the user can
+    // pick any from/to pair.  Includes Earth so it can be on either side.
     let mut calc_bodies: Vec<String> = Vec::new();
-    for (display, a, _t, syn, longitude) in &data {
-        // Only include the major planets (a <= 40 AU, name appears in PLANETS list).
-        let is_planet = PLANETS
-            .iter()
-            .any(|p| ctx.display(p) == display.as_str() && *p != "Earth");
-        if !is_planet {
-            continue;
-        }
+    // Earth first
+    calc_bodies.push(format!(
+        "{{\"name\":\"Earth\",\"a\":{a},\"longitude\":{lng}}}",
+        a = earth_a,
+        lng = earth.longitude_deg.unwrap_or(0.0),
+    ));
+    for (display, a, _t, _syn, longitude) in &data {
         calc_bodies.push(format!(
-            "{{\"name\":\"{name}\",\"a\":{a},\"synodic\":{syn},\"longitude\":{lng}}}",
+            "{{\"name\":\"{name}\",\"a\":{a},\"longitude\":{lng}}}",
             name = display.replace('"', "\\\""),
             a = a,
-            syn = syn,
             lng = longitude,
         ));
     }
@@ -723,6 +721,7 @@ fn page_launch_windows(ctx: &WikiCtx) -> String {
 
     format!(
         "# Launch Windows\n\n\
+**Jump to:** [Calculate a window](#window-calculator) · [Filter the body list](#body-table)\n\n\
 > **Heads-up:** these numbers are computed by the wiki from the orbital\n\
 > elements the game ships, *not* read from the game itself.  The in-game\n\
 > Plan Mission window uses live n-body propagation including gravitational\n\
@@ -745,7 +744,10 @@ The **synodic period** is how often the Earth-body pair returns to that\n\
 same relative geometry.  Computed from each body's semi-major axis via\n\
 Kepler's third law (`T_years = a^(3/2)`) and\n\
 `synodic = 1 / |1/T_earth − 1/T_body|`.\n\n\
+<div id=\"body-table\">\n\
+<label>Filter: <input id=\"body-filter\" type=\"search\" placeholder=\"e.g., mars, ceres, 1P…\"></label>\n\n\
 {table}\n\
+</div>\n\n\
 ## Practical reading\n\n\
 - **Earth → Mercury** opens most often — ~116 days, less than every 4 months.\n\
 - **Earth → Venus** ~19 months.\n\
@@ -758,21 +760,23 @@ Kepler's third law (`T_years = a^(3/2)`) and\n\
 Moons aren't here — launching from Earth to the Moon (or Phobos, Europa, etc.)\n\
 doesn't have a useful synodic period; you wait for your spacecraft to be\n\
 ready and the in-game flight planner handles phasing.\n\n\
-## Next windows from a chosen date\n\n\
-Enter an in-game date and the calculator shows the next five Earth-departure\n\
-launch windows for each of the eight other planets.  Same caveat: this is a\n\
-Keplerian approximation anchored at the game's epoch of orbital data.  The\n\
-*spacing* between windows is reliable; the *absolute dates* may drift from\n\
-the in-game porkchop plot by days to weeks.\n\n\
+## Window calculator\n\n\
+<a id=\"window-calculator\"></a>\n\n\
+Pick a *from* body, *to* body, and a start date.  The calculator lists the\n\
+next five Hohmann-transfer launch windows from that pair, plus the arrival\n\
+date for each (transfer time = `0.5 × ((a_from + a_to) / 2)^1.5` years).\n\n\
+Same caveat as the table above: this is a Keplerian approximation anchored\n\
+at the game's earliest contract epoch (1959-01-01).  Spacing between windows\n\
+is reliable; absolute dates may drift from the in-game porkchop plot by days\n\
+to weeks.\n\n\
 <div class=\"calc\">\n\
-<label>Start date: <input type=\"date\" id=\"calc-date\" value=\"2050-01-01\"></label>\n\
-<table id=\"calc-result\">\n\
-  <thead><tr><th>Body</th><th colspan=\"5\">Next five Earth-departure windows</th></tr></thead>\n\
-  <tbody></tbody>\n\
-</table>\n\
+<label>From: <select id=\"calc-from\"></select></label>\n\
+<label>To: <select id=\"calc-to\"></select></label>\n\
+<label>Start date: <input type=\"date\" id=\"calc-date\" value=\"2020-01-01\"></label>\n\
+<div id=\"calc-result\"></div>\n\
 </div>\n\n\
 <script>\n\
-window.LAUNCH_WINDOW_BODIES = {data};\n\
+window.LAUNCH_WINDOW_ALL_BODIES = {data};\n\
 window.LAUNCH_WINDOW_EARTH = {{\"a\":{earth_a},\"longitude\":{earth_lng}}};\n\
 </script>\n\
 <script src=\"{{{{ '/assets/js/launch-windows.js' | relative_url }}}}\"></script>\n\n\
