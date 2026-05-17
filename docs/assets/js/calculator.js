@@ -304,8 +304,9 @@
       transports.map(function (t) {
         var sel = t.id === ctx.state.crewTransport ? ' selected' : '';
         var lockTag = t.is_locked ? ' (locked)' : '';
+        var loaded = t.mass + t.capacity;
         return '<option value="' + escapeHtml(t.id) + '"' + sel + '>' +
-          escapeHtml(t.name) + ' — ' + t.capacity + ' seats, ' + t.mass + ' t' + lockTag +
+          escapeHtml(t.name) + ' — ' + t.capacity + ' seats, ' + loaded + ' t loaded' + lockTag +
           '</option>';
       }).join('') +
       '</select></label>';
