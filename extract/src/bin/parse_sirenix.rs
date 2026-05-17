@@ -40,6 +40,11 @@ struct LaunchVehicle {
     build_time_days: f64,
     launch_cost: f64,
     maintenance_cost_per_day: f64,
+    // The fuel resource the rocket burns: `id_resource_fuel` for chemical,
+    // `id_resource_hydrogen` for nuclear-thermal (LH2 reaction mass), or
+    // `None` for entries where the field is unset in the dump.  Used to
+    // categorize the launch-vehicles page into chemical vs. nuclear tables.
+    fuel_type_on_start: Option<String>,
 }
 
 #[derive(Serialize, Debug, Default, PartialEq)]
@@ -186,6 +191,10 @@ fn parse_launch_vehicle(v: &Value) -> Option<LaunchVehicle> {
     }
     let f = |path: &[&str]| -> f64 { lookup_f64(v, path).unwrap_or(0.0) };
     let b = |path: &[&str]| -> bool { lookup_bool(v, path).unwrap_or(false) };
+    let fuel_type_on_start = v
+        .pointer("/fuelTypeOnStart/name")
+        .and_then(|x| x.as_str())
+        .map(|s| s.to_string());
     Some(LaunchVehicle {
         id,
         max_payload: f(&["maxPayload"]),
@@ -198,6 +207,7 @@ fn parse_launch_vehicle(v: &Value) -> Option<LaunchVehicle> {
         build_time_days: f(&["timeToBuildInDays"]),
         launch_cost: f(&["costLaunch"]),
         maintenance_cost_per_day: f(&["maintenanceCostPerDay"]),
+        fuel_type_on_start,
     })
 }
 
@@ -788,6 +798,29 @@ mod tests {
         let r = serde_json::json!({"id": "id_Rocket_RocketType1", "maxPayload": 10});
         let parsed = parse_launch_vehicle(&r).expect("RocketType1 should parse");
         assert_eq!(parsed.max_payload, 10.0);
+    }
+
+    #[test]
+    fn captures_fuel_type_for_chemical_and_nuclear() {
+        // Sparrow-style chemical rocket: fuelTypeOnStart points at id_resource_fuel.
+        let chem = serde_json::json!({
+            "id": "id_Rocket_RocketType1",
+            "fuelTypeOnStart": { "$ref": true, "type": "ResourceDefinition", "name": "id_resource_fuel" }
+        });
+        let c = parse_launch_vehicle(&chem).unwrap();
+        assert_eq!(c.fuel_type_on_start.as_deref(), Some("id_resource_fuel"));
+
+        // Nuclear-thermal rocket: hydrogen as reaction mass.
+        let nuke = serde_json::json!({
+            "id": "lv_nuke_small",
+            "fuelTypeOnStart": { "name": "id_resource_hydrogen" }
+        });
+        let n = parse_launch_vehicle(&nuke).unwrap();
+        assert_eq!(n.fuel_type_on_start.as_deref(), Some("id_resource_hydrogen"));
+
+        // Missing field stays None (some dump entries have fuelTypeOnStart=null).
+        let bare = serde_json::json!({"id": "lv_chem_seadragon"});
+        assert!(parse_launch_vehicle(&bare).unwrap().fuel_type_on_start.is_none());
     }
 
     #[test]

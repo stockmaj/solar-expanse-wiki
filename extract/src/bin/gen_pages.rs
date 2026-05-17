@@ -196,6 +196,8 @@ struct LaunchVehicleStat {
     build_time_days: f64,
     launch_cost: f64,
     maintenance_cost_per_day: f64,
+    #[serde(default)]
+    fuel_type_on_start: Option<String>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -1199,53 +1201,62 @@ fn page_launch_vehicles(locale: &Locale, sirenix: &Sirenix) -> String {
             .then(a.id.cmp(&b.id))
     });
 
-    let rows: Vec<Vec<String>> = entries
-        .iter()
-        .map(|lv| {
-            let display = id_to_name.get(lv.id.as_str()).copied().unwrap_or(lv.id.as_str());
-            let desc = id_to_desc.get(lv.id.as_str()).copied().unwrap_or("");
-            vec![
-                format!(
-                    "{anchor}**{name}**",
-                    anchor = anchor_tag("lv", &lv.id),
-                    name = escape_cell(display)
-                ),
-                fmt_amount(lv.max_payload),
-                fmt_reusability(lv.reusability).into(),
-                if lv.can_send_human { "Yes" } else { "No" }.into(),
-                fmt_build_cost(&lv.build_cost, &resource_name),
-                fmt_amount(lv.build_time_days),
-                fmt_abbrev(lv.launch_cost),
-                fmt_abbrev(lv.maintenance_cost_per_day),
-                escape_cell(desc),
-            ]
-        })
-        .collect();
-    let table = md_table_with_tips(
-        &[
-            "Launch Vehicle",
-            "Payload (t)",
-            "Reusable",
-            "Crew",
-            "Build cost",
-            "Time (d)",
-            "Launch",
-            "Maint",
-            "Description",
-        ],
-        &[
-            None,
-            Some("Max payload to low orbit, in tonnes"),
-            Some("Survives reentry and can fly again (Yes / Partial / No)"),
-            Some("Crew-rated for human passengers"),
-            Some("Resources required to construct"),
-            Some("Build time in days"),
-            Some("Cash fee paid on every launch"),
-            Some("Daily maintenance cost while idle on the pad"),
-            None,
-        ],
-        &rows,
-    );
+    // Categorise by propulsion.  Nuclear-thermal rockets use hydrogen as
+    // reaction mass (`id_resource_hydrogen`); everything else is chemical.
+    // Some chemical entries have `fuelTypeOnStart=None` in the dump (the
+    // field is set at runtime), so chemical is the default bucket.
+    let is_nuclear = |lv: &&LaunchVehicleStat| {
+        lv.fuel_type_on_start.as_deref() == Some("id_resource_hydrogen")
+    };
+    let chemical: Vec<&LaunchVehicleStat> = entries.iter().copied().filter(|lv| !is_nuclear(lv)).collect();
+    let nuclear: Vec<&LaunchVehicleStat> = entries.iter().copied().filter(is_nuclear).collect();
+
+    let make_row = |lv: &LaunchVehicleStat| -> Vec<String> {
+        let display = id_to_name.get(lv.id.as_str()).copied().unwrap_or(lv.id.as_str());
+        let desc = id_to_desc.get(lv.id.as_str()).copied().unwrap_or("");
+        vec![
+            format!(
+                "{anchor}**{name}**",
+                anchor = anchor_tag("lv", &lv.id),
+                name = escape_cell(display)
+            ),
+            fmt_amount(lv.max_payload),
+            fmt_reusability(lv.reusability).into(),
+            if lv.can_send_human { "Yes" } else { "No" }.into(),
+            fmt_build_cost(&lv.build_cost, &resource_name),
+            fmt_amount(lv.build_time_days),
+            fmt_abbrev(lv.launch_cost),
+            fmt_abbrev(lv.maintenance_cost_per_day),
+            escape_cell(desc),
+        ]
+    };
+    let headers = [
+        "Launch Vehicle",
+        "Payload (t)",
+        "Reusable",
+        "Crew",
+        "Build cost",
+        "Time (d)",
+        "Launch",
+        "Maint",
+        "Description",
+    ];
+    let tooltips = [
+        None,
+        Some("Max payload to low orbit, in tonnes"),
+        Some("Survives reentry and can fly again (Yes / Partial / No)"),
+        Some("Crew-rated for human passengers"),
+        Some("Resources required to construct"),
+        Some("Build time in days"),
+        Some("Cash fee paid on every launch"),
+        Some("Daily maintenance cost while idle on the pad"),
+        None,
+    ];
+
+    let chem_rows: Vec<Vec<String>> = chemical.iter().map(|lv| make_row(lv)).collect();
+    let nuke_rows: Vec<Vec<String>> = nuclear.iter().map(|lv| make_row(lv)).collect();
+    let chem_table = md_table_with_tips(&headers, &tooltips, &chem_rows);
+    let nuke_table = md_table_with_tips(&headers, &tooltips, &nuke_rows);
 
     format!(
         "# Launch Vehicles\n\n\
@@ -1253,8 +1264,15 @@ Surface-to-orbit lifters. Every spacecraft that's built on a planet's surface\n\
 has to ride one of these to reach orbit, and the launch cost paid here is paid\n\
 on **every** launch — reusable vehicles amortise their build cost over many\n\
 flights.\n\n\
-{table}\n\
-## Reading the table\n\n\
+Three propulsion families are unlocked across the tech tree:\n\n\
+- **Chemical** rockets — kerosene/RP-1 burned with LOX. The early- and mid-game default.\n\
+- **Nuclear-thermal** rockets — hydrogen heated by a fission reactor and expelled as reaction mass. Higher specific impulse for the same payload class; unlocked later in the tech tree.\n\
+- **Mechanical / magnetic** launchers — non-rocket systems built as facilities. See [Alternative launch methods](#alternative-launch-methods) below.\n\n\
+## Chemical rockets\n\n\
+{chem_table}\n\
+## Nuclear-thermal rockets\n\n\
+{nuke_table}\n\
+## Reading the tables\n\n\
 - **Max Payload** is the heaviest load (in tonnes) the vehicle can carry to low orbit.\n\
 - **Reusable** — *Yes* means the vehicle survives reentry and can fly again; *No* means each launch consumes the vehicle.\n\
 - **Crew Rated** — whether the vehicle can carry humans, not just cargo.\n\
