@@ -626,9 +626,6 @@ rivals the Solar System in planet count.\n\n\
 }
 
 fn page_launch_windows(ctx: &WikiCtx) -> String {
-    // T_years = a^(3/2) for a body orbiting the Sun (Kepler's third law, AU + years).
-    // synodic = 1 / |1/T_inner − 1/T_outer|  →  the interval between consecutive
-    // identical configurations (Hohmann-style launch opportunities).
     let earth = match ctx.body("Earth") {
         Some(b) => b,
         None => return "# Launch Windows\n\nEarth data not available.\n".into(),
@@ -639,12 +636,17 @@ fn page_launch_windows(ctx: &WikiCtx) -> String {
     };
     let earth_period_years = earth_a.powf(1.5);
 
-    let mut rows: Vec<Vec<String>> = Vec::new();
-    let mut targets: Vec<&str> = PLANETS.iter().filter(|p| **p != "Earth").copied().collect();
-    // Tack on the major asteroids and Pluto's neighborhood by leveraging the same body lookup —
-    // anything orbiting the Sun is in scope.  Keep the list short to stay readable.
-    targets.extend(["Ceres", "Vesta", "Pallas"].iter().copied());
+    // Build the full set of sun-orbiting targets from every taxonomy bucket.
+    let mut targets: Vec<&str> = Vec::new();
+    targets.extend(PLANETS.iter().filter(|p| **p != "Earth").copied());
+    targets.extend(ASTEROIDS_BELT.iter().copied());
+    targets.extend(ASTEROIDS_NEO.iter().copied());
+    targets.extend(ASTEROIDS_TROJAN_GREEK.iter().copied());
+    targets.extend(ASTEROIDS_FICTIONAL.iter().copied());
+    targets.extend(COMETS.iter().copied());
 
+    // Collect (body, display, a, t_years, synodic_years) for everything we can match.
+    let mut data: Vec<(String, f64, f64, f64, f64)> = Vec::new();
     for id in &targets {
         let b = match ctx.body(id) {
             Some(b) => b,
@@ -663,36 +665,75 @@ fn page_launch_windows(ctx: &WikiCtx) -> String {
             continue;
         }
         let synodic_years = 1.0 / inv.abs();
-        let synodic_days = synodic_years * 365.25;
-        let display = ctx.display(id);
-        let synodic_label = if synodic_years < 2.0 {
-            format!("{:.0} days (~{:.1} months)", synodic_days, synodic_years * 12.0)
-        } else {
-            format!("{:.1} years", synodic_years)
-        };
-        rows.push(vec![
-            format!("**{}**", display),
-            format!("{:.3}", a),
-            format!("{:.2} yr", t_years),
-            synodic_label,
-        ]);
+        let display = ctx.display(id).to_string();
+        let longitude = b.longitude_deg.unwrap_or(0.0);
+        data.push((display, a, t_years, synodic_years, longitude));
     }
-    let table = md_table(
+    data.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Synodic-period overview table.
+    let table_rows: Vec<Vec<String>> = data
+        .iter()
+        .map(|(display, a, t_years, syn, _)| {
+            let synodic_days = syn * 365.25;
+            let synodic_label = if *syn < 2.0 {
+                format!("{:.0} days (~{:.1} months)", synodic_days, syn * 12.0)
+            } else {
+                format!("{:.1} years", syn)
+            };
+            vec![
+                format!("**{}**", display),
+                format!("{:.3}", a),
+                format!("{:.2} yr", t_years),
+                synodic_label,
+            ]
+        })
+        .collect();
+    let table = md_table_with_tips(
         &["Body", "Semi-major axis (AU)", "Orbital period", "Earth ↔ body window"],
-        &rows,
+        &[
+            None,
+            Some("Average distance from the Sun in astronomical units (1 AU = Earth's distance)"),
+            Some("Time for one orbit around the Sun, derived from a via Kepler's third law"),
+            Some("Interval between consecutive Hohmann-style launch opportunities from Earth — the synodic period"),
+        ],
+        &table_rows,
     );
+
+    // Embed body data for the JS calculator (planets only — too many asteroids
+    // to surface next-window dates for everything without overwhelming the page).
+    let mut calc_bodies: Vec<String> = Vec::new();
+    for (display, a, _t, syn, longitude) in &data {
+        // Only include the major planets (a <= 40 AU, name appears in PLANETS list).
+        let is_planet = PLANETS
+            .iter()
+            .any(|p| ctx.display(p) == display.as_str() && *p != "Earth");
+        if !is_planet {
+            continue;
+        }
+        calc_bodies.push(format!(
+            "{{\"name\":\"{name}\",\"a\":{a},\"synodic\":{syn},\"longitude\":{lng}}}",
+            name = display.replace('"', "\\\""),
+            a = a,
+            syn = syn,
+            lng = longitude,
+        ));
+    }
+    let calc_data = format!("[{}]", calc_bodies.join(","));
 
     format!(
         "# Launch Windows\n\n\
-The game doesn't store launch-window dates as static data — the porkchop\n\
-plot you see in Plan Mission is computed live from current planetary\n\
-positions. What *is* knowable in advance is the **synodic period**: how\n\
-often a given pair of bodies returns to the same relative geometry. After\n\
-each synodic period, the same Hohmann-style launch opportunity comes around\n\
-again.\n\n\
-Synodic periods below are computed from each body's semi-major axis using\n\
-Kepler's third law (`T_years = a^(3/2)`) and `synodic = 1 / |1/T_inner −\n\
-1/T_outer|`.\n\n\
+> **Heads-up:** these numbers are computed by the wiki from the orbital\n\
+> elements the game ships, *not* read from the game itself.  The in-game\n\
+> Plan Mission window uses live n-body propagation including gravitational\n\
+> perturbations and your spacecraft's specific Δv budget, so the dates and\n\
+> intervals here are a **planning approximation** — the porkchop plot is\n\
+> the source of truth at launch time.\n\n\
+The **synodic period** is how often a given Earth-body pair returns to the\n\
+same relative geometry.  After each synodic period, the same Hohmann-style\n\
+launch opportunity comes around again.  Computed from each body's\n\
+semi-major axis via Kepler's third law (`T_years = a^(3/2)`) and\n\
+`synodic = 1 / |1/T_earth − 1/T_body|`.\n\n\
 {table}\n\
 ## Practical reading\n\n\
 - **Earth → Mercury** opens most often — ~116 days, less than every 4 months.\n\
@@ -702,14 +743,35 @@ Kepler's third law (`T_years = a^(3/2)`) and `synodic = 1 / |1/T_inner −\n\
 - **Earth → Jupiter and beyond** are short intervals (~13 months) because the\n\
   outer planets move slowly relative to Earth, so Earth laps them almost\n\
   yearly.  The Hohmann transfer itself takes years.\n\
-- **Earth → asteroid belt** (Ceres, Vesta, Pallas) sits between Mars and\n\
-  Jupiter — windows ~14–16 months.\n\n\
-Moons aren't in this table — launching from Earth to the Moon (or Phobos,\n\
-Europa, etc.) doesn't have a useful synodic period; you just wait for your\n\
-spacecraft to be ready and the in-game flight planner handles phasing.\n\n\
+- Asteroid-belt bodies sit between Mars and Jupiter — windows ~14–16 months.\n\n\
+Moons aren't here — launching from Earth to the Moon (or Phobos, Europa, etc.)\n\
+doesn't have a useful synodic period; you wait for your spacecraft to be\n\
+ready and the in-game flight planner handles phasing.\n\n\
+## Next windows from a chosen date\n\n\
+Enter an in-game date and the calculator shows the next five Earth-departure\n\
+launch windows for each of the eight other planets.  Same caveat: this is a\n\
+Keplerian approximation anchored at the game's epoch of orbital data.  The\n\
+*spacing* between windows is reliable; the *absolute dates* may drift from\n\
+the in-game porkchop plot by days to weeks.\n\n\
+<div class=\"calc\">\n\
+<label>Start date: <input type=\"date\" id=\"calc-date\" value=\"2050-01-01\"></label>\n\
+<table id=\"calc-result\">\n\
+  <thead><tr><th>Body</th><th colspan=\"5\">Next five Earth-departure windows</th></tr></thead>\n\
+  <tbody></tbody>\n\
+</table>\n\
+</div>\n\n\
+<script>\n\
+window.LAUNCH_WINDOW_BODIES = {data};\n\
+window.LAUNCH_WINDOW_EARTH = {{\"a\":{earth_a},\"longitude\":{earth_lng}}};\n\
+</script>\n\
+<script src=\"{{{{ '/assets/js/launch-windows.js' | relative_url }}}}\"></script>\n\n\
 ## See also\n\n\
 - [Planets](planets.md)\n\
-- [Celestial Bodies overview](README.md)\n"
+- [Celestial Bodies overview](README.md)\n",
+        data = calc_data,
+        earth_a = earth_a,
+        earth_lng = earth.longitude_deg.unwrap_or(0.0),
+    )
     )
 }
 
