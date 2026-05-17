@@ -721,21 +721,41 @@ fn page_launch_windows(ctx: &WikiCtx) -> String {
 
     format!(
         "# Launch Windows\n\n\
-**Jump to:** [Calculate a window](#window-calculator) · [Filter the body list](#body-table)\n\n\
+**Jump to:** [Body table](#body-table) · [Gravity-assist trajectory](#gravity-assist)\n\n\
 > **Heads-up:** these numbers are computed by the wiki from the orbital\n\
 > elements the game ships, *not* read from the game itself.  The in-game\n\
 > Plan Mission window uses live n-body propagation including gravitational\n\
 > perturbations and your spacecraft's specific Δv budget, so the dates and\n\
 > intervals here are a **planning approximation** — the porkchop plot is\n\
 > the source of truth at launch time.\n\n\
+## Window calculator\n\n\
+<a id=\"window-calculator\"></a>\n\n\
+Pick a *from* body, *to* body, and a start date.  The calculator lists the\n\
+next five Hohmann-transfer launch windows from that pair, plus the arrival\n\
+date for each (transfer time = `0.5 × ((a_from + a_to) / 2)^1.5` years).\n\n\
+The start date defaults to **2020-01-01** — the game starts in 1959 but the\n\
+real-world J2000 orbital elements used here are most accurate around the\n\
+year 2000, and the launch-window math is mostly useful for planning a few\n\
+years out.\n\n\
+<div class=\"calc\">\n\
+<label>From: <select id=\"calc-from\"></select></label>\n\
+<label>To: <select id=\"calc-to\"></select></label>\n\
+<label>Start date: <input type=\"date\" id=\"calc-date\" value=\"2020-01-01\"></label>\n\
+<div id=\"calc-result\"></div>\n\
+</div>\n\n\
+<script>\n\
+window.LAUNCH_WINDOW_ALL_BODIES = {data};\n\
+window.LAUNCH_WINDOW_EARTH = {{\"a\":{earth_a},\"longitude\":{earth_lng}}};\n\
+</script>\n\
+<script src=\"{{{{ '/assets/js/launch-windows.js' | relative_url }}}}\"></script>\n\n\
 ## What counts as a launch window\n\n\
 A *launch window* here is the moment when an idealized **Hohmann transfer**\n\
-launched from Earth's orbit will arrive at the target body just as that body\n\
-reaches the transfer ellipse's far side.  Concretely, at the moment of\n\
+launched from one body's orbit will arrive at the target body just as that\n\
+body reaches the transfer ellipse's far side.  Concretely, at the moment of\n\
 launch the target has to lead (for outer bodies) or trail (for inner bodies)\n\
-Earth by a specific phase angle so that body and spacecraft meet on arrival.\n\
-Earth–Mars windows recur every ~26 months (synodic period); the most recent\n\
-real-world ones were 2020-07, 2022-09, 2024-10.\n\n\
+the origin by a specific phase angle so that body and spacecraft meet on\n\
+arrival.  Earth–Mars windows recur every ~26 months (synodic period); the\n\
+most recent real-world ones were 2020-07, 2022-09, 2024-10.\n\n\
 This is a single idealised window per synodic period — *not* a multi-day\n\
 porkchop plot.  In practice the in-game planner gives you a range of days\n\
 on either side at slightly higher Δv cost; the table here is the centre of\n\
@@ -760,26 +780,37 @@ Kepler's third law (`T_years = a^(3/2)`) and\n\
 Moons aren't here — launching from Earth to the Moon (or Phobos, Europa, etc.)\n\
 doesn't have a useful synodic period; you wait for your spacecraft to be\n\
 ready and the in-game flight planner handles phasing.\n\n\
-## Window calculator\n\n\
-<a id=\"window-calculator\"></a>\n\n\
-Pick a *from* body, *to* body, and a start date.  The calculator lists the\n\
-next five Hohmann-transfer launch windows from that pair, plus the arrival\n\
-date for each (transfer time = `0.5 × ((a_from + a_to) / 2)^1.5` years).\n\n\
-Same caveat as the table above: this is a Keplerian approximation anchored\n\
-at the game's earliest contract epoch (1959-01-01).  Spacing between windows\n\
-is reliable; absolute dates may drift from the in-game porkchop plot by days\n\
-to weeks.\n\n\
+## Gravity-assist trajectory\n\n\
+<a id=\"gravity-assist\"></a>\n\n\
+For outer-system targets a *gravity assist* — a deep flyby of an intermediate\n\
+body that bends the spacecraft's trajectory at no propellant cost — can cut\n\
+the launch Δv dramatically.  Pick any *from*, *flyby*, and *to* body and the\n\
+calculator searches a coarse grid of launch and flyby dates, returning the\n\
+lowest-cost single-flyby trajectory it can find.\n\n\
+**Important caveats:**\n\n\
+- This is a **single** gravity assist (one intermediate body).  Real\n\
+  outer-planet missions usually chain several — Cassini did Venus-Venus-Earth-Jupiter,\n\
+  for example — and those aren't modelled here.\n\
+- It's a **patched-conic** approximation: each leg is a heliocentric Kepler\n\
+  arc and the flyby itself is treated as an instantaneous rotation of the\n\
+  v∞ vector.  In particular, the flyby is assumed capable of bending v∞ by\n\
+  any angle for free (the actual maximum bend depends on flyby altitude\n\
+  and the body's mass).\n\
+- Bodies are assumed to move on **circular coplanar** orbits anchored at\n\
+  the game's epoch — same Keplerian approximation the window calculator\n\
+  above uses.\n\n\
+Treat this as a **planning tool**, not a precise trajectory.  The reported\n\
+\"Δv proxy\" is `|v_spacecraft − v_Earth|` at launch plus\n\
+`|v_spacecraft − v_target|` at arrival, both expressed in km/s; it\n\
+ignores escape Δv from low Earth orbit and capture Δv at the target.\n\n\
 <div class=\"calc\">\n\
-<label>From: <select id=\"calc-from\"></select></label>\n\
-<label>To: <select id=\"calc-to\"></select></label>\n\
-<label>Start date: <input type=\"date\" id=\"calc-date\" value=\"2020-01-01\"></label>\n\
-<div id=\"calc-result\"></div>\n\
+<label>From: <select id=\"ga-from\"></select></label>\n\
+<label>Flyby: <select id=\"ga-flyby\"></select></label>\n\
+<label>To: <select id=\"ga-to\"></select></label>\n\
+<label>Search from: <input type=\"date\" id=\"ga-date\" value=\"2020-01-01\"></label>\n\
+<div id=\"ga-result\"></div>\n\
 </div>\n\n\
-<script>\n\
-window.LAUNCH_WINDOW_ALL_BODIES = {data};\n\
-window.LAUNCH_WINDOW_EARTH = {{\"a\":{earth_a},\"longitude\":{earth_lng}}};\n\
-</script>\n\
-<script src=\"{{{{ '/assets/js/launch-windows.js' | relative_url }}}}\"></script>\n\n\
+<script src=\"{{{{ '/assets/js/gravity-assist.js' | relative_url }}}}\"></script>\n\n\
 ## See also\n\n\
 - [Planets](planets.md)\n\
 - [Celestial Bodies overview](README.md)\n",
@@ -790,50 +821,46 @@ window.LAUNCH_WINDOW_EARTH = {{\"a\":{earth_a},\"longitude\":{earth_lng}}};\n\
 }
 
 fn page_celestial_index() -> String {
-    let counts = [
-        ("Planets", PLANETS.len()),
-        (
-            "Moons",
-            moons_by_parent().iter().map(|(_, m)| m.len()).sum::<usize>(),
-        ),
-        (
-            "Asteroids",
-            ASTEROIDS_BELT.len()
-                + ASTEROIDS_NEO.len()
-                + ASTEROIDS_TROJAN_GREEK.len()
-                + ASTEROIDS_FICTIONAL.len(),
-        ),
-        ("Comets", COMETS.len()),
-        (
-            "Exoplanets",
-            EXOPLANETS_TRAPPIST.len() + EXOPLANETS_KEPLER.len(),
-        ),
+    let asteroid_count = ASTEROIDS_BELT.len()
+        + ASTEROIDS_NEO.len()
+        + ASTEROIDS_TROJAN_GREEK.len()
+        + ASTEROIDS_FICTIONAL.len();
+    let moon_count = moons_by_parent().iter().map(|(_, m)| m.len()).sum::<usize>();
+    let exoplanet_count = EXOPLANETS_TRAPPIST.len() + EXOPLANETS_KEPLER.len();
+    let rows: Vec<Vec<String>> = vec![
+        vec![
+            "**[Planets](planets.md)**".into(),
+            PLANETS.len().to_string(),
+            "Major body orbiting the Sun. Most planets host one or more moons.".into(),
+        ],
+        vec![
+            "**[Moons](moons.md)**".into(),
+            moon_count.to_string(),
+            "Natural satellite orbiting a planet.".into(),
+        ],
+        vec![
+            "**[Asteroids](asteroids.md)**".into(),
+            asteroid_count.to_string(),
+            "Small body. Some are in the main belt, some are near-Earth, and some co-orbit Jupiter at the Trojan/Greek points. Asteroids can be pulled into new orbits with an Asteroid Engine Module.".into(),
+        ],
+        vec![
+            "**[Comets](comets.md)**".into(),
+            COMETS.len().to_string(),
+            "Periodic body on a highly eccentric orbit.".into(),
+        ],
+        vec![
+            "**[Exoplanets](exoplanets.md)**".into(),
+            exoplanet_count.to_string(),
+            "Body in a non-Solar system. Reachable only via a generation ship.".into(),
+        ],
     ];
-    let rows: Vec<Vec<String>> = counts
-        .iter()
-        .map(|(name, n)| {
-            vec![
-                format!("**[{name}]({}.md)**", name.to_lowercase()),
-                n.to_string(),
-            ]
-        })
-        .collect();
-    let count_table = md_table(&["Category", "Count"], &rows);
+    let count_table = md_table(&["Type", "Count", "Notes"], &rows);
     format!(
         "# Celestial Bodies\n\n\
 All natural objects in Solar Expanse — from the Sun and the nine planets, through\n\
 moons and asteroid belts, out to comets and the Trappist-1 and Kepler-90\n\
 exoplanet systems reachable in the late game.\n\n\
 {count_table}\n\
-## Object types\n\n\
-Solar Expanse distinguishes objects by type in the search and navigation UI:\n\n\
-| Type | Notes |\n\
-| --- | --- |\n\
-| **Planet** | Major body orbiting the Sun. Most planets host one or more moons. |\n\
-| **Moon** | Natural satellite orbiting a planet. |\n\
-| **Asteroid** | Small body. Some are in the main belt, some are near-Earth, and some co-orbit Jupiter at the Trojan/Greek points. Asteroids can be pulled into new orbits with an Asteroid Engine Module. |\n\
-| **Comet** | Periodic body on a highly eccentric orbit. |\n\
-| **Exoplanet** | Body in a non-Solar system. Reachable only via a generation ship. |\n\n\
 ## Orbital data\n\n\
 | Field | Meaning | Unit |\n\
 | --- | --- | --- |\n\
@@ -1453,8 +1480,50 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
                 && !c.id.contains("_test")
         })
         .collect();
-    // Display order: by id (groups by area: asteroid, mars, moon, outer, etc.)
-    entries.sort_by(|a, b| a.id.cmp(&b.id));
+
+    // Topological depth: a contract with no prereqs (no one unlocks it via rewards)
+    // has depth 0; otherwise depth = 1 + max(depth of each prereq).  Cycles are
+    // broken defensively by treating any in-progress revisit as depth 0.
+    let mut depth: BTreeMap<&str, u32> = BTreeMap::new();
+    fn compute_depth<'a>(
+        id: &'a str,
+        unlocked_by: &BTreeMap<&'a str, Vec<&'a str>>,
+        memo: &mut BTreeMap<&'a str, u32>,
+        visiting: &mut std::collections::BTreeSet<&'a str>,
+    ) -> u32 {
+        if let Some(&d) = memo.get(id) {
+            return d;
+        }
+        if !visiting.insert(id) {
+            // Cycle — break by treating this node as depth 0.
+            return 0;
+        }
+        let d = match unlocked_by.get(id) {
+            None => 0,
+            Some(srcs) => srcs
+                .iter()
+                .map(|src| compute_depth(src, unlocked_by, memo, visiting))
+                .max()
+                .map(|m| m + 1)
+                .unwrap_or(0),
+        };
+        visiting.remove(id);
+        memo.insert(id, d);
+        d
+    }
+    for c in &entries {
+        let mut visiting: std::collections::BTreeSet<&str> = Default::default();
+        compute_depth(c.id.as_str(), &unlocked_by, &mut depth, &mut visiting);
+    }
+
+    // Display order: by topological depth (roots first), then by display name.
+    entries.sort_by(|a, b| {
+        let da = depth.get(a.id.as_str()).copied().unwrap_or(0);
+        let db = depth.get(b.id.as_str()).copied().unwrap_or(0);
+        let name_a = contract_name.get(a.id.as_str()).copied().unwrap_or(a.id.as_str());
+        let name_b = contract_name.get(b.id.as_str()).copied().unwrap_or(b.id.as_str());
+        da.cmp(&db).then_with(|| name_a.cmp(name_b))
+    });
 
     let rows: Vec<Vec<String>> = entries
         .iter()
@@ -1567,7 +1636,10 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
                     .join("<br>"),
             };
 
+            let order_cell = depth.get(c.id.as_str()).copied().unwrap_or(0).to_string();
+
             vec![
+                order_cell,
                 name_cell,
                 prereq_cell,
                 requirements,
@@ -1577,8 +1649,9 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
         })
         .collect();
     let table = md_table_with_tips(
-        &["Contract", "Prereq", "Requirements", "Rewards", "Premise"],
+        &["Order", "Contract", "Prereq", "Requirements", "Rewards", "Premise"],
         &[
+            Some("Dependency depth: 0 = no prereq, N = unlocked after an Order N-1 contract"),
             None,
             Some("Contracts that must complete before this one is offered"),
             Some("Objectives that must be completed to claim the rewards"),
@@ -1597,6 +1670,7 @@ the next link in a chain (Mars Phase 1 → Mars Phase 2 → …), a new spacecra
 or a new launch vehicle.\n\n\
 {table}\n\
 ## Reading the table\n\n\
+- Rows are sorted by **Order** — the contract's dependency depth in the unlock DAG. Order 0 contracts are roots with no prerequisite; Order 1 is unlocked by an Order 0 contract; and so on. Ties break alphabetically.\n\
 - A contract marked **(final)** ends a campaign chain.\n\
 - **Requirements**: the objectives you have to complete to claim the payout. Body-specific objectives (\"deliver 100 t to Mars\") list the *what* but not the destination — the premise text describes the target.\n\
 - **Rewards**: cash, resources, facility / spacecraft / launch-vehicle unlocks, and the next contract in the chain.\n\
@@ -2259,15 +2333,16 @@ mod tests {
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
-    if args.len() != 5 {
+    if args.len() < 5 || args.len() > 6 {
         return Err(anyhow!(
-            "usage: gen-pages <locale.json> <stats.json> <sirenix.json> <wiki-root>"
+            "usage: gen-pages <locale.json> <stats.json> <sirenix.json> <wiki-root> [game-version]"
         ));
     }
     let locale_path = PathBuf::from(&args[1]);
     let stats_path = PathBuf::from(&args[2]);
     let sirenix_path = PathBuf::from(&args[3]);
     let wiki_root = PathBuf::from(&args[4]);
+    let game_version = args.get(5).cloned().unwrap_or_else(|| "unknown".to_string());
 
     let locale: Locale = serde_json::from_str(&fs::read_to_string(&locale_path)?)
         .with_context(|| format!("parsing {}", locale_path.display()))?;
@@ -2298,5 +2373,44 @@ fn main() -> Result<()> {
     write_file(&wiki_root, "contracts/README.md", &page_contracts(&locale, &sirenix))?;
     write_file(&wiki_root, "research/README.md", &page_research(&locale, &sirenix))?;
     write_file(&wiki_root, "missions/README.md", &page_missions(&locale, &sirenix))?;
+
+    // Site metadata for the footer (Jekyll auto-loads _data/*.yml).
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let generated_at = format_unix_date(now);
+    let wiki_yaml = format!(
+        "# Auto-generated by extract/src/bin/gen_pages.rs; do not edit by hand.\n\
+game_version: \"{}\"\n\
+generated_at: \"{}\"\n",
+        game_version.replace('"', "\\\""),
+        generated_at,
+    );
+    write_file(&wiki_root, "_data/wiki.yml", &wiki_yaml)?;
     Ok(())
+}
+
+/// Format a Unix timestamp as `YYYY-MM-DD` (UTC).  Used for the footer's
+/// "generated on" date — we don't pull in chrono just for this.
+fn format_unix_date(secs: u64) -> String {
+    // Days since 1970-01-01 (a Thursday).
+    let days = secs / 86_400;
+    let mut y: i64 = 1970;
+    let mut d = days as i64;
+    loop {
+        let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+        let yd = if leap { 366 } else { 365 };
+        if d < yd { break; }
+        d -= yd;
+        y += 1;
+    }
+    let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    let mlen = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let mut m: i64 = 0;
+    while m < 12 && d >= mlen[m as usize] {
+        d -= mlen[m as usize];
+        m += 1;
+    }
+    format!("{:04}-{:02}-{:02}", y, m + 1, d + 1)
 }
