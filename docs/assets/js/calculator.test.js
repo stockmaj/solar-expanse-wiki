@@ -1,7 +1,7 @@
 // Node-only unit tests for calculator.js — additive-stacking math.
 // Run with `node docs/assets/js/calculator.test.js` from anywhere.
 
-const { applyReductions, workerTotal, powerNetTotal, addSaved, removeSaved, iconFile } = require('./calculator.js');
+const { applyReductions, workerTotal, powerNetTotal, addSaved, removeSaved, iconFile, fmtAbbrev } = require('./calculator.js');
 
 let passed = 0;
 let failed = 0;
@@ -297,6 +297,18 @@ eq(iconFile('metal'), 'metal.png', 'iconFile: default = id + .png');
 eq(iconFile('hel3'), 'HEL3.png', 'iconFile: hel3 is an all-caps override');
 eq(iconFile('human'), 'human.png', 'iconFile: human maps directly');
 eq(iconFile('energy'), 'energy.png', 'iconFile: energy maps directly');
+
+// ----- fmtAbbrev ----------------------------------------------------------
+
+eq(fmtAbbrev(0), '0', 'fmtAbbrev: zero');
+eq(fmtAbbrev(125), '125', 'fmtAbbrev: below 1k stays as integer');
+eq(fmtAbbrev(999), '999', 'fmtAbbrev: 999 stays as integer (< 1k threshold)');
+eq(fmtAbbrev(1000), '1k', 'fmtAbbrev: exactly 1000 → 1k');
+eq(fmtAbbrev(1200), '1.2k', 'fmtAbbrev: 1200 → 1.2k');
+eq(fmtAbbrev(60000), '60k', 'fmtAbbrev: 60000 → 60k');
+eq(fmtAbbrev(200000), '200k', 'fmtAbbrev: 200000 → 200k');
+eq(fmtAbbrev(1500000), '1.5M', 'fmtAbbrev: 1.5M');
+eq(fmtAbbrev(3000000000), '3B', 'fmtAbbrev: billions');
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed === 0 ? 0 : 1);

@@ -80,6 +80,19 @@
     return Math.round(total);
   }
 
+  // Mirrors gen_pages.rs::fmt_abbrev — 1.2k / 200k / 1.5M / 2B style.
+  // Used for the per-row resource pips where horizontal space is tight.
+  function fmtAbbrev(v) {
+    if (v <= 0) return '0';
+    var scaled, suffix;
+    if (v >= 1e9) { scaled = v / 1e9; suffix = 'B'; }
+    else if (v >= 1e6) { scaled = v / 1e6; suffix = 'M'; }
+    else if (v >= 1e3) { scaled = v / 1e3; suffix = 'k'; }
+    else return String(Math.round(v));
+    if (Math.abs(scaled - Math.round(scaled)) < 0.05) return Math.round(scaled) + suffix;
+    return scaled.toFixed(1) + suffix;
+  }
+
   function addSaved(saved, name, placed) {
     var trimmed = String(name).trim();
     if (!trimmed) return saved.slice();
@@ -421,8 +434,8 @@
       var pipsHtml = (r.fac.build_cost || []).map(function (bc) {
         var amount = reduced[bc.resource] || 0;
         var resName = (ctx.resById[bc.resource] && ctx.resById[bc.resource].name) || bc.resource;
-        return '<span class="calc-pip" title="' + escapeHtml(resName) + '">' +
-          '<span class="calc-pip-num">' + amount.toLocaleString() + '</span>' +
+        return '<span class="calc-pip" title="' + escapeHtml(resName + ': ' + amount.toLocaleString()) + '">' +
+          '<span class="calc-pip-num">' + fmtAbbrev(amount) + '</span>' +
           '<img class="calc-pip-icon" src="' + escapeHtml(iconUrl(bc.resource)) + '" alt="">' +
           '</span>';
       }).join('');
@@ -650,6 +663,7 @@
     addSaved: addSaved,
     removeSaved: removeSaved,
     iconFile: iconFile,
+    fmtAbbrev: fmtAbbrev,
   };
 
   if (typeof module !== 'undefined' && module.exports) {
