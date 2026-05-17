@@ -214,6 +214,33 @@ main hr {
   margin: 24px 0;
 }
 
+/* ---------- Body-table filter (launch-windows page) ---------- */
+
+.body-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  align-items: center;
+  margin: 8px 0 12px;
+}
+.body-filters label {
+  font-size: 13px;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.body-filters input[type="search"] {
+  background: var(--code-bg);
+  color: var(--fg);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 13px;
+}
+.body-filters input[type="checkbox"] {
+  margin-right: 4px;
+  vertical-align: -2px;
+}
+
 @media (max-width: 720px) {
   .container { padding: 0 12px; }
   main h1 { font-size: 22px; }

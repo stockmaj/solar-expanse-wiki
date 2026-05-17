@@ -54,70 +54,75 @@ Kepler's third law (`T_years = a^(3/2)`) and
 `synodic = 1 / |1/T_earth − 1/T_body|`.
 
 <div id="body-table" markdown="1">
-<label>Filter: <input id="body-filter" type="search" placeholder="e.g., mars, ceres, 1P…"></label>
+<div class="body-filters">
+<label>Filter: <input id="body-filter" type="search"></label>
+<label><input type="checkbox" class="body-type-filter" value="Planet" checked> Planets</label>
+<label><input type="checkbox" class="body-type-filter" value="Asteroid"> Asteroids</label>
+<label><input type="checkbox" class="body-type-filter" value="Comet"> Comets</label>
+</div>
 
-| Body | <span title="Average distance from the Sun in astronomical units (1 AU = Earth's distance)">Semi-major axis (AU)</span> | <span title="Time for one orbit around the Sun, derived from a via Kepler's third law">Orbital period</span> | <span title="Interval between consecutive Hohmann-style launch opportunities from Earth — the synodic period">Earth ↔ body window</span> |
-| --- | --- | --- | --- |
-| **Mercury** | 0.387 | 0.24 yr | 116 days (~3.8 months) |
-| **Venus** | 0.723 | 0.62 yr | 584 days (~19.2 months) |
-| **EX0-99 Extinctor** | 0.732 | 0.63 yr | 612 days (~20.1 months) |
-| **99942 Apophis** | 0.923 | 0.89 yr | 7.8 years |
-| **3753 Cruithne** | 0.998 | 1.00 yr | 294.0 years |
-| **469219 Kamoʻoalewa** | 1.001 | 1.00 yr | 710.8 years |
-| **101955 Bennu** | 1.126 | 1.20 yr | 6.1 years |
-| **25143 Itokawa** | 1.324 | 1.52 yr | 2.9 years |
-| **Mars** | 1.524 | 1.88 yr | 2.1 years |
-| **098-Y Peppin** | 1.800 | 2.41 yr | 623 days (~20.5 months) |
-| **2495 Noviomagum** | 1.918 | 2.66 yr | 586 days (~19.2 months) |
-| **5426 Sharp** | 1.950 | 2.72 yr | 577 days (~19.0 months) |
-| **2048 Dwornik** | 1.954 | 2.73 yr | 576 days (~18.9 months) |
-| **7088 Ishtar** | 1.980 | 2.79 yr | 570 days (~18.7 months) |
-| **UT7-55 Kutno** | 2.130 | 3.11 yr | 538 days (~17.7 months) |
-| **8 Flora** | 2.202 | 3.27 yr | 526 days (~17.3 months) |
-| **2P Encke** | 2.215 | 3.30 yr | 524 days (~17.2 months) |
-| **12 Victoria** | 2.330 | 3.56 yr | 508 days (~16.7 months) |
-| **4 Vesta** | 2.362 | 3.63 yr | 504 days (~16.6 months) |
-| **7 Iris** | 2.386 | 3.69 yr | 501 days (~16.5 months) |
-| **9 Metis** | 2.387 | 3.69 yr | 501 days (~16.5 months) |
-| **6 Hebe** | 2.426 | 3.78 yr | 497 days (~16.3 months) |
-| **11 Parthenope** | 2.450 | 3.83 yr | 494 days (~16.2 months) |
-| **TJ66-2145** | 2.450 | 3.83 yr | 494 days (~16.2 months) |
-| **5 Astraea** | 2.573 | 4.13 yr | 482 days (~15.8 months) |
-| **13 Egeria** | 2.580 | 4.14 yr | 481 days (~15.8 months) |
-| **KH7-23 Geraldino** | 2.640 | 4.29 yr | 476 days (~15.6 months) |
-| **1036 Ganymed** | 2.663 | 4.35 yr | 474 days (~15.6 months) |
-| **3 Juno** | 2.670 | 4.36 yr | 474 days (~15.6 months) |
-| **FL8-09 Varsoviom** | 2.750 | 4.56 yr | 468 days (~15.4 months) |
-| **1 Ceres** | 2.768 | 4.61 yr | 467 days (~15.3 months) |
-| **2 Pallas** | 2.770 | 4.61 yr | 466 days (~15.3 months) |
-| **267 Tirza** | 2.775 | 4.62 yr | 466 days (~15.3 months) |
-| **PC0-01 Kurai** | 2.801 | 4.69 yr | 464 days (~15.3 months) |
-| **PW4-13 Rider** | 3.010 | 5.22 yr | 452 days (~14.8 months) |
-| **368 Haidea** | 3.070 | 5.38 yr | 449 days (~14.7 months) |
-| **10 Hygiea** | 3.142 | 5.57 yr | 445 days (~14.6 months) |
-| **AB2-38 Dover** | 3.220 | 5.78 yr | 442 days (~14.5 months) |
-| **BG1-65 Usher** | 3.330 | 6.08 yr | 437 days (~14.4 months) |
-| **MP3-87 Nosfer** | 3.450 | 6.41 yr | 433 days (~14.2 months) |
-| **TT-9025** | 3.540 | 6.66 yr | 430 days (~14.1 months) |
-| **ZZ9-01 Nebulavsky** | 3.670 | 7.03 yr | 426 days (~14.0 months) |
-| **4P Faye** | 3.838 | 7.52 yr | 421 days (~13.8 months) |
-| **KB5-98 Kris** | 3.910 | 7.73 yr | 420 days (~13.8 months) |
-| **2312 Duboshin** | 3.970 | 7.91 yr | 418 days (~13.7 months) |
-| **DE8-42 Sunset** | 4.000 | 8.00 yr | 417 days (~13.7 months) |
-| **279 Thule** | 4.260 | 8.79 yr | 412 days (~13.5 months) |
-| **659 Nestor** | 5.170 | 11.76 yr | 399 days (~13.1 months) |
-| **Jupiter** | 5.203 | 11.87 yr | 399 days (~13.1 months) |
-| **617 Patroclus** | 5.209 | 11.89 yr | 399 days (~13.1 months) |
-| **588 Achilles** | 5.209 | 11.89 yr | 399 days (~13.1 months) |
-| **1172 Aneas** | 5.218 | 11.92 yr | 399 days (~13.1 months) |
-| **3317 Paris** | 5.222 | 11.93 yr | 399 days (~13.1 months) |
-| **624 Hektor** | 5.257 | 12.05 yr | 398 days (~13.1 months) |
-| **911 Agamemnon** | 5.277 | 12.12 yr | 398 days (~13.1 months) |
-| **Saturn** | 9.537 | 29.45 yr | 378 days (~12.4 months) |
-| **1P Halley** | 17.834 | 75.31 yr | 370 days (~12.2 months) |
-| **Uranus** | 19.189 | 84.06 yr | 370 days (~12.1 months) |
-| **Neptune** | 30.070 | 164.89 yr | 367 days (~12.1 months) |
-| **Pluto** | 39.482 | 248.09 yr | 367 days (~12.0 months) |
+| Body | <span title="Planet, Asteroid, or Comet — used by the filter checkboxes above">Type</span> | <span title="Average distance from the Sun in astronomical units (1 AU = Earth's distance)">Semi-major axis (AU)</span> | <span title="Time for one orbit around the Sun, derived from a via Kepler's third law">Orbital period</span> | <span title="Interval between consecutive Hohmann-style launch opportunities from Earth — the synodic period">Earth ↔ body window</span> |
+| --- | --- | --- | --- | --- |
+| **Mercury** | Planet | 0.387 | 0.24 yr | 116 days (~3.8 months) |
+| **Venus** | Planet | 0.723 | 0.62 yr | 584 days (~19.2 months) |
+| **EX0-99 Extinctor** | Asteroid | 0.732 | 0.63 yr | 612 days (~20.1 months) |
+| **99942 Apophis** | Asteroid | 0.923 | 0.89 yr | 7.8 years |
+| **3753 Cruithne** | Asteroid | 0.998 | 1.00 yr | 294.0 years |
+| **469219 Kamoʻoalewa** | Asteroid | 1.001 | 1.00 yr | 710.8 years |
+| **101955 Bennu** | Asteroid | 1.126 | 1.20 yr | 6.1 years |
+| **25143 Itokawa** | Asteroid | 1.324 | 1.52 yr | 2.9 years |
+| **Mars** | Planet | 1.524 | 1.88 yr | 2.1 years |
+| **098-Y Peppin** | Asteroid | 1.800 | 2.41 yr | 623 days (~20.5 months) |
+| **2495 Noviomagum** | Asteroid | 1.918 | 2.66 yr | 586 days (~19.2 months) |
+| **5426 Sharp** | Asteroid | 1.950 | 2.72 yr | 577 days (~19.0 months) |
+| **2048 Dwornik** | Asteroid | 1.954 | 2.73 yr | 576 days (~18.9 months) |
+| **7088 Ishtar** | Asteroid | 1.980 | 2.79 yr | 570 days (~18.7 months) |
+| **UT7-55 Kutno** | Asteroid | 2.130 | 3.11 yr | 538 days (~17.7 months) |
+| **8 Flora** | Asteroid | 2.202 | 3.27 yr | 526 days (~17.3 months) |
+| **2P Encke** | Comet | 2.215 | 3.30 yr | 524 days (~17.2 months) |
+| **12 Victoria** | Asteroid | 2.330 | 3.56 yr | 508 days (~16.7 months) |
+| **4 Vesta** | Asteroid | 2.362 | 3.63 yr | 504 days (~16.6 months) |
+| **7 Iris** | Asteroid | 2.386 | 3.69 yr | 501 days (~16.5 months) |
+| **9 Metis** | Asteroid | 2.387 | 3.69 yr | 501 days (~16.5 months) |
+| **6 Hebe** | Asteroid | 2.426 | 3.78 yr | 497 days (~16.3 months) |
+| **11 Parthenope** | Asteroid | 2.450 | 3.83 yr | 494 days (~16.2 months) |
+| **TJ66-2145** | Asteroid | 2.450 | 3.83 yr | 494 days (~16.2 months) |
+| **5 Astraea** | Asteroid | 2.573 | 4.13 yr | 482 days (~15.8 months) |
+| **13 Egeria** | Asteroid | 2.580 | 4.14 yr | 481 days (~15.8 months) |
+| **KH7-23 Geraldino** | Asteroid | 2.640 | 4.29 yr | 476 days (~15.6 months) |
+| **1036 Ganymed** | Asteroid | 2.663 | 4.35 yr | 474 days (~15.6 months) |
+| **3 Juno** | Asteroid | 2.670 | 4.36 yr | 474 days (~15.6 months) |
+| **FL8-09 Varsoviom** | Asteroid | 2.750 | 4.56 yr | 468 days (~15.4 months) |
+| **1 Ceres** | Asteroid | 2.768 | 4.61 yr | 467 days (~15.3 months) |
+| **2 Pallas** | Asteroid | 2.770 | 4.61 yr | 466 days (~15.3 months) |
+| **267 Tirza** | Asteroid | 2.775 | 4.62 yr | 466 days (~15.3 months) |
+| **PC0-01 Kurai** | Asteroid | 2.801 | 4.69 yr | 464 days (~15.3 months) |
+| **PW4-13 Rider** | Asteroid | 3.010 | 5.22 yr | 452 days (~14.8 months) |
+| **368 Haidea** | Asteroid | 3.070 | 5.38 yr | 449 days (~14.7 months) |
+| **10 Hygiea** | Asteroid | 3.142 | 5.57 yr | 445 days (~14.6 months) |
+| **AB2-38 Dover** | Asteroid | 3.220 | 5.78 yr | 442 days (~14.5 months) |
+| **BG1-65 Usher** | Asteroid | 3.330 | 6.08 yr | 437 days (~14.4 months) |
+| **MP3-87 Nosfer** | Asteroid | 3.450 | 6.41 yr | 433 days (~14.2 months) |
+| **TT-9025** | Asteroid | 3.540 | 6.66 yr | 430 days (~14.1 months) |
+| **ZZ9-01 Nebulavsky** | Asteroid | 3.670 | 7.03 yr | 426 days (~14.0 months) |
+| **4P Faye** | Comet | 3.838 | 7.52 yr | 421 days (~13.8 months) |
+| **KB5-98 Kris** | Asteroid | 3.910 | 7.73 yr | 420 days (~13.8 months) |
+| **2312 Duboshin** | Asteroid | 3.970 | 7.91 yr | 418 days (~13.7 months) |
+| **DE8-42 Sunset** | Asteroid | 4.000 | 8.00 yr | 417 days (~13.7 months) |
+| **279 Thule** | Asteroid | 4.260 | 8.79 yr | 412 days (~13.5 months) |
+| **659 Nestor** | Asteroid | 5.170 | 11.76 yr | 399 days (~13.1 months) |
+| **Jupiter** | Planet | 5.203 | 11.87 yr | 399 days (~13.1 months) |
+| **617 Patroclus** | Asteroid | 5.209 | 11.89 yr | 399 days (~13.1 months) |
+| **588 Achilles** | Asteroid | 5.209 | 11.89 yr | 399 days (~13.1 months) |
+| **1172 Aneas** | Asteroid | 5.218 | 11.92 yr | 399 days (~13.1 months) |
+| **3317 Paris** | Asteroid | 5.222 | 11.93 yr | 399 days (~13.1 months) |
+| **624 Hektor** | Asteroid | 5.257 | 12.05 yr | 398 days (~13.1 months) |
+| **911 Agamemnon** | Asteroid | 5.277 | 12.12 yr | 398 days (~13.1 months) |
+| **Saturn** | Planet | 9.537 | 29.45 yr | 378 days (~12.4 months) |
+| **1P Halley** | Comet | 17.834 | 75.31 yr | 370 days (~12.2 months) |
+| **Uranus** | Planet | 19.189 | 84.06 yr | 370 days (~12.1 months) |
+| **Neptune** | Planet | 30.070 | 164.89 yr | 367 days (~12.1 months) |
+| **Pluto** | Planet | 39.482 | 248.09 yr | 367 days (~12.0 months) |
 
 </div>
 
@@ -140,6 +145,13 @@ ready and the in-game flight planner handles phasing.
 
 <a id="gravity-assist"></a>
 
+> **Heads-up:** these trajectories are computed by the wiki using a
+> patched-conic model on circular coplanar orbits.  The in-game Plan
+> Mission window uses full n-body propagation, so the dates, Δv values,
+> and even the best flyby choice may not match what the game's flight
+> planner reports.  Treat this as a **first-cut planning tool**, not a
+> precise trajectory — confirm in-game before committing to a craft.
+
 For outer-system targets a *gravity assist* — a deep flyby of an intermediate
 body that bends the spacecraft's trajectory at no propellant cost — can cut
 the launch Δv dramatically.  Pick any *from*, *flyby*, and *to* body and the
@@ -160,10 +172,19 @@ and the body's mass).
 the game's epoch — same Keplerian approximation the window calculator
 above uses.
 
-Treat this as a **planning tool**, not a precise trajectory.  The reported
-"Δv proxy" is `|v_spacecraft − v_Earth|` at launch plus
+The reported "Δv proxy" is `|v_spacecraft − v_origin|` at launch plus
 `|v_spacecraft − v_target|` at arrival, both expressed in km/s; it
 ignores escape Δv from low Earth orbit and capture Δv at the target.
+
+### Suggested trajectories
+
+These are well-known flyby routes the calculator picks out as advantageous
+versus a direct transfer in the same launch window.  Computed on page load —
+expect a second or two for the table to populate.
+
+<div id="ga-suggestions"><em>Calculating suggested trajectories…</em></div>
+
+### Custom trajectory
 
 <div class="calc">
 <label>From: <input id="ga-from" list="calc-bodies" autocomplete="off" placeholder="Body name…" value="Earth"></label>

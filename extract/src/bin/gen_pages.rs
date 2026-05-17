@@ -638,18 +638,24 @@ fn page_launch_windows(ctx: &WikiCtx) -> String {
     };
     let earth_period_years = earth_a.powf(1.5);
 
-    // Build the full set of sun-orbiting targets from every taxonomy bucket.
-    let mut targets: Vec<&str> = Vec::new();
-    targets.extend(PLANETS.iter().filter(|p| **p != "Earth").copied());
-    targets.extend(ASTEROIDS_BELT.iter().copied());
-    targets.extend(ASTEROIDS_NEO.iter().copied());
-    targets.extend(ASTEROIDS_TROJAN_GREEK.iter().copied());
-    targets.extend(ASTEROIDS_FICTIONAL.iter().copied());
-    targets.extend(COMETS.iter().copied());
+    // Build the full set of sun-orbiting targets from every taxonomy bucket,
+    // remembering which bucket each id came from so we can label its Type.
+    let mut targets: Vec<(&str, &'static str)> = Vec::new();
+    targets.extend(
+        PLANETS
+            .iter()
+            .filter(|p| **p != "Earth")
+            .map(|p| (*p, "Planet")),
+    );
+    for &id in ASTEROIDS_BELT.iter() { targets.push((id, "Asteroid")); }
+    for &id in ASTEROIDS_NEO.iter() { targets.push((id, "Asteroid")); }
+    for &id in ASTEROIDS_TROJAN_GREEK.iter() { targets.push((id, "Asteroid")); }
+    for &id in ASTEROIDS_FICTIONAL.iter() { targets.push((id, "Asteroid")); }
+    for &id in COMETS.iter() { targets.push((id, "Comet")); }
 
-    // Collect (body, display, a, t_years, synodic_years) for everything we can match.
-    let mut data: Vec<(String, f64, f64, f64, f64)> = Vec::new();
-    for id in &targets {
+    // Collect (display, a, t_years, synodic_years, longitude, body_type) for everything we can match.
+    let mut data: Vec<(String, f64, f64, f64, f64, &'static str)> = Vec::new();
+    for (id, body_type) in &targets {
         let b = match ctx.body(id) {
             Some(b) => b,
             None => continue,
@@ -669,14 +675,16 @@ fn page_launch_windows(ctx: &WikiCtx) -> String {
         let synodic_years = 1.0 / inv.abs();
         let display = ctx.display(id).to_string();
         let longitude = b.longitude_deg.unwrap_or(0.0);
-        data.push((display, a, t_years, synodic_years, longitude));
+        data.push((display, a, t_years, synodic_years, longitude, *body_type));
     }
     data.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
-    // Synodic-period overview table.
+    // Synodic-period overview table.  Each row gets a `data-body-type`
+    // attribute via a small "Type" column — the JS filter uses that to
+    // hide/show by type.
     let table_rows: Vec<Vec<String>> = data
         .iter()
-        .map(|(display, a, t_years, syn, _)| {
+        .map(|(display, a, t_years, syn, _, body_type)| {
             let synodic_days = syn * 365.25;
             let synodic_label = if *syn < 2.0 {
                 format!("{:.0} days (~{:.1} months)", synodic_days, syn * 12.0)
@@ -685,6 +693,7 @@ fn page_launch_windows(ctx: &WikiCtx) -> String {
             };
             vec![
                 format!("**{}**", display),
+                body_type.to_string(),
                 format!("{:.3}", a),
                 format!("{:.2} yr", t_years),
                 synodic_label,
@@ -692,9 +701,10 @@ fn page_launch_windows(ctx: &WikiCtx) -> String {
         })
         .collect();
     let table = md_table_with_tips(
-        &["Body", "Semi-major axis (AU)", "Orbital period", "Earth ↔ body window"],
+        &["Body", "Type", "Semi-major axis (AU)", "Orbital period", "Earth ↔ body window"],
         &[
             None,
+            Some("Planet, Asteroid, or Comet — used by the filter checkboxes above"),
             Some("Average distance from the Sun in astronomical units (1 AU = Earth's distance)"),
             Some("Time for one orbit around the Sun, derived from a via Kepler's third law"),
             Some("Interval between consecutive Hohmann-style launch opportunities from Earth — the synodic period"),
@@ -711,7 +721,7 @@ fn page_launch_windows(ctx: &WikiCtx) -> String {
         a = earth_a,
         lng = earth.longitude_deg.unwrap_or(0.0),
     ));
-    for (display, a, _t, _syn, longitude) in &data {
+    for (display, a, _t, _syn, longitude, _type) in &data {
         calc_bodies.push(format!(
             "{{\"name\":\"{name}\",\"a\":{a},\"longitude\":{lng}}}",
             name = display.replace('"', "\\\""),
@@ -766,7 +776,12 @@ same relative geometry.  Computed from each body's semi-major axis via\n\
 Kepler's third law (`T_years = a^(3/2)`) and\n\
 `synodic = 1 / |1/T_earth − 1/T_body|`.\n\n\
 <div id=\"body-table\" markdown=\"1\">\n\
-<label>Filter: <input id=\"body-filter\" type=\"search\" placeholder=\"e.g., mars, ceres, 1P…\"></label>\n\n\
+<div class=\"body-filters\">\n\
+<label>Filter: <input id=\"body-filter\" type=\"search\"></label>\n\
+<label><input type=\"checkbox\" class=\"body-type-filter\" value=\"Planet\" checked> Planets</label>\n\
+<label><input type=\"checkbox\" class=\"body-type-filter\" value=\"Asteroid\"> Asteroids</label>\n\
+<label><input type=\"checkbox\" class=\"body-type-filter\" value=\"Comet\"> Comets</label>\n\
+</div>\n\n\
 {table}\n\
 </div>\n\n\
 ## Practical reading\n\n\
@@ -783,6 +798,12 @@ doesn't have a useful synodic period; you wait for your spacecraft to be\n\
 ready and the in-game flight planner handles phasing.\n\n\
 ## Gravity-assist trajectory\n\n\
 <a id=\"gravity-assist\"></a>\n\n\
+> **Heads-up:** these trajectories are computed by the wiki using a\n\
+> patched-conic model on circular coplanar orbits.  The in-game Plan\n\
+> Mission window uses full n-body propagation, so the dates, Δv values,\n\
+> and even the best flyby choice may not match what the game's flight\n\
+> planner reports.  Treat this as a **first-cut planning tool**, not a\n\
+> precise trajectory — confirm in-game before committing to a craft.\n\n\
 For outer-system targets a *gravity assist* — a deep flyby of an intermediate\n\
 body that bends the spacecraft's trajectory at no propellant cost — can cut\n\
 the launch Δv dramatically.  Pick any *from*, *flyby*, and *to* body and the\n\
@@ -800,10 +821,15 @@ lowest-cost single-flyby trajectory it can find.\n\n\
 - Bodies are assumed to move on **circular coplanar** orbits anchored at\n\
   the game's epoch — same Keplerian approximation the window calculator\n\
   above uses.\n\n\
-Treat this as a **planning tool**, not a precise trajectory.  The reported\n\
-\"Δv proxy\" is `|v_spacecraft − v_Earth|` at launch plus\n\
+The reported \"Δv proxy\" is `|v_spacecraft − v_origin|` at launch plus\n\
 `|v_spacecraft − v_target|` at arrival, both expressed in km/s; it\n\
 ignores escape Δv from low Earth orbit and capture Δv at the target.\n\n\
+### Suggested trajectories\n\n\
+These are well-known flyby routes the calculator picks out as advantageous\n\
+versus a direct transfer in the same launch window.  Computed on page load —\n\
+expect a second or two for the table to populate.\n\n\
+<div id=\"ga-suggestions\"><em>Calculating suggested trajectories…</em></div>\n\n\
+### Custom trajectory\n\n\
 <div class=\"calc\">\n\
 <label>From: <input id=\"ga-from\" list=\"calc-bodies\" autocomplete=\"off\" placeholder=\"Body name…\" value=\"Earth\"></label>\n\
 <label>Flyby: <input id=\"ga-flyby\" list=\"calc-bodies\" autocomplete=\"off\" placeholder=\"Body name…\" value=\"Venus\"></label>\n\

@@ -143,18 +143,37 @@
     update();
   }
 
-  // Body-name filter on the big synodic table.
+  // Combined text + type-checkbox filter for the body table.  The Type
+  // column (2nd column) holds "Planet" / "Asteroid" / "Comet"; checkboxes
+  // toggle each.  Default state is "Planets only" — see the markup in the
+  // generator.
   function bindFilter() {
     var input = document.getElementById('body-filter');
     var table = document.querySelector('#body-table table');
+    var checkboxes = document.querySelectorAll('.body-type-filter');
     if (!input || !table) return;
-    input.addEventListener('input', function () {
+
+    function applyFilter() {
       var q = input.value.trim().toLowerCase();
-      table.querySelectorAll('tbody tr').forEach(function (tr) {
-        var first = tr.cells[0] ? (tr.cells[0].textContent || '').toLowerCase() : '';
-        tr.style.display = !q || first.indexOf(q) !== -1 ? '' : 'none';
+      var enabled = {};
+      checkboxes.forEach(function (cb) {
+        if (cb.checked) enabled[cb.value] = true;
       });
+      table.querySelectorAll('tbody tr').forEach(function (tr) {
+        var nameCell = tr.cells[0] ? (tr.cells[0].textContent || '').toLowerCase() : '';
+        var typeCell = tr.cells[1] ? (tr.cells[1].textContent || '').trim() : '';
+        var textOk = !q || nameCell.indexOf(q) !== -1;
+        var typeOk = checkboxes.length === 0 || enabled[typeCell];
+        tr.style.display = textOk && typeOk ? '' : 'none';
+      });
+    }
+
+    input.addEventListener('input', applyFilter);
+    checkboxes.forEach(function (cb) {
+      cb.addEventListener('change', applyFilter);
     });
+    // Apply the default (planet-only) filter on load.
+    applyFilter();
   }
 
   if (typeof document !== 'undefined') {

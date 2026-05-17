@@ -321,8 +321,113 @@
     });
   }
 
+  // --- Curated suggested trajectories ------------------------------------
+  // Historically interesting / practically advantageous single-flyby routes.
+  // Computed on page load and rendered into `#ga-suggestions`.
+  var SUGGESTED_ROUTES = [
+    { from: 'Earth', flyby: 'Venus',   to: 'Mercury', note: 'BepiColombo-style inner-system flyby' },
+    { from: 'Earth', flyby: 'Venus',   to: 'Jupiter', note: 'Galileo-style: Venus first, then onward' },
+    { from: 'Earth', flyby: 'Mars',    to: 'Jupiter', note: 'Alternative outer-bound route' },
+    { from: 'Earth', flyby: 'Jupiter', to: 'Saturn',  note: 'Voyager-style, Jupiter sling outward' },
+    { from: 'Earth', flyby: 'Jupiter', to: 'Uranus',  note: 'Outer-planet bound via Jupiter' },
+    { from: 'Earth', flyby: 'Jupiter', to: 'Neptune', note: 'Deep outer-system' },
+    { from: 'Earth', flyby: 'Venus',   to: 'Saturn',  note: 'Inner-system slingshot to far target' },
+    { from: 'Earth', flyby: 'Saturn',  to: 'Pluto',   note: 'Cold and slow, but the only realistic Pluto shot' },
+  ];
+
+  function renderSuggestions() {
+    var container = document.getElementById('ga-suggestions');
+    if (!container) return;
+    var bodies = root.LAUNCH_WINDOW_ALL_BODIES;
+    if (!bodies) { container.innerHTML = ''; return; }
+    function findBody(name) {
+      for (var i = 0; i < bodies.length; i++) {
+        if (bodies[i].name === name) return bodies[i];
+      }
+      return null;
+    }
+    var startMs = Date.UTC(2020, 0, 1);
+    // 10-year window so far-target routes can find their first viable launch.
+    var endMs = startMs + 10 * YEAR_MS;
+    var epoch = Date.UTC(1959, 0, 1);
+
+    // Compute each route off the main thread (well, off the next paint) so
+    // the page is interactive while the grid scans run.  setTimeout(0)
+    // between routes gives the browser a chance to paint between rows.
+    var results = [];
+    function step(i) {
+      if (i >= SUGGESTED_ROUTES.length) {
+        renderTable(results, container);
+        return;
+      }
+      var r = SUGGESTED_ROUTES[i];
+      var from = findBody(r.from), flyby = findBody(r.flyby), target = findBody(r.to);
+      var row = { route: r, ok: false };
+      if (from && flyby && target && from !== flyby && flyby !== target && from !== target) {
+        var ga = bestTrajectory({
+          earth: from, flybyBody: flyby, target: target,
+          fromDateMs: startMs, toDateMs: endMs, epochMs: epoch,
+        });
+        var direct = bestDirect({
+          earth: from, target: target,
+          fromDateMs: startMs, toDateMs: endMs, epochMs: epoch,
+        });
+        if (ga && direct) {
+          row.ok = true;
+          row.launchMs = ga.launchMs;
+          row.arriveMs = ga.arriveMs;
+          row.gaDv = ga.totalDvKms;
+          row.directDv = direct.totalDvKms;
+          row.savedDv = direct.totalDvKms - ga.totalDvKms;
+        }
+      }
+      results.push(row);
+      setTimeout(function () { step(i + 1); }, 0);
+    }
+    step(0);
+  }
+
+  function renderTable(results, container) {
+    function fmt(ms) { return new Date(ms).toISOString().slice(0, 10); }
+    var html = '<table><thead><tr>' +
+      '<th>From → Flyby → To</th>' +
+      '<th>Launch</th>' +
+      '<th>Arrival</th>' +
+      '<th>Direct Δv</th>' +
+      '<th>Flyby Δv</th>' +
+      '<th>Δv saved</th>' +
+      '<th>Notes</th>' +
+      '</tr></thead><tbody>';
+    results.forEach(function (r) {
+      var label = r.route.from + ' → ' + r.route.flyby + ' → ' + r.route.to;
+      if (!r.ok) {
+        html += '<tr><td>' + label + '</td>' +
+          '<td colspan="5"><em>no viable trajectory found</em></td>' +
+          '<td>' + r.route.note + '</td></tr>';
+        return;
+      }
+      var savedClass = r.savedDv > 0 ? 'style="color:#7fd17f"' : 'style="color:#d17f7f"';
+      html += '<tr>' +
+        '<td><strong>' + label + '</strong></td>' +
+        '<td>' + fmt(r.launchMs) + '</td>' +
+        '<td>' + fmt(r.arriveMs) + '</td>' +
+        '<td>' + r.directDv.toFixed(2) + ' km/s</td>' +
+        '<td>' + r.gaDv.toFixed(2) + ' km/s</td>' +
+        '<td ' + savedClass + '><strong>' + (r.savedDv >= 0 ? '+' : '') + r.savedDv.toFixed(2) + ' km/s</strong></td>' +
+        '<td>' + r.route.note + '</td>' +
+        '</tr>';
+    });
+    html += '</tbody></table>';
+    container.innerHTML = html;
+  }
+
   if (typeof document !== 'undefined') {
-    document.addEventListener('DOMContentLoaded', bindDom);
+    document.addEventListener('DOMContentLoaded', function () {
+      bindDom();
+      // Defer the suggestion compute until the browser has painted the rest
+      // of the page — keeps initial load snappy.
+      setTimeout(renderSuggestions, 50);
+    });
   }
 
   root.GravityAssist = {
