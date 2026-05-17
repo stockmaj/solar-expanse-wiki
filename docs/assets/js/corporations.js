@@ -119,16 +119,22 @@
       cmp.cash.map(function (v) {
         return '<td style="text-align:center">' + escapeHtml(formatMoney(v)) + '</td>';
       }).join('') + '</tr>');
-    rows.push('<tr><td><strong>Launch vehicles</strong></td>' +
+    rows.push('<tr><td><strong title="Number of launch vehicles already assembled in the corp\'s fleet at scenario start (not how many they could research)">Pre-built launch vehicles</strong></td>' +
       cmp.lvCounts.map(function (v) {
         return '<td style="text-align:center">' + v + '</td>';
       }).join('') + '</tr>');
-    rows.push('<tr><td><strong>Spacecraft</strong></td>' +
+    rows.push('<tr><td><strong title="Number of spacecraft already constructed in the corp\'s fleet at scenario start (not how many craft types they could build)">Pre-built spacecraft</strong></td>' +
       cmp.scCounts.map(function (v) {
         return '<td style="text-align:center">' + v + '</td>';
       }).join('') + '</tr>');
+    // Section separator before research rows.
+    if (cmp.researchRows.length) {
+      rows.push('<tr class="corp-research-header"><td colspan="' +
+        (cmp.corpNames.length + 1) +
+        '" style="background:var(--bg-elev);color:var(--accent);text-align:left;font-weight:600;border-top:2px solid var(--accent-dim);padding-top:8px">Completed research</td></tr>');
+    }
     cmp.researchRows.forEach(function (r) {
-      rows.push('<tr><td>' + escapeHtml(r.name) + ' <small>(research)</small></td>' +
+      rows.push('<tr><td>' + escapeHtml(r.name) + '</td>' +
         r.held.map(function (h) {
           return '<td style="text-align:center">' + (h ? '✓' : '—') + '</td>';
         }).join('') + '</tr>');
