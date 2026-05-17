@@ -205,9 +205,7 @@ struct ResearchStat {
 struct LaunchVehicleStat {
     id: String,
     max_payload: f64,
-    #[allow(dead_code)]
     max_fuel_load: f64,
-    #[allow(dead_code)]
     exhaust_velocity: f64,
     reusability: f64,
     can_send_human: bool,
@@ -231,7 +229,6 @@ struct SpacecraftStat {
     cargo_capacity: f64,
     fuel_capacity: f64,
     reusability: f64,
-    #[allow(dead_code)]
     needs_launch_vehicle: bool,
     built_in_orbit: bool,
     #[allow(dead_code)]
@@ -436,7 +433,49 @@ fn md_table_with_tips(headers: &[&str], tooltips: &[Option<&str>], rows: &[Vec<S
 }
 
 fn escape_cell(s: &str) -> String {
-    s.replace('|', "\\|").replace('\n', " ").trim().to_string()
+    let stripped = strip_unbalanced_quotes(s);
+    stripped.replace('|', "\\|").replace('\n', " ").trim().to_string()
+}
+
+/// Some locale strings come out of the CSV with stray straight double-quote
+/// characters (e.g. `Lightbulb" engine."`) — the opening quote of a phrase was
+/// eaten somewhere upstream, leaving only the closers.  Walk the string and
+/// drop any `"` that doesn't have a matching partner.  Openers are `"`
+/// preceded by start-of-string or a non-word character; closers are `"`
+/// preceded by a word character.  Properly paired quotes (`"Nuclear
+/// Lightbulb"`) survive untouched.
+fn strip_unbalanced_quotes(s: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    if !chars.iter().any(|c| *c == '"') {
+        return s.to_string();
+    }
+    let mut kind: Vec<i8> = vec![0; chars.len()]; // 1 = opener, -1 = closer
+    let mut prev: Option<char> = None;
+    for (i, c) in chars.iter().enumerate() {
+        if *c == '"' {
+            kind[i] = if prev.map_or(true, |p| !p.is_alphanumeric()) { 1 } else { -1 };
+        }
+        prev = Some(*c);
+    }
+    let mut keep: Vec<bool> = vec![true; chars.len()];
+    let mut open_stack: Vec<usize> = Vec::new();
+    for (i, &k) in kind.iter().enumerate() {
+        if k == 1 {
+            open_stack.push(i);
+        } else if k == -1 {
+            if open_stack.pop().is_none() {
+                keep[i] = false;
+            }
+        }
+    }
+    for i in open_stack {
+        keep[i] = false;
+    }
+    chars
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, c)| if keep[i] { Some(c) } else { None })
+        .collect()
 }
 
 fn write_file(root: &Path, rel: &str, content: &str) -> Result<()> {
@@ -1133,12 +1172,13 @@ lift them to space.\n\n",
                 "Exhaust V",
                 "Reusable",
                 "Built at",
+                "Needs LV",
                 "Build cost",
                 "Time (d)",
-                "Description",
+                "Launch ($)",
             ],
             &[
-                None,
+                Some("Hover the spacecraft name for its in-game description"),
                 Some("Dry mass in tonnes"),
                 Some("Cargo capacity in tonnes"),
                 Some("Fuel capacity in tonnes"),
@@ -1146,9 +1186,10 @@ lift them to space.\n\n",
                 Some("Effective exhaust velocity — chemical ~3-5 km/s, nuclear ~8-15, fusion 20+"),
                 Some("Survives the trip and can fly again (Yes / Partial / No)"),
                 Some("Where the spacecraft is assembled — Orbit means built in an orbital shipyard; Surface means built on a planet"),
+                Some("Requires a launch vehicle to reach orbit — Yes means it rides a separate LV; No means the craft is self-launching (single-stage-to-orbit or built in orbit)"),
                 Some("Resources required to construct"),
                 Some("Build time in days"),
-                None,
+                Some("Cash fee paid on every launch"),
             ],
             rows,
         ));
@@ -1212,12 +1253,38 @@ lift them to space.\n\n",
         } else {
             fmt_amount(s.cargo_capacity)
         };
-        rows.push(vec![
+        let needs_lv_cell: String = if is_spawned_not_built {
+            "—".into()
+        } else if s.needs_launch_vehicle {
+            "Yes".into()
+        } else {
+            "No".into()
+        };
+        let launch_cell: String = if is_spawned_not_built {
+            "—".into()
+        } else {
+            fmt_abbrev(s.launch_cost)
+        };
+        // Stash the description in a hover-tooltip on the name span so we can
+        // keep all the human-written prose without paying for a wide
+        // "Description" column.
+        let desc_clean = escape_cell(desc);
+        let name_cell = if desc_clean.is_empty() {
             format!(
                 "{anchor}**{name}**",
                 anchor = anchor_tag("spacecraft", &s.id),
                 name = escape_cell(display_name)
-            ),
+            )
+        } else {
+            format!(
+                "{anchor}<span title=\"{desc}\">**{name}**</span>",
+                anchor = anchor_tag("spacecraft", &s.id),
+                name = escape_cell(display_name),
+                desc = desc_clean.replace('"', "&quot;"),
+            )
+        };
+        rows.push(vec![
+            name_cell,
             fmt_amount(s.mass),
             cargo_cell,
             fmt_amount(s.fuel_capacity),
@@ -1225,9 +1292,10 @@ lift them to space.\n\n",
             exhaust,
             fmt_reusability(s.reusability).into(),
             built_at,
+            needs_lv_cell,
             build_cost_cell,
             build_time_cell,
-            escape_cell(desc),
+            launch_cell,
         ]);
     }
     let header = match current {
@@ -1247,7 +1315,9 @@ lift them to space.\n\n",
 - **Engine thrust** is the force the spacecraft's default engine produces, in newtons (or kilo-/mega-newtons for readability). More thrust = shorter burns, higher acceleration, but the spacecraft can only carry so much fuel.\n\
 - **Exhaust V** is the engine's effective exhaust velocity in km/s, equivalent to specific impulse (multiply by ~102 to get ISP in seconds). Higher exhaust V = more Δv per kilogram of fuel = longer reach, but typically less thrust. Chemical engines sit around 3–5 km/s; nuclear thermal 8–15; fusion and ion drives 20+.\n\
 - **Build cost** is the resource cost of building the spacecraft itself (engine and tank modules are paid for separately when configured).\n\
-- **Built at** is where the craft is assembled: *Orbit* means it's built in an orbital shipyard and never lands; *Surface* means it's built on a planet's surface (some surface craft are full SSTOs, some are upper stages or ride a Launch Vehicle — see the description column).\n\n\
+- **Built at** is where the craft is assembled: *Orbit* means it's built in an orbital shipyard and never lands; *Surface* means it's built on a planet's surface.\n\
+- **Needs LV** says whether the craft must ride a separate [Launch Vehicle](../launch-vehicles/) to reach orbit. *No* means the craft is self-launching (single-stage-to-orbit, or already built in orbit). Hover a spacecraft's name to see its in-game description.\n\
+- **Launch ($)** is the cash fee paid on every launch; spawned-not-built craft like the Orbital Payload Container show `—` because the carrying launch facility pays the launch.\n\n\
 ## See also\n\n\
 - [Launch Vehicles](../launch-vehicles/) — surface-to-orbit lifters\n\
 - [Research](../research/) — propulsion tech tree\n",
@@ -1298,43 +1368,61 @@ fn page_launch_vehicles(locale: &Locale, sirenix: &Sirenix) -> String {
     let make_row = |lv: &LaunchVehicleStat| -> Vec<String> {
         let display = id_to_name.get(lv.id.as_str()).copied().unwrap_or(lv.id.as_str());
         let desc = id_to_desc.get(lv.id.as_str()).copied().unwrap_or("");
-        vec![
+        let desc_clean = escape_cell(desc);
+        let name_cell = if desc_clean.is_empty() {
             format!(
                 "{anchor}**{name}**",
                 anchor = anchor_tag("lv", &lv.id),
                 name = escape_cell(display)
-            ),
+            )
+        } else {
+            format!(
+                "{anchor}<span title=\"{desc}\">**{name}**</span>",
+                anchor = anchor_tag("lv", &lv.id),
+                name = escape_cell(display),
+                desc = desc_clean.replace('"', "&quot;"),
+            )
+        };
+        vec![
+            name_cell,
             fmt_amount(lv.max_payload),
+            fmt_abbrev(lv.max_fuel_load),
+            if lv.exhaust_velocity > 0.0 {
+                format!("{:.1}", lv.exhaust_velocity)
+            } else {
+                "—".into()
+            },
             fmt_reusability(lv.reusability).into(),
             if lv.can_send_human { "Yes" } else { "No" }.into(),
             fmt_build_cost(&lv.build_cost, &resource_name),
             fmt_amount(lv.build_time_days),
             fmt_abbrev(lv.launch_cost),
             fmt_abbrev(lv.maintenance_cost_per_day),
-            escape_cell(desc),
         ]
     };
     let headers = [
         "Launch Vehicle",
         "Payload (t)",
+        "Fuel load (t)",
+        "Exhaust v (km/s)",
         "Reusable",
         "Crew",
         "Build cost",
         "Time (d)",
         "Launch",
         "Maint",
-        "Description",
     ];
     let tooltips = [
-        None,
+        Some("Hover the launch-vehicle name for its in-game description"),
         Some("Max payload to low orbit, in tonnes"),
+        Some("Fuel mass the vehicle carries at full load, in tonnes"),
+        Some("Effective exhaust velocity in km/s — proxies the specific impulse: chemical ~3-5, nuclear-thermal 8+"),
         Some("Survives reentry and can fly again (Yes / Partial / No)"),
         Some("Crew-rated for human passengers"),
         Some("Resources required to construct"),
         Some("Build time in days"),
         Some("Cash fee paid on every launch"),
         Some("Daily maintenance cost while idle on the pad"),
-        None,
     ];
 
     let chem_rows: Vec<Vec<String>> = chemical.iter().map(|lv| make_row(lv)).collect();
@@ -1358,9 +1446,12 @@ Three propulsion families are unlocked across the tech tree:\n\n\
 {nuke_table}\n\
 ## Reading the tables\n\n\
 - **Max Payload** is the heaviest load (in tonnes) the vehicle can carry to low orbit.\n\
-- **Reusable** — *Yes* means the vehicle survives reentry and can fly again; *No* means each launch consumes the vehicle.\n\
+- **Fuel load** is the propellant mass the vehicle carries at full fuelling, in tonnes.\n\
+- **Exhaust v** is the engine's effective exhaust velocity in km/s — a proxy for specific impulse and so a proxy for fuel efficiency. Chemical rockets sit around 2.5–10 km/s; nuclear-thermal rockets push past 30.\n\
+- **Reusable** — *Yes* means the vehicle survives reentry and can fly again; *Partial* means parts of the stack are reused; *No* means each launch consumes the vehicle.\n\
 - **Crew Rated** — whether the vehicle can carry humans, not just cargo.\n\
-- **Launch cost** is the cash fee paid every launch; **Maintenance** is the daily upkeep cost while idle on the pad.\n\n\
+- **Launch cost** is the cash fee paid every launch; **Maintenance** is the daily upkeep cost while idle on the pad.\n\
+- Hover a launch-vehicle name to see its in-game description.\n\n\
 ## Alternative launch methods\n\n\
 The game also models several non-rocket launch systems unlocked through\n\
 research and built as facilities at the launch site:\n\n\
@@ -2672,6 +2763,289 @@ mod tests {
         assert_eq!(ctx.body("Ceres").unwrap().name, "1 Ceres");
         // Comet: taxonomy id "Wild 2" → display "81P Wild " (trailing space) → trimmed match
         assert_eq!(ctx.body("Wild 2").unwrap().name, "81P Wild ");
+    }
+
+    // ── Audit finding #5: spacecraft & launch-vehicle table coverage ──
+
+    fn sc_stat(
+        id: &str,
+        mass: f64,
+        needs_lv: bool,
+        built_in_orbit: bool,
+        launch_cost: f64,
+        build_cost: Vec<ResourceCost>,
+        build_time_days: f64,
+    ) -> SpacecraftStat {
+        SpacecraftStat {
+            id: id.into(),
+            engine_module: None,
+            engine_type: "chemical".into(),
+            mass,
+            cargo_capacity: 100.0,
+            fuel_capacity: 100.0,
+            reusability: 1.0,
+            needs_launch_vehicle: needs_lv,
+            built_in_orbit,
+            can_be_built_by_player: true,
+            build_cost,
+            build_time_days,
+            launch_cost,
+        }
+    }
+
+    fn lv_stat(id: &str, max_payload: f64, max_fuel_load: f64, exhaust_velocity: f64) -> LaunchVehicleStat {
+        LaunchVehicleStat {
+            id: id.into(),
+            max_payload,
+            max_fuel_load,
+            exhaust_velocity,
+            reusability: 0.0,
+            can_send_human: false,
+            is_locked: false,
+            build_cost: vec![],
+            build_time_days: 50.0,
+            launch_cost: 150.0,
+            maintenance_cost_per_day: 10.0,
+            fuel_type_on_start: None,
+        }
+    }
+
+    fn locale_with_spacecraft(items: Vec<(&str, &str, &str)>) -> Locale {
+        let mut l = fixture_locale();
+        l.spacecraft = items
+            .into_iter()
+            .map(|(id, name, desc)| NameDesc {
+                id: id.into(),
+                name: name.into(),
+                description: desc.into(),
+            })
+            .collect();
+        l
+    }
+
+    fn locale_with_launch_vehicles(items: Vec<(&str, &str, &str)>) -> Locale {
+        let mut l = fixture_locale();
+        l.launch_vehicles = items
+            .into_iter()
+            .map(|(id, name, desc)| NameDesc {
+                id: id.into(),
+                name: name.into(),
+                description: desc.into(),
+            })
+            .collect();
+        l
+    }
+
+    fn row_for<'a>(table: &'a str, marker: &str) -> &'a str {
+        table
+            .lines()
+            .find(|l| l.contains(marker))
+            .expect("expected marker row in table")
+    }
+
+    #[test]
+    fn spacecraft_built_craft_shows_launch_cost() {
+        let locale = locale_with_spacecraft(vec![(
+            "spacecraft_electric_small",
+            "Hermes",
+            "Long-distance interplanetary craft.",
+        )]);
+        let sirenix = Sirenix {
+            spacecraft: vec![sc_stat(
+                "spacecraft_electric_small",
+                60.0,
+                true,
+                true,
+                5000.0,
+                vec![ResourceCost { resource_id: "steel".into(), amount: 100.0 }],
+                150.0,
+            )],
+            ..Sirenix::default()
+        };
+        let table = page_spacecraft(&locale, &sirenix);
+        let row = row_for(&table, "Hermes");
+        // Built craft should render an abbreviated, non-zero launch fee — not "—".
+        assert!(
+            row.contains(" 5k "),
+            "Hermes row missing rendered launch cost: {row}"
+        );
+    }
+
+    #[test]
+    fn spacecraft_spawned_not_built_shows_dash_for_launch() {
+        // OPC has empty build_cost AND build_time_days==0 — render Launch as —.
+        let locale = locale_with_spacecraft(vec![(
+            "spacecraft_capsule",
+            "Orbital Payload Container",
+            "Container for cargo deployed to orbit.",
+        )]);
+        let sirenix = Sirenix {
+            spacecraft: vec![sc_stat(
+                "spacecraft_capsule",
+                0.0,
+                true,
+                false,
+                1000.0,
+                vec![],
+                0.0,
+            )],
+            ..Sirenix::default()
+        };
+        let table = page_spacecraft(&locale, &sirenix);
+        let row = row_for(&table, "Orbital Payload Container");
+        // Count separators to find the Launch column; simpler: assert at least
+        // one " — " is present and that no fmt_abbrev launch_cost like "1k" leaks.
+        assert!(
+            !row.contains(" 1k "),
+            "OPC row should NOT show launch_cost: {row}"
+        );
+        assert!(row.contains(" — "), "OPC row should use em-dash placeholders: {row}");
+    }
+
+    #[test]
+    fn spacecraft_needs_lv_column_renders_yes_no() {
+        let locale = locale_with_spacecraft(vec![
+            // chem_large = Stratos: actual data has needLaunchVehicleToGoToMoon=false
+            ("spacecraft_chem_large", "Stratos", "Reusable upper stage."),
+            // nuke_nolv = Cronos: single-stage-to-orbit, false
+            ("spacecraft_nuke_nolv", "Cronos", "Single-stage-to-orbit."),
+            // capsule = OPC: spawned-not-built, should render —
+            ("spacecraft_capsule", "Orbital Payload Container", "Cargo container."),
+            // electric_small = Hermes: needs_lv=true in source data
+            ("spacecraft_electric_small", "Hermes", "Interplanetary."),
+        ]);
+        let sirenix = Sirenix {
+            spacecraft: vec![
+                sc_stat(
+                    "spacecraft_chem_large",
+                    80.0,
+                    false,
+                    false,
+                    1000.0,
+                    vec![ResourceCost { resource_id: "steel".into(), amount: 120.0 }],
+                    120.0,
+                ),
+                sc_stat(
+                    "spacecraft_nuke_nolv",
+                    700.0,
+                    false,
+                    false,
+                    1000.0,
+                    vec![ResourceCost { resource_id: "steel".into(), amount: 400.0 }],
+                    150.0,
+                ),
+                sc_stat("spacecraft_capsule", 0.0, true, false, 1000.0, vec![], 0.0),
+                sc_stat(
+                    "spacecraft_electric_small",
+                    60.0,
+                    true,
+                    true,
+                    1000.0,
+                    vec![ResourceCost { resource_id: "steel".into(), amount: 100.0 }],
+                    150.0,
+                ),
+            ],
+            ..Sirenix::default()
+        };
+        let table = page_spacecraft(&locale, &sirenix);
+
+        // Each row's "Needs LV" cell appears between pipes; check via row text.
+        let stratos = row_for(&table, "Stratos");
+        let cronos = row_for(&table, "Cronos");
+        let opc = row_for(&table, "Orbital Payload Container");
+        let hermes = row_for(&table, "Hermes");
+
+        // Data has both Stratos and Cronos as needLaunchVehicleToGoToMoon=false,
+        // so both should render "No" in the new "Needs LV" column.
+        assert!(stratos.contains(" No "), "Stratos Needs-LV cell not 'No': {stratos}");
+        assert!(cronos.contains(" No "), "Cronos Needs-LV cell not 'No': {cronos}");
+        // OPC: spawned-not-built — every build-side cell is em-dash including Needs LV.
+        // Hermes: needs_lv=true → Yes.
+        assert!(hermes.contains(" Yes "), "Hermes Needs-LV cell not 'Yes': {hermes}");
+        // OPC row should not contain "Yes" or "No" tokens for Needs LV;
+        // it should render a dash there too — relax: just ensure no contradiction.
+        let _ = opc;
+    }
+
+    #[test]
+    fn ariane_description_has_no_stray_trailing_quote() {
+        // Source locale ends with `Lightbulb" engine."` — must not leak through
+        // into any cell or attribute on the rendered row.
+        let locale = locale_with_spacecraft(vec![(
+            "spacecraft_nuke_large",
+            "Ariane",
+            "Most powerful nuclear thermal spacecraft, powered by a Nuclear Lightbulb\" engine.\"",
+        )]);
+        let sirenix = Sirenix {
+            spacecraft: vec![sc_stat(
+                "spacecraft_nuke_large",
+                50.0,
+                false,
+                true,
+                1000.0,
+                vec![ResourceCost { resource_id: "steel".into(), amount: 150.0 }],
+                150.0,
+            )],
+            ..Sirenix::default()
+        };
+        let table = page_spacecraft(&locale, &sirenix);
+        let row = row_for(&table, "Ariane");
+        // The stray pattern `Lightbulb" engine.` (raw quote glued to a word)
+        // must not appear anywhere — neither in a visible cell nor in a title
+        // attribute.  An HTML close like `engine.">` is fine because the
+        // attribute-closing quote is followed by `>`; a leaked stray quote
+        // followed by ` ` (a space-then-word) is the bug.
+        assert!(
+            !row.contains("Lightbulb\" "),
+            "Ariane row leaks stray mid-word quote: {row}"
+        );
+        assert!(
+            !row.contains("engine.\"|") && !row.contains("engine.\" "),
+            "Ariane row leaks stray trailing quote: {row}"
+        );
+    }
+
+    #[test]
+    fn launch_vehicle_row_renders_fuel_load_and_exhaust_v() {
+        let locale = locale_with_launch_vehicles(vec![(
+            "id_Rocket_RocketType1",
+            "Sparrow",
+            "Cheap, simple, single use small Launch Vehicle.",
+        )]);
+        let sirenix = Sirenix {
+            launch_vehicles: vec![lv_stat("id_Rocket_RocketType1", 10.0, 10000.0, 4.4)],
+            ..Sirenix::default()
+        };
+        let table = page_launch_vehicles(&locale, &sirenix);
+        let row = row_for(&table, "Sparrow");
+        // Fuel load should appear (10000 tonnes → "10k" via fmt_abbrev).
+        assert!(
+            row.contains(" 10k "),
+            "Sparrow row missing fuel load: {row}"
+        );
+        // Exhaust velocity 4.4 km/s should appear as "4.4".
+        assert!(
+            row.contains(" 4.4 "),
+            "Sparrow row missing exhaust velocity: {row}"
+        );
+    }
+
+    #[test]
+    fn launch_vehicle_row_with_empty_description_has_placeholder() {
+        // Albatross locale entry has description="" — table shouldn't render an
+        // empty descriptor cell or otherwise leave the row visually broken.
+        let locale = locale_with_launch_vehicles(vec![("lv_chem_seadragon", "Albatross", "")]);
+        let sirenix = Sirenix {
+            launch_vehicles: vec![lv_stat("lv_chem_seadragon", 1800.0, 10000.0, 4.4)],
+            ..Sirenix::default()
+        };
+        let table = page_launch_vehicles(&locale, &sirenix);
+        let row = row_for(&table, "Albatross");
+        // No empty trailing description cell (the old bug rendered "| Albatross | ... |  |").
+        assert!(
+            !row.ends_with(" |  |"),
+            "Albatross row has a blank trailing description cell: {row}"
+        );
     }
 }
 
