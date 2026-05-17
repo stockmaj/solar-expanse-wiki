@@ -72,6 +72,10 @@
       return true;
     }
     document.querySelectorAll('table').forEach(function (table) {
+      // Honor an explicit opt-out — pages that render content in chain
+      // order (e.g., contracts/missions) wrap their tables in
+      // <div class="no-sort"> so re-sorting can't destroy the meaning.
+      if (table.closest('.no-sort')) return;
       var ths = table.querySelectorAll('thead th, tr:first-child th');
       var firstRow = (table.querySelector('tbody tr') || (function () {
         // No <tbody>: first <tr> after header.

@@ -7,6 +7,8 @@ out cash, resources, or unlocks when complete. Many contracts also unlock
 the next link in a chain (Mars Phase 1 → Mars Phase 2 → …), a new spacecraft,
 or a new launch vehicle.
 
+<div class="no-sort" markdown="1">
+
 | <span title="Dependency depth: 0 = no prereq, N = unlocked after an Order N-1 contract">Order</span> | Contract | <span title="Contracts that must complete before this one is offered">Prereq</span> | <span title="Objectives that must be completed to claim the rewards">Requirements</span> | <span title="Cash, resources, unlocks, and follow-up contracts granted on completion">Rewards</span> | Premise |
 | --- | --- | --- | --- | --- | --- |
 | 0 | <a id="contract-contract-tutorial-firstorbit"></a>**First Orbit** | — | Deliver 1× Hubel Telescope Cargo<br>Explore | Cash: 15k<br>Next: [Explore Luna](#contract-contract-tutorial-moonorbit) | We're ready for our big launch! To start off, we need to put a brand new space telescope in Low Earth Orbit. It will let us look above and beyond, and scout out suitable locations for future missions. |
@@ -54,6 +56,8 @@ or a new launch vehicle.
 | 7 | <a id="contract-contract-asteroid-sample"></a>**Asteroid Sample** | — | Deliver 5× Rare Metals | Cash: 150k<br>Next: [Asteroid Mining](#contract-contract-asteroid-mining) | Strike the rock! We found great potential on Lutetia, so it's time to take advantage of that. Mine out what you can and bring it back to Earth for examination. There's much money to be made if this goes well. |
 | 7 | <a id="contract-contract-asteroid-impact"></a>**Avoiding Armageddon** | — | Deliver 1× Contractitem<br>Detonate nuclear device | Cash: 1.5M | We have just detected an asteroid on an impact course with Earth! The impact is calculated to happen in several years, and will wipe out all life from our planet. This might be the most dreadful extinction event in history, a death… |
 | 8 | <a id="contract-contract-asteroid-dropping"></a>**Asteroid Drop** | [Asteroid Pulling](#contract-contract-asteroid-pulling) | Deliver | Cash: 1B | Now that we have tested our technology, it's time to use it for terraforming. Bring a water-rich asteroid to Mars in a controlled impact. |
+
+</div>
 
 ## Reading the table
 

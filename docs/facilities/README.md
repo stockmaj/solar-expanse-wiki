@@ -13,11 +13,18 @@ may need atmospheric conditions to function.
 - **Orbital modules** attach to a space station or shipyard in orbit. They
 don't need a habitable surface, but you have to build the station first.
 
-<div class="facility-filter">
-<label>Filter: <input id="facility-filter" type="search" placeholder="facility name…" autocomplete="off"></label>
-</div>
-
 ## Ground facilities
+
+<div class="facility-filter" data-table="ground">
+<label>Filter: <input class="facility-filter-search" data-table="ground" type="search" placeholder="facility name…" autocomplete="off"></label>
+<label><input type="checkbox" class="facility-type-filter" data-table="ground" value="Habitation" checked> Habitation</label>
+<label><input type="checkbox" class="facility-type-filter" data-table="ground" value="LaunchFacility" checked> Launch Facility</label>
+<label><input type="checkbox" class="facility-type-filter" data-table="ground" value="Mining" checked> Mining</label>
+<label><input type="checkbox" class="facility-type-filter" data-table="ground" value="Other" checked> Other</label>
+<label><input type="checkbox" class="facility-type-filter" data-table="ground" value="Power" checked> Power</label>
+<label><input type="checkbox" class="facility-type-filter" data-table="ground" value="Production" checked> Production</label>
+<label><input type="checkbox" class="facility-type-filter" data-table="ground" value="Terraformation" checked> Terraformation</label>
+</div>
 
 | Facility | <span title="Facility category — Production / Mining / Power / Habitation / …">Type</span> | <span title="Resources required to construct">Build cost</span> | <span title="Days required to construct">Time</span> | <span title="Primary on-site role and its magnitude (crew capacity, research rate, mining rate, etc.)">Role</span> | <span title="On-site population required for full output">Workers</span> | <span title="Energy consumed per day">Energy</span> | <span title="Daily maintenance cost">Maint</span> | <span title="Bonus granted to launches that originate here">Launch bonus</span> | <span title="Per-day deltas applied to the planet's habitability parameters">Terraforming</span> | <span title="Research that unlocks this facility">Prereq</span> | Description |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -116,6 +123,16 @@ don't need a habitable surface, but you have to build the station first.
 | <a id="facility-terraform-magnet"></a>**Planetary Magnetosphere Generator** | Terraformation | <span style="white-space:nowrap" title="Metals"><img src="../images/resources/metal.png" width="16" alt="Metals"/>&nbsp;36k</span> | 1800 | — | — | 240 | 50 | — | Radiation −0.6, Magnetic field +0.6 | [Artificial Magnetosphere](../research/#research-research-terraforming-magnet1) | Decreases radiation on the object's surface. |
 
 ## Orbital modules
+
+<div class="facility-filter" data-table="orbital">
+<label>Filter: <input class="facility-filter-search" data-table="orbital" type="search" placeholder="facility name…" autocomplete="off"></label>
+<label><input type="checkbox" class="facility-type-filter" data-table="orbital" value="Habitation" checked> Habitation</label>
+<label><input type="checkbox" class="facility-type-filter" data-table="orbital" value="Mining" checked> Mining</label>
+<label><input type="checkbox" class="facility-type-filter" data-table="orbital" value="Other" checked> Other</label>
+<label><input type="checkbox" class="facility-type-filter" data-table="orbital" value="Power" checked> Power</label>
+<label><input type="checkbox" class="facility-type-filter" data-table="orbital" value="Production" checked> Production</label>
+<label><input type="checkbox" class="facility-type-filter" data-table="orbital" value="Terraformation" checked> Terraformation</label>
+</div>
 
 | Facility | <span title="Facility category — Production / Mining / Power / Habitation / …">Type</span> | <span title="Resources required to construct">Build cost</span> | <span title="Days required to construct">Time</span> | <span title="Primary on-site role and its magnitude (crew capacity, research rate, mining rate, etc.)">Role</span> | <span title="On-site population required for full output">Workers</span> | <span title="Energy consumed per day">Energy</span> | <span title="Daily maintenance cost">Maint</span> | <span title="Bonus granted to launches that originate here">Launch bonus</span> | <span title="Per-day deltas applied to the planet's habitability parameters">Terraforming</span> | <span title="Research that unlocks this facility">Prereq</span> | Description |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |

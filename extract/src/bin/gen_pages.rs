@@ -2968,6 +2968,12 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
         ],
         &rows,
     );
+    // Wrap so the global sortable-table JS skips this table — chain-DFS
+    // visit order is the meaningful sort and any other reorder breaks it.
+    // The Order column itself is hidden via CSS (.no-sort table th:first-child
+    // / td:first-child { display: none }) so the player sees a clean table
+    // while the depth value stays in the markup for tests + screen readers.
+    let table = format!("<div class=\"no-sort\" markdown=\"1\">\n\n{table}\n</div>\n");
     format!(
         "# Contracts\n\n\
 Contracts drive progression in Solar Expanse — they're the game's source of\n\
@@ -3325,6 +3331,41 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
     let ground_table = md_table_with_tips(&header, &header_tips, &ground_rows);
     let orbital_table = md_table_with_tips(&header, &header_tips, &orbital_rows);
 
+    // Build per-table filter blocks: text search + a checkbox per distinct
+    // facility type in that table.  Types are sorted alphabetically and
+    // humanized (`LaunchFacility` → `Launch Facility`).
+    let humanize_type = |t: &str| -> String {
+        let mut out = String::with_capacity(t.len() + 4);
+        for (i, c) in t.char_indices() {
+            if i > 0 && c.is_uppercase() { out.push(' '); }
+            out.push(c);
+        }
+        out
+    };
+    let build_filter_block = |id_suffix: &str, facs: &[&FacilityStat]| -> String {
+        let mut types: Vec<&str> = facs.iter().map(|f| f.facility_type.as_str()).collect();
+        types.sort();
+        types.dedup();
+        let mut block = String::new();
+        block.push_str(&format!(
+            "<div class=\"facility-filter\" data-table=\"{id_suffix}\">\n",
+        ));
+        block.push_str(&format!(
+            "<label>Filter: <input class=\"facility-filter-search\" data-table=\"{id_suffix}\" type=\"search\" placeholder=\"facility name…\" autocomplete=\"off\"></label>\n",
+        ));
+        for t in &types {
+            block.push_str(&format!(
+                "<label><input type=\"checkbox\" class=\"facility-type-filter\" data-table=\"{id_suffix}\" value=\"{t}\" checked> {label}</label>\n",
+                t = t,
+                label = humanize_type(t),
+            ));
+        }
+        block.push_str("</div>\n\n");
+        block
+    };
+    let ground_filter = build_filter_block("ground", &ground);
+    let orbital_filter = build_filter_block("orbital", &orbital);
+
     format!(
         "# Facilities\n\n\
 Facilities are the buildings and modules you place on planets, moons, asteroids,\n\
@@ -3337,13 +3378,10 @@ Facilities are split into two families:\n\n\
   may need atmospheric conditions to function.\n\
 - **Orbital modules** attach to a space station or shipyard in orbit. They\n\
   don't need a habitable surface, but you have to build the station first.\n\n\
-<div class=\"facility-filter\">\n\
-<label>Filter: <input id=\"facility-filter\" type=\"search\" placeholder=\"facility name…\" autocomplete=\"off\"></label>\n\
-</div>\n\n\
 ## Ground facilities\n\n\
-{ground_table}\n\
+{ground_filter}{ground_table}\n\
 ## Orbital modules\n\n\
-{orbital_table}\n\
+{orbital_filter}{orbital_table}\n\
 ## Reading the table\n\n\
 - **Type** is the gameplay category — *Production*, *Mining*, *Storage*, *Power*, *Habitat*, etc. The Solar Expanse UI groups facilities by type when you open the build menu.\n\
 - **Time** is the build duration in days.\n\

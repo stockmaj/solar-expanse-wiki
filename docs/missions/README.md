@@ -84,6 +84,8 @@ For launch-window timing for any destination, see [Launch Windows](../celestial-
 | 7 | <a id="contract-contract-asteroid-impact"></a>**Avoiding Armageddon** | — | Deliver 1× Contractitem<br>Detonate nuclear device | Cash: 1.5M | We have just detected an asteroid on an impact course with Earth! The impact is calculated to happen in several years, and will wipe out all life from our planet. This might be the most dreadful extinction event in history, a death… |
 | 8 | <a id="contract-contract-asteroid-dropping"></a>**Asteroid Drop** | [Asteroid Pulling](#contract-contract-asteroid-pulling) | Deliver | Cash: 1B | Now that we have tested our technology, it's time to use it for terraforming. Bring a water-rich asteroid to Mars in a controlled impact. |
 
+</div>
+
 ## Reading the table
 
 - The **Order** column is the contract's dependency depth in the unlock DAG (0 = no prereq, N = unlocked after an Order N-1 contract). Rows are sorted by **campaign chain** — each starting contract is followed by its full follow-up chain (depth-first), so a tutorial or campaign reads top-to-bottom as a progression instead of jumping around by depth. Tutorial chains come first; non-tutorial roots follow alphabetically.

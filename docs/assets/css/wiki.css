@@ -248,6 +248,16 @@ main hr {
   margin: 24px 0;
 }
 
+/* ---------- No-sort tables (contracts / missions) ----------
+ * Tables wrapped in <div class="no-sort"> render in a meaningful chain
+ * order; their first column carries the depth-derived "Order" number
+ * which the test suite reads but the player doesn't need to see.
+ * Hide first column visually; cells remain in the DOM. */
+.no-sort table th:first-child,
+.no-sort table td:first-child {
+  display: none;
+}
+
 /* ---------- Facility-table filter (facilities page) ---------- */
 
 .facility-filter {
