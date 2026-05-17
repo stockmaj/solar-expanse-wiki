@@ -1419,7 +1419,9 @@ The five playable starting factions in Solar Expanse. Each scenario\n\
 (Colonization Era / The Expansion / Race Beyond) ships a different\n\
 pre-built save where every corporation starts with its own completed\n\
 research, funding, and fleet. Difficulty further scales starting money\n\
-and ongoing costs.\n\n",
+and ongoing costs.\n\n\
+_Prelude and Early-Exploration scenarios are procedural and not listed\n\
+here — they have no pre-built save data._\n\n",
     );
 
     // ── Global difficulty table — same multipliers across all corps. ──
@@ -1441,12 +1443,12 @@ and ongoing costs.\n\n",
     ));
     out.push('\n');
 
-    // ── Per-corporation sections. ──
-    // Iterate in locale order (SoleX, NASA, ESA, CNSA, Roscosmos) so the
-    // page matches the in-game customization screen.
+    // ── Flavor-traits block per corp.  All the numeric/research data
+    //    moves into the comparison view below; this section keeps the
+    //    locale's hand-written one-liner traits accessible to readers.
+    out.push_str("## Corporations at a glance\n\n");
     for c in &locale.corporations {
-        out.push_str(&format!("## {}\n\n{}\n\n", c.name, c.description));
-
+        out.push_str(&format!("### {}\n\n{}\n\n", c.name, c.description));
         let traits = c.traits.replace("\\n", "\n");
         let traits = traits.trim();
         if !traits.is_empty() {
@@ -1454,106 +1456,110 @@ and ongoing costs.\n\n",
             out.push_str(traits);
             out.push_str("\n\n");
         }
+    }
 
-        // For each scenario, find this corp's CorpStartStat. CompanyDefinition
-        // ids ("Solex", "NASA", …) are matched case-insensitively against
-        // the locale name because the locale spells "SoleX" with capital X
-        // but the CompanyDefinition is "Solex".
-        let scenarios: Vec<(&ScenarioStartStat, &CorpStartStat)> = sirenix
-            .scenario_starts
-            .iter()
-            .filter_map(|s| {
-                s.corp_starts
-                    .iter()
-                    .find(|cs| cs.company_id.eq_ignore_ascii_case(&c.name))
-                    .map(|cs| (s, cs))
-            })
-            .collect();
-
-        if scenarios.is_empty() {
-            // Should not happen — every locale corp has CompanyDefinition data.
-            out.push_str("_No pre-built starting state found in StartGameData._\n\n");
-            continue;
-        }
-
-        // Starting funding table: rows = scenarios, columns = difficulties.
-        out.push_str("**Starting funding** (Pioneer base × difficulty multiplier):\n\n");
-        let money_rows: Vec<Vec<String>> = scenarios
-            .iter()
-            .map(|(s, cs)| {
-                let mut row = vec![format!("**{}**", scenario_display_name(&s.scenario_id))];
-                for &mult in DIFFICULTY_MONEY_MULT {
-                    row.push(format!("${}", fmt_abbrev(cs.starting_money * mult)));
-                }
-                row
-            })
-            .collect();
-        let headers = {
-            let mut h = vec!["Scenario"];
-            for n in DIFFICULTY_NAMES {
-                h.push(*n);
-            }
-            h
-        };
-        out.push_str(&md_table(&headers, &money_rows));
-        out.push('\n');
-
-        // Starting fleet table: rows = scenarios.
-        out.push_str("**Starting fleet & research count:**\n\n");
-        let fleet_rows: Vec<Vec<String>> = scenarios
-            .iter()
-            .map(|(s, cs)| {
-                vec![
-                    format!("**{}**", scenario_display_name(&s.scenario_id)),
-                    cs.starting_launch_vehicles.to_string(),
-                    cs.starting_spacecraft.to_string(),
-                    cs.completed_research.len().to_string(),
-                ]
-            })
-            .collect();
-        out.push_str(&md_table(
-            &[
-                "Scenario",
-                "Launch vehicles",
-                "Spacecraft",
-                "Research completed",
-            ],
-            &fleet_rows,
-        ));
-        out.push('\n');
-
-        // Per-scenario completed research lists.
-        for (s, cs) in &scenarios {
-            out.push_str(&format!(
-                "**Completed research — {}:**\n\n",
-                scenario_display_name(&s.scenario_id)
-            ));
-            if cs.completed_research.is_empty() {
-                out.push_str("_None._\n\n");
-                continue;
-            }
-            // Sort by display name — keeps the list stable across scenarios
-            // and easy to diff visually. The raw id ordering in the save
-            // is by tech-tree insertion which is confusing to a reader.
-            let mut names: Vec<String> = cs
+    // ── Build the JSON blob that powers the interactive comparison table. ──
+    // Schema:
+    //   { scenarios: [{ id, name, corps: [{ name, starting_money,
+    //                                        lv_count, sc_count, research: [str…] }] }],
+    //     difficulties: [{ name, money_multiplier }] }
+    //
+    // Corp order inside each scenario matches the locale order
+    // (SoleX, NASA, ESA, CNSA, Roscosmos) so the comparison columns line
+    // up with the in-game customization screen.
+    let mut scenarios_json: Vec<serde_json::Value> = Vec::new();
+    for s in &sirenix.scenario_starts {
+        let mut corps_json: Vec<serde_json::Value> = Vec::new();
+        for c in &locale.corporations {
+            let cs = match s
+                .corp_starts
+                .iter()
+                .find(|cs| cs.company_id.eq_ignore_ascii_case(&c.name))
+            {
+                Some(cs) => cs,
+                None => continue,
+            };
+            let mut research_names: Vec<String> = cs
                 .completed_research
                 .iter()
                 .filter_map(|rid| {
-                    // Skip category nodes (research_category_*) — they're
-                    // tree-structure rather than player-visible tech.
+                    // Drop tree-structure category nodes — they aren't
+                    // player-visible research and were already filtered
+                    // out by the previous version of this page.
                     if rid.starts_with("research_category_") {
                         return None;
                     }
-                    let nm = research_name.get(rid.as_str()).copied().unwrap_or(rid.as_str());
+                    let nm = research_name
+                        .get(rid.as_str())
+                        .copied()
+                        .unwrap_or(rid.as_str());
                     Some(nm.to_string())
                 })
                 .collect();
-            names.sort();
-            names.dedup();
-            out.push_str(&names.iter().map(|n| format!("- {}", n)).collect::<Vec<_>>().join("\n"));
-            out.push_str("\n\n");
+            research_names.sort();
+            research_names.dedup();
+            corps_json.push(serde_json::json!({
+                "name": c.name,
+                "starting_money": cs.starting_money,
+                "lv_count": cs.starting_launch_vehicles,
+                "sc_count": cs.starting_spacecraft,
+                "research": research_names,
+            }));
         }
+        scenarios_json.push(serde_json::json!({
+            "id": s.scenario_id,
+            "name": scenario_display_name(&s.scenario_id),
+            "corps": corps_json,
+        }));
     }
+
+    let difficulties_json: Vec<serde_json::Value> = (0..DIFFICULTY_NAMES.len())
+        .map(|i| {
+            serde_json::json!({
+                "name": DIFFICULTY_NAMES[i],
+                "money_multiplier": DIFFICULTY_MONEY_MULT[i],
+            })
+        })
+        .collect();
+
+    let corp_data_json = serde_json::to_string(&serde_json::json!({
+        "scenarios": scenarios_json,
+        "difficulties": difficulties_json,
+    }))
+    .expect("CORP_DATA serialization");
+
+    out.push_str("## Comparison\n\n");
+    out.push_str(
+        "Pick a scenario and difficulty to compare starting funding, fleet, and completed research across all five corporations side-by-side. Only research held by at least one corporation at the selected scenario is listed.\n\n",
+    );
+    // <select> elements use Colonization Era + Pioneer as defaults; the JS
+    // layer reads the current value and re-renders the table on change.
+    out.push_str("<div class=\"calc\">\n");
+    out.push_str("<label>Scenario:\n<select id=\"corp-scenario\">\n");
+    for s in &sirenix.scenario_starts {
+        let id = &s.scenario_id;
+        let name = scenario_display_name(id);
+        let selected = if id == "StartGameColonization" {
+            " selected"
+        } else {
+            ""
+        };
+        out.push_str(&format!(
+            "<option value=\"{id}\"{selected}>{name}</option>\n"
+        ));
+    }
+    out.push_str("</select>\n</label>\n");
+    out.push_str("<label>Difficulty:\n<select id=\"corp-difficulty\">\n");
+    for n in DIFFICULTY_NAMES {
+        let selected = if *n == "Pioneer" { " selected" } else { "" };
+        out.push_str(&format!("<option value=\"{n}\"{selected}>{n}</option>\n"));
+    }
+    out.push_str("</select>\n</label>\n");
+    out.push_str("<div id=\"corp-comparison\"></div>\n");
+    out.push_str("</div>\n\n");
+
+    out.push_str(&format!("<script>\nwindow.CORP_DATA = {corp_data_json};\n</script>\n"));
+    out.push_str("<script src=\"{{ '/assets/js/corporations.js' | relative_url }}?v={{ site.data.wiki.generated_at }}\"></script>\n\n");
 
     out.push_str("## See also\n\n- [Research](../research/) — full tech tree across all branches\n");
     out
