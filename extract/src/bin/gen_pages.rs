@@ -1299,9 +1299,11 @@ lift them to space.\n\n",
         } else {
             fmt_amount(s.cargo_capacity)
         };
-        // Append a research-unlock link below the spacecraft name when the
-        // tech tree gates it.  Same cell to avoid widening the table.
-        let research_suffix = research_unlocking_sc
+        // Prepend a research-unlock link to the description cell rather than
+        // the name cell — putting it under the name wrapped most of the time
+        // and pushed the table layout around.  Putting it before the desc
+        // text keeps the column where the long text already is.
+        let unlock_prefix = research_unlocking_sc
             .get(s.id.as_str())
             .map(|rid| {
                 let label = research_display_name
@@ -1310,14 +1312,15 @@ lift them to space.\n\n",
                     .filter(|n| !n.is_empty())
                     .unwrap_or(rid);
                 format!(
-                    "<br><sub>Unlock: {}</sub>",
+                    "<sub>Unlock: {}</sub><br>",
                     link_cross_page("research", "research", rid, &escape_cell(label))
                 )
             })
             .unwrap_or_default();
+        let desc_cell = format!("{}{}", unlock_prefix, escape_cell(desc));
         rows.push(vec![
             format!(
-                "{anchor}**{name}**{research_suffix}",
+                "{anchor}**{name}**",
                 anchor = anchor_tag("spacecraft", &s.id),
                 name = escape_cell(display_name)
             ),
@@ -1330,7 +1333,7 @@ lift them to space.\n\n",
             built_at,
             build_cost_cell,
             build_time_cell,
-            escape_cell(desc),
+            desc_cell,
         ]);
     }
     let header = match current {
@@ -2669,18 +2672,18 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
         {
             continue;
         }
-        // Split by where the facility can be placed.  "Orbit" → orbital section;
-        // "Surface" → ground section; "Surface, Orbit" appears in both.
+        // Split by where the facility can be placed.  Surface-only → ground
+        // table; orbit-only → orbital table; "Surface, Orbit" facilities
+        // (habitats etc.) go in the ground table only, with a small "(also
+        // orbital)" marker on the name cell — duplicate rows confuse readers.
         let p = f.placement.as_str();
         let surface_ok = p.contains("Surface") || p.contains("SurfaceAndAsteroid");
         let orbit_ok = p.contains("Orbit");
         if surface_ok {
             ground.push(f);
-        }
-        if orbit_ok {
+        } else if orbit_ok {
             orbital.push(f);
-        }
-        if !surface_ok && !orbit_ok {
+        } else {
             // Placement empty / unknown — show on ground as default rather than drop.
             ground.push(f);
         }
@@ -2728,10 +2731,19 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
             "—".to_string()
         };
         let desc = facility_desc.get(id_no_prefix).copied().unwrap_or("");
+        // Tag Surface-and-Orbit facilities so the player knows the row in the
+        // Ground table also covers orbital placement (avoids the previous
+        // duplicate-row rendering in both sections).
+        let placement_marker = if f.placement.contains("Surface") && f.placement.contains("Orbit") {
+            "<br><sub>(also orbital)</sub>"
+        } else {
+            ""
+        };
         let name_cell = format!(
-            "{anchor}**{name}**",
+            "{anchor}**{name}**{marker}",
             anchor = anchor_tag("facility", id_no_prefix),
-            name = escape_cell(&display)
+            name = escape_cell(&display),
+            marker = placement_marker,
         );
         let time = if f.build_time_days > 0.0 {
             fmt_amount(f.build_time_days)

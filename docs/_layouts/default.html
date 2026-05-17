@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ page.title | default: site.title }}</title>
-  <link rel="stylesheet" href="{{ '/assets/css/wiki.css' | relative_url }}">
+  <link rel="stylesheet" href="{{ '/assets/css/wiki.css' | relative_url }}?v={{ site.data.wiki.generated_at | default: 'dev' }}">
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='10' fill='%23ffb347'/><circle cx='24' cy='12' r='2.5' fill='%2388ccff'/></svg>">
 </head>
 <body>
