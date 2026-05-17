@@ -360,14 +360,24 @@ main hr {
  * its full width and the research matrix stays readable.
  */
 .corp-comparison-split {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
   gap: 24px;
-  align-items: flex-start;
+  align-items: start;
 }
-.corp-comparison-split > table { flex: 0 0 auto; }
-.corp-comparison-right { flex: 1 1 auto; }
+/* main table { display: block; overflow-x: auto } blocks grid sizing — for
+ * the comparison split we want native table layout so the grid tracks
+ * size correctly. */
+.corp-comparison-split table {
+  display: table;
+  overflow: visible;
+  min-width: 0;
+  max-width: 100%;
+  width: auto;
+}
+.corp-comparison-right { width: 100%; }
 @media (max-width: 900px) {
-  .corp-comparison-split { flex-direction: column; }
+  .corp-comparison-split { grid-template-columns: 1fr; }
 }
 
 /* ---------- Colony construction calculator (/calculator/) ---------- */

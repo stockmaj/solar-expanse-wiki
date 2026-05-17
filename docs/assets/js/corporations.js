@@ -110,12 +110,24 @@
       return { name: u.name, category: u.category, held: held };
     });
 
+    // Filter out parity rows — research held by every corp (all ✓) or no
+    // corp (all —).  The point of the matrix is to show DIFFERENCES; rows
+    // with parity convey nothing.  Track how many we dropped so the page
+    // can note "N research items with parity not shown."
+    var totalBeforeFilter = researchRows.length;
+    researchRows = researchRows.filter(function (r) {
+      var firstVal = r.held[0];
+      return r.held.some(function (v) { return v !== firstVal; });
+    });
+    var parityHidden = totalBeforeFilter - researchRows.length;
+
     return {
       corpNames: corpNames,
       cash: cash,
       lvCounts: lvCounts,
       scCounts: scCounts,
       researchRows: researchRows,
+      parityHidden: parityHidden,
     };
   }
 
@@ -166,9 +178,6 @@
       }).join('') + '</tr>');
 
     // ----- Right table: completed research, grouped by category -----
-    // The rows are already sorted category-then-name in buildComparison(),
-    // so consecutive entries with the same category form a single group —
-    // we prepend exactly one category-header row per group.
     var rightRows = [];
     var prevCategory = null;
     cmp.researchRows.forEach(function (r) {
@@ -190,7 +199,15 @@
     var rightTable = '<table class="corp-comparison-right"><thead>' + head +
       '</thead><tbody>' + rightRows.join('') + '</tbody></table>';
 
-    return '<div class="corp-comparison-split">' + leftTable + rightTable + '</div>';
+    var parityNote = '';
+    if (cmp.parityHidden && cmp.parityHidden > 0) {
+      parityNote = '<p class="corp-parity-note" style="font-size:12px;color:var(--fg-muted);margin-top:4px">' +
+        cmp.parityHidden +
+        ' research item' + (cmp.parityHidden === 1 ? '' : 's') +
+        ' shared by every corp (or by none) hidden — only differences shown.</p>';
+    }
+
+    return '<div class="corp-comparison-split">' + leftTable + rightTable + '</div>' + parityNote;
   }
 
   // ----- DOM binding -----------------------------------------------------
