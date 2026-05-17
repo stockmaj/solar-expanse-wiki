@@ -181,6 +181,25 @@ struct FacilityStat {
     can_be_scrapped: bool,
     #[allow(dead_code)]
     can_be_turned_off: bool,
+    /// Days to construct. From `timeToBuildInDays`.
+    #[serde(default)]
+    build_time_days: f64,
+    /// Launch-method bonus, surfaced only for the seven launch facilities.
+    /// Shape: `(bonus_kind, magnitude)`.
+    #[serde(default)]
+    bonus_data: Option<(String, f64)>,
+    /// `specialAbilityFacilityNew` enum (CrewCapacity, Refiner, Mining, Lab,
+    /// EnergyProduction, etc.) — `None` when the facility has no role.
+    #[serde(default)]
+    role: Option<String>,
+    /// `specialAbilityParameter` — role-dependent magnitude (crew count,
+    /// research rate, mining rate, etc.).
+    #[serde(default)]
+    role_magnitude: f64,
+    /// Terraforming deltas keyed by friendly label (Temperature, Atmosphere,
+    /// Radiation, Magnetic field, …). Empty for non-terraforming facilities.
+    #[serde(default)]
+    habitability_deltas: Vec<(String, f64)>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -2476,6 +2495,119 @@ fn smart_title_case(s: &str) -> String {
     out
 }
 
+/// Format a facility-side magnitude (role or habitability delta). Unlike
+/// `fmt_amount`, sub-unit values keep three significant digits so a sunshade's
+/// `-0.006` albedo doesn't collapse to "-0.0". Integer values print without a
+/// decimal point. Always returns the absolute value — callers add the sign so
+/// they can swap the ASCII `-` for the Unicode `−` consistently.
+fn fmt_magnitude_abs(v: f64) -> String {
+    let a = v.abs();
+    if a == 0.0 {
+        return "0".to_string();
+    }
+    if a == a.trunc() && a < 1e9 {
+        return format!("{}", a as i64);
+    }
+    let raw = if a >= 10.0 {
+        format!("{a:.1}")
+    } else if a >= 1.0 {
+        format!("{a:.2}")
+    } else if a >= 0.001 {
+        // Three decimals carries the sunshade's -0.006 albedo delta without
+        // losing precision; the magnet station's 0.6 just renders as "0.6".
+        format!("{a:.3}")
+    } else {
+        // Very small fractions (e.g. 1e-4) — drop to scientific notation so
+        // we don't render "0.000" and lose the value entirely.
+        return format!("{a:.1e}");
+    };
+    // Strip trailing zeros to keep cells tight ("0.600" → "0.6", "2.50" → "2.5").
+    let trimmed = raw.trim_end_matches('0').trim_end_matches('.').to_string();
+    if trimmed.is_empty() {
+        "0".to_string()
+    } else {
+        trimmed
+    }
+}
+
+/// Render the `specialAbilityFacilityNew` enum + its parameter into a single
+/// player-facing cell. The enum is the source of truth for the kind of role
+/// (CrewCapacity, Lab, Mining, EnergyProduction, …) and the parameter is the
+/// magnitude. We collapse them into "<friendly label> <number>" so the table
+/// can carry one column instead of two. A few enum values arrive as combined
+/// strings like "EnergyProduction, EnergyStorage" — we pass them through with
+/// minimal massaging because the in-game UI uses the same phrasing.
+fn fmt_facility_role(role: Option<&str>, magnitude: f64) -> String {
+    let Some(r) = role else { return "—".to_string() };
+    if r.is_empty() {
+        return "—".to_string();
+    }
+    let label: String = match r {
+        "CrewCapacity" => "Crew".into(),
+        "Refiner" => "Refiner".into(),
+        "Mining" => "Mining".into(),
+        "SpaceMirrorOrShade" => "Mirror/Shade".into(),
+        "ConstructionEquipment" => "Construction".into(),
+        "Lab" => "Lab".into(),
+        "BuildSpacecraft" => "Spacecraft assembly".into(),
+        "EnergyProduction" => "Power output".into(),
+        "EnergyStorage" => "Power storage".into(),
+        "EnergyProduction, EnergyStorage" => "Power / storage".into(),
+        "Bonus" => "Bonus".into(),
+        other => other.to_string(),
+    };
+    // Magnitude meaning varies by role. We always render it numerically; the
+    // role label provides the unit context. Zero magnitudes typically mean
+    // "the magnitude lives on a dynamic subclass" (e.g. launch facilities mark
+    // themselves as Bonus with param 0 because the actual bonus is in
+    // bonusData); show just the label in that case. Negative values get a
+    // Unicode minus for consistency with terraforming deltas.
+    if magnitude == 0.0 {
+        label
+    } else if magnitude < 0.0 {
+        format!("{} −{}", label, fmt_magnitude_abs(magnitude))
+    } else {
+        format!("{} {}", label, fmt_magnitude_abs(magnitude))
+    }
+}
+
+/// Render the launch-method `bonusData` object into a player-facing phrase.
+/// The dump uses three enum values:
+///   * `LaunchCost` — flat discount to the launch cost. Param = percent.
+///   * `LaunchCostOptionInPlanMission` — per-mission planner discount option.
+///   * `SpaceCraftInPlanMission` — provides a fake spacecraft option in plan.
+/// We never surface the raw enum name.
+fn fmt_launch_bonus(bd: Option<&(String, f64)>) -> String {
+    let Some((kind, param)) = bd else { return "—".to_string() };
+    let pct = fmt_amount(*param);
+    match kind.as_str() {
+        "LaunchCost" => format!("−{pct}% launch cost"),
+        "LaunchCostOptionInPlanMission" => format!("−{pct}% in plan-mission"),
+        "SpaceCraftInPlanMission" => format!("+{pct} payload option"),
+        // Unknown future enum value: render the parameter without leaking the
+        // raw enum name (kept short so the column stays narrow).
+        _ => format!("+{pct}"),
+    }
+}
+
+/// Render the habitability-parameter deltas as a comma-separated list of
+/// signed entries. We prefer the Unicode minus (U+2212) for negative numbers
+/// — it's typographically nicer and used elsewhere in the wiki. Positive
+/// values get an explicit `+` so the direction of each delta is unambiguous.
+fn fmt_habitability_deltas(deltas: &[(String, f64)]) -> String {
+    if deltas.is_empty() {
+        return "—".to_string();
+    }
+    deltas
+        .iter()
+        .map(|(label, value)| {
+            let sign = if *value < 0.0 { "−" } else { "+" };
+            format!("{label} {sign}{}", fmt_magnitude_abs(*value))
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
     let facility_name: BTreeMap<&str, &str> = locale
         .facilities
@@ -2599,13 +2731,25 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
             anchor = anchor_tag("facility", id_no_prefix),
             name = escape_cell(&display)
         );
+        let time = if f.build_time_days > 0.0 {
+            fmt_amount(f.build_time_days)
+        } else {
+            "—".to_string()
+        };
+        let role = fmt_facility_role(f.role.as_deref(), f.role_magnitude);
+        let launch_bonus = fmt_launch_bonus(f.bonus_data.as_ref());
+        let terraforming = fmt_habitability_deltas(&f.habitability_deltas);
         vec![
             name_cell,
             f.facility_type.clone(),
             fmt_build_cost(&f.build_cost, resource_name),
+            time,
+            role,
             workers,
             energy,
             maint,
+            launch_bonus,
+            terraforming,
             prereq,
             escape_cell(desc),
         ]
@@ -2615,9 +2759,13 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
         "Facility",
         "Type",
         "Build cost",
+        "Time",
+        "Role",
         "Workers",
         "Energy",
         "Maint",
+        "Launch bonus",
+        "Terraforming",
         "Prereq",
         "Description",
     ];
@@ -2631,13 +2779,17 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
         .map(|f| row_for(f, &facility_name, &research_name, &resource_name))
         .collect();
 
-    let header_tips: [Option<&str>; 8] = [
+    let header_tips: [Option<&str>; 12] = [
         None,
         Some("Facility category — Production / Mining / Power / Habitation / …"),
         Some("Resources required to construct"),
+        Some("Days required to construct"),
+        Some("Primary on-site role and its magnitude (crew capacity, research rate, mining rate, etc.)"),
         Some("On-site population required for full output"),
         Some("Energy consumed per day"),
         Some("Daily maintenance cost"),
+        Some("Bonus granted to launches that originate here"),
+        Some("Per-day deltas applied to the planet's habitability parameters"),
         Some("Research that unlocks this facility"),
         None,
     ];
@@ -2662,11 +2814,14 @@ Facilities are split into two families:\n\n\
 {orbital_table}\n\
 ## Reading the table\n\n\
 - **Type** is the gameplay category — *Production*, *Mining*, *Storage*, *Power*, *Habitat*, etc. The Solar Expanse UI groups facilities by type when you open the build menu.\n\
+- **Time** is the build duration in days.\n\
+- **Role** combines the facility's primary on-site role with its magnitude — *Crew 100* for a habitat, *Lab 1* for a research lab, *Mining 10* for a heavy mine, *Mirror/Shade −0.006* for a sunshade's albedo delta, etc. Facilities with no specific role show `—`.\n\
 - **Workers** is the on-site population the facility needs to operate at full output. Most facilities throttle when understaffed.\n\
 - **Energy/day** is the running energy demand. Power facilities show this as `—`; everything else is a consumer.\n\
 - **Maintenance** is the per-day cash upkeep while the facility is active.\n\
-- **Research prereq** is the research that unlocks construction; `—` means it's available from the start (or the prereq lives outside the standard `lockByHelpNotUse` field, which a few specialist facilities use).\n\n\
-What this page does *not* show: per-facility produces / consumes rates and special-effect bonuses. Those are stored on dynamically-typed subclasses of each facility and aren't in the static descriptor data — the in-game tooltip is the source of truth for now.\n"
+- **Launch bonus** appears only for launch facilities — it describes the discount or capacity gain applied to launches that originate from this facility.\n\
+- **Terraforming** lists the per-day deltas the facility applies to a body's habitability parameters (temperature, atmosphere, gravity, radiation, magnetic field). Empty for everything except a handful of dedicated terraforming structures.\n\
+- **Research prereq** is the research that unlocks construction; `—` means it's available from the start (or the prereq lives outside the standard `lockByHelpNotUse` field, which a few specialist facilities use).\n"
     )
 }
 
@@ -3886,6 +4041,228 @@ mod tests {
         assert!(
             page.contains("Crew Compartment") || page.contains("module_crew_compartment"),
             "module target label missing entirely:\n{page}"
+        );
+    }
+
+    #[test]
+    fn fmt_magnitude_abs_preserves_subunit_precision() {
+        // Integer round-trips without a decimal point.
+        assert_eq!(fmt_magnitude_abs(100.0), "100");
+        // Sunshade's albedo delta must not collapse to "0.0".
+        assert_eq!(fmt_magnitude_abs(-0.006), "0.006");
+        // Trailing zeros are trimmed so "0.600" → "0.6".
+        assert_eq!(fmt_magnitude_abs(0.6), "0.6");
+        // Mid-range fractions keep two decimals (then trim).
+        assert_eq!(fmt_magnitude_abs(2.5), "2.5");
+        // Zero is zero.
+        assert_eq!(fmt_magnitude_abs(0.0), "0");
+    }
+
+    // ---------- Facilities page: build time / launch bonus / role / terraforming ----------
+
+    fn facility_fixture_locale() -> Locale {
+        Locale {
+            celestial_bodies: vec![],
+            spacecraft: vec![],
+            launch_vehicles: vec![],
+            research: vec![],
+            corporations: vec![],
+            contracts: vec![],
+            resources: vec![],
+            facilities: vec![
+                Facility {
+                    id: "habitat".into(),
+                    name: "Habitat".into(),
+                    description: "Houses colonists.".into(),
+                },
+                Facility {
+                    id: "launch_elevator".into(),
+                    name: "Space Elevator".into(),
+                    description: "Cable to orbit.".into(),
+                },
+                Facility {
+                    id: "launch_pad".into(),
+                    name: "Launchpad".into(),
+                    description: "Standard rocket pad.".into(),
+                },
+                Facility {
+                    id: "terraform_magnet".into(),
+                    name: "Magnetic Field Generator".into(),
+                    description: "Generates a planetary magnetic field.".into(),
+                },
+                Facility {
+                    id: "lab".into(),
+                    name: "Research Lab".into(),
+                    description: "Conducts research.".into(),
+                },
+            ],
+            habitability_scales: BTreeMap::new(),
+            cargo: vec![],
+        }
+    }
+
+    fn facility_stat(id: &str, ftype: &str) -> FacilityStat {
+        FacilityStat {
+            id: id.into(),
+            descriptor: "Ground".into(),
+            placement: "Surface".into(),
+            facility_type: ftype.into(),
+            build_cost: vec![],
+            maintenance_per_day: 0.0,
+            workers_required: 0,
+            energy_consumption: 0.0,
+            research_prereq: None,
+            is_obsolete: false,
+            can_be_scrapped: false,
+            can_be_turned_off: false,
+            build_time_days: 0.0,
+            bonus_data: None,
+            role: None,
+            role_magnitude: 0.0,
+            habitability_deltas: vec![],
+        }
+    }
+
+    #[test]
+    fn facilities_page_renders_build_time_column() {
+        let locale = facility_fixture_locale();
+        let mut f = facility_stat("build_lab", "Other");
+        f.build_time_days = 200.0;
+        let sirenix = Sirenix {
+            facilities: vec![f],
+            ..Default::default()
+        };
+        let page = page_facilities(&locale, &sirenix);
+        // Header column for build time present.
+        assert!(
+            page.contains("Time"),
+            "facilities page is missing a Time/build-duration column:\n{page}"
+        );
+        let row = page
+            .lines()
+            .find(|l| l.contains("Research Lab"))
+            .expect("Research Lab row present");
+        assert!(row.contains("200"), "row should show 200-day build time: {row}");
+    }
+
+    #[test]
+    fn facilities_page_renders_launch_bonus_for_launch_facility() {
+        let locale = facility_fixture_locale();
+        let mut elev = facility_stat("build_launch_elevator", "LaunchFacility");
+        elev.bonus_data = Some(("LaunchCostOptionInPlanMission".into(), 10.0));
+        let mut pad = facility_stat("build_launch_pad", "LaunchFacility");
+        pad.bonus_data = Some(("LaunchCost".into(), 10.0));
+        let sirenix = Sirenix {
+            facilities: vec![elev, pad],
+            ..Default::default()
+        };
+        let page = page_facilities(&locale, &sirenix);
+        let elev_row = page
+            .lines()
+            .find(|l| l.contains("Space Elevator"))
+            .expect("Space Elevator row present");
+        // The launch-bonus column must surface a player-facing phrasing — never
+        // the raw enum name. "LaunchCostOptionInPlanMission" is the source enum;
+        // it must NOT appear verbatim in the row.
+        assert!(
+            !elev_row.contains("LaunchCostOptionInPlanMission"),
+            "raw enum leaked: {elev_row}"
+        );
+        // The row should describe the discount in everyday words.
+        assert!(
+            elev_row.to_lowercase().contains("launch") || elev_row.contains("%"),
+            "launch-bonus column should describe the bonus: {elev_row}"
+        );
+        // The bonus magnitude (10) should appear somewhere on the row.
+        assert!(elev_row.contains("10"), "magnitude missing: {elev_row}");
+    }
+
+    #[test]
+    fn facilities_page_renders_role_magnitude_for_habitat() {
+        let locale = facility_fixture_locale();
+        let mut hab = facility_stat("build_habitat", "Habitation");
+        hab.role = Some("CrewCapacity".into());
+        hab.role_magnitude = 100.0;
+        let sirenix = Sirenix {
+            facilities: vec![hab],
+            ..Default::default()
+        };
+        let page = page_facilities(&locale, &sirenix);
+        let row = page
+            .lines()
+            .find(|l| l.contains("**Habitat**"))
+            .expect("Habitat row present");
+        // Magnitude column carries the raw number; the role column shows
+        // CrewCapacity → friendly "Crew" / similar. We accept either ordering
+        // but the row must contain both the number and a recognisable label.
+        assert!(row.contains("100"), "magnitude missing: {row}");
+        assert!(
+            row.to_lowercase().contains("crew"),
+            "role label should mention crew: {row}"
+        );
+    }
+
+    #[test]
+    fn facilities_page_renders_terraforming_deltas_for_magnet_station() {
+        let locale = facility_fixture_locale();
+        let mut mag = facility_stat("build_terraform_magnet", "Other");
+        mag.habitability_deltas = vec![
+            ("Radiation".into(), -0.6),
+            ("Magnetic field".into(), 0.6),
+        ];
+        let sirenix = Sirenix {
+            facilities: vec![mag],
+            ..Default::default()
+        };
+        let page = page_facilities(&locale, &sirenix);
+        // Header column present.
+        assert!(
+            page.contains("Terraforming"),
+            "facilities page is missing a Terraforming column:\n{page}"
+        );
+        let row = page
+            .lines()
+            .find(|l| l.contains("Magnetic Field Generator"))
+            .expect("magnet station row present");
+        assert!(
+            row.contains("Radiation"),
+            "row should mention Radiation: {row}"
+        );
+        // The sign matters — radiation drops, so the cell should carry a
+        // minus sign (either ASCII `-` or the prettier `−` U+2212). Both are
+        // acceptable.
+        assert!(
+            row.contains("−0.6") || row.contains("-0.6"),
+            "row should carry signed delta: {row}"
+        );
+        assert!(
+            row.contains("Magnetic field"),
+            "row should mention Magnetic field: {row}"
+        );
+    }
+
+    #[test]
+    fn facilities_page_role_dash_when_absent() {
+        // A facility without a role should NOT leak the raw enum "None" — it
+        // should render the standard `—` placeholder.
+        let locale = facility_fixture_locale();
+        let f = facility_stat("build_lab", "Other");
+        let sirenix = Sirenix {
+            facilities: vec![f],
+            ..Default::default()
+        };
+        let page = page_facilities(&locale, &sirenix);
+        let row = page
+            .lines()
+            .find(|l| l.contains("Research Lab"))
+            .expect("Lab row present");
+        // The string "None" appears nowhere on the row's facility-side data.
+        // (The literal word "none" in description text is allowed; our fixture
+        // description doesn't contain it, so any "None" leak would be from
+        // role.)
+        assert!(
+            !row.contains("None"),
+            "raw role enum leaked: {row}"
         );
     }
 }

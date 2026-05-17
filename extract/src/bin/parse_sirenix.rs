@@ -93,6 +93,30 @@ struct Facility {
     ///     Power facilities (it carries a placeholder metal→alloy default).
     ///   * Non-power → `refinerData.input[]`.
     consumes: Vec<ResourceCost>,
+    /// Days required to construct the facility. From `timeToBuildInDays`.
+    build_time_days: f64,
+    /// Launch-method bonus payload, if any. Source: `bonusData` (which the dump
+    /// stores as a *single object*, not an array). Surfaces only when
+    /// `bonus != "None"` — every non-launch facility carries a `"None"`
+    /// placeholder we must skip. Shape: `(bonus_kind, bonusParameter)`.
+    /// Real values seen in dump: LaunchCost / LaunchCostOptionInPlanMission /
+    /// SpaceCraftInPlanMission with parameters 10–100.
+    bonus_data: Option<(String, f64)>,
+    /// Facility role from `specialAbilityFacilityNew` — CrewCapacity, Refiner,
+    /// Mining, SpaceMirrorOrShade, ConstructionEquipment, Bonus, Lab,
+    /// BuildSpacecraft, EnergyProduction, EnergyStorage (and "None" → dropped).
+    role: Option<String>,
+    /// Magnitude for the role above (`specialAbilityParameter`). Meaning is
+    /// role-dependent: crew count for habitats, research rate for Lab, mining
+    /// rate for Mining, albedo delta for SpaceMirrorOrShade, etc.
+    role_magnitude: f64,
+    /// Terraforming-relevant deltas pulled from `habitabilityParametersBonus`.
+    /// That field is a *dict* keyed by parameter name (temperature, composition,
+    /// pressure, gravity, radiation, magneticFieldVisualization, plus a bunch
+    /// of flag-like fields — extremeVolcanism etc. — that are NOT deltas).
+    /// We surface only the player-facing numeric knobs, with friendly labels.
+    /// Empty for everything except a handful of terraforming facilities.
+    habitability_deltas: Vec<(String, f64)>,
 }
 
 #[derive(Serialize, Debug, Default, PartialEq)]
@@ -535,6 +559,53 @@ fn parse_facility(v: &Value, descriptor: &str) -> Option<Facility> {
     consumes.sort_by(|a, b| a.resource_id.cmp(&b.resource_id));
     consumes.dedup_by(|a, b| a.resource_id == b.resource_id);
 
+    // bonusData is a single object on every facility; the placeholder bonus
+    // ("None") must be dropped so the column renders blank for non-launch rows.
+    let bonus_data = v.get("bonusData").and_then(|bd| {
+        let bonus = bd.get("bonus").and_then(|x| x.as_str()).unwrap_or("None");
+        if bonus.is_empty() || bonus == "None" {
+            return None;
+        }
+        let param = bd
+            .get("bonusParameter")
+            .and_then(|x| x.as_f64())
+            .unwrap_or(0.0);
+        Some((bonus.to_string(), param))
+    });
+
+    // specialAbilityFacilityNew + specialAbilityParameter — the role & its
+    // magnitude. "None" placeholder collapses to no-role.
+    let role = v
+        .get("specialAbilityFacilityNew")
+        .and_then(|x| x.as_str())
+        .filter(|s| !s.is_empty() && *s != "None")
+        .map(|s| s.to_string());
+    let role_magnitude = f(&["specialAbilityParameter"]);
+
+    // habitabilityParametersBonus is a dict, not an array. Only a handful of
+    // numeric keys are real terraforming deltas; the rest (extremeVolcanism,
+    // environmentalToxicity, cryoVolcanism, hydroCarbonLakes) are flag-like
+    // and never represent a delta even when set to 1.
+    let mut habitability_deltas: Vec<(String, f64)> = Vec::new();
+    if let Some(hpb) = v.get("habitabilityParametersBonus") {
+        // Order matters for rendering — keep player-facing parameters first,
+        // then the magnetic-field knob the terraform-magnet facilities use.
+        for (raw_key, label) in [
+            ("temperature", "Temperature"),
+            ("composition", "Atmosphere"),
+            ("pressure", "Pressure"),
+            ("gravity", "Gravity"),
+            ("water", "Water"),
+            ("radiation", "Radiation"),
+            ("magneticFieldVisualization", "Magnetic field"),
+        ] {
+            let val = hpb.get(raw_key).and_then(|x| x.as_f64()).unwrap_or(0.0);
+            if val != 0.0 {
+                habitability_deltas.push((label.to_string(), val));
+            }
+        }
+    }
+
     Some(Facility {
         id,
         descriptor: descriptor.to_string(),
@@ -550,6 +621,11 @@ fn parse_facility(v: &Value, descriptor: &str) -> Option<Facility> {
         can_be_turned_off: b(&["canBeTurnedOff"]),
         produces,
         consumes,
+        build_time_days: f(&["timeToBuildInDays"]),
+        bonus_data,
+        role,
+        role_magnitude,
+        habitability_deltas,
     })
 }
 
@@ -1606,6 +1682,143 @@ mod tests {
         assert!(e.is_locked);
         assert_eq!(e.possible_player_companies.len(), 4);
         assert!(e.possible_player_companies.contains(&"NASA".to_string()));
+    }
+
+    #[test]
+    fn facility_build_time_days_round_trips() {
+        // GroundFacilityDescriptor entries carry timeToBuildInDays at the top
+        // level — same shape as SpacecraftDescriptor / LaunchVehicleDescriptor.
+        let v = serde_json::json!({
+            "id": "build_lab",
+            "facilityType": "Other",
+            "timeToBuildInDays": 200,
+        });
+        let f = parse_facility(&v, "Ground").expect("parses");
+        assert_eq!(f.build_time_days, 200.0);
+    }
+
+    #[test]
+    fn facility_launch_elevator_parses_bonus_data() {
+        // build_launch_elevator: bonusData is a *single object*, not an array —
+        // {bonus: "LaunchCostOptionInPlanMission", bonusParameter: 10, ...}.
+        let v = serde_json::json!({
+            "id": "build_launch_elevator",
+            "facilityType": "LaunchFacility",
+            "bonusData": {
+                "bonus": "LaunchCostOptionInPlanMission",
+                "bonusParameter": 10,
+                "fakeLVId": "id_LV_launch_elevator_Fake",
+                "fakeSCId": "",
+                "spaceElevatorPrefab3dView": null
+            }
+        });
+        let f = parse_facility(&v, "Ground").expect("parses");
+        let (bonus, param) = f.bonus_data.expect("expected bonus_data");
+        assert_eq!(bonus, "LaunchCostOptionInPlanMission");
+        assert_eq!(param, 10.0);
+    }
+
+    #[test]
+    fn facility_with_bonus_none_yields_empty_bonus_data() {
+        // The dump sets bonus="None" on every non-launch facility — we must NOT
+        // surface those (they would render as bogus "—" placeholders).
+        let v = serde_json::json!({
+            "id": "build_habitat",
+            "facilityType": "Habitation",
+            "bonusData": {
+                "bonus": "None",
+                "bonusParameter": 0,
+            }
+        });
+        let f = parse_facility(&v, "Ground").expect("parses");
+        assert!(f.bonus_data.is_none(), "got {:?}", f.bonus_data);
+    }
+
+    #[test]
+    fn facility_habitat_parses_crew_capacity_role() {
+        // build_habitat: specialAbilityFacilityNew=CrewCapacity, parameter=100.
+        let v = serde_json::json!({
+            "id": "build_habitat",
+            "facilityType": "Habitation",
+            "specialAbilityFacilityNew": "CrewCapacity",
+            "specialAbilityParameter": 100,
+        });
+        let f = parse_facility(&v, "Ground").expect("parses");
+        assert_eq!(f.role.as_deref(), Some("CrewCapacity"));
+        assert_eq!(f.role_magnitude, 100.0);
+    }
+
+    #[test]
+    fn facility_with_role_none_drops_role() {
+        // specialAbilityFacilityNew="None" is the placeholder for facilities
+        // that don't carry a magnitude (e.g. telescopes). We treat that as
+        // "no role" so the page renders `—` instead of "None".
+        let v = serde_json::json!({
+            "id": "build_observatory",
+            "facilityType": "Other",
+            "specialAbilityFacilityNew": "None",
+            "specialAbilityParameter": 0,
+        });
+        let f = parse_facility(&v, "Ground").expect("parses");
+        assert!(f.role.is_none(), "got {:?}", f.role);
+    }
+
+    #[test]
+    fn facility_magnet_station_parses_habitability_deltas() {
+        // build_terraform_magnet: habitabilityParametersBonus is a *dict*, not
+        // an array — keys are temperature / composition / pressure / gravity /
+        // radiation / magneticFieldVisualization / etc. Only non-zero numeric
+        // entries for the four player-facing terraforming knobs (and magnetic
+        // field) should be surfaced.
+        let v = serde_json::json!({
+            "id": "build_terraform_magnet",
+            "facilityType": "Other",
+            "habitabilityParametersBonus": {
+                "temperature": 0,
+                "composition": 0,
+                "pressure": 0,
+                "gravity": 0,
+                "water": 0,
+                "radiation": -0.6,
+                "magneticFieldVisualization": 0.6,
+                // Flag-like fields that must NOT appear as deltas:
+                "extremeVolcanism": 1,
+                "environmentalToxicity": 1,
+                "cryoVolcanism": 1,
+                "hydroCarbonLakes": 1,
+                "albedo": 0,
+            }
+        });
+        let f = parse_facility(&v, "Ground").expect("parses");
+        // Find the radiation delta:
+        let rad = f
+            .habitability_deltas
+            .iter()
+            .find(|(k, _)| k == "Radiation")
+            .map(|(_, v)| *v);
+        assert_eq!(rad, Some(-0.6), "deltas={:?}", f.habitability_deltas);
+        let mag = f
+            .habitability_deltas
+            .iter()
+            .find(|(k, _)| k == "Magnetic field")
+            .map(|(_, v)| *v);
+        assert_eq!(mag, Some(0.6), "deltas={:?}", f.habitability_deltas);
+        // The volcanism / toxicity flags are NOT terraforming deltas and must
+        // be excluded.
+        assert!(!f
+            .habitability_deltas
+            .iter()
+            .any(|(k, _)| k.eq_ignore_ascii_case("extremevolcanism")));
+    }
+
+    #[test]
+    fn facility_without_habitability_bonus_has_empty_deltas() {
+        let v = serde_json::json!({
+            "id": "build_farm",
+            "facilityType": "Production",
+        });
+        let f = parse_facility(&v, "Ground").expect("parses");
+        assert!(f.habitability_deltas.is_empty());
     }
 
     #[test]
