@@ -178,6 +178,8 @@ struct ResearchStat {
     bonus_amount: f64,
     bonus_components: Vec<String>,
     show_in_tree: bool,
+    #[serde(default)]
+    contract_unlocks: Vec<String>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -751,6 +753,7 @@ The start date defaults to **2020-01-01**, the game's campaign start year.\n\n\
 <label>From: <input id=\"calc-from\" list=\"calc-bodies\" autocomplete=\"off\" placeholder=\"Body name…\" value=\"Earth\"></label>\n\
 <label>To: <input id=\"calc-to\" list=\"calc-bodies\" autocomplete=\"off\" placeholder=\"Body name…\" value=\"Mars\"></label>\n\
 <label>Start date: <input type=\"date\" id=\"calc-date\" value=\"2020-01-01\"></label>\n\
+<button id=\"calc-submit\" type=\"button\">Calculate</button>\n\
 <datalist id=\"calc-bodies\"></datalist>\n\
 <div id=\"calc-result\"></div>\n\
 </div>\n\n\
@@ -828,7 +831,8 @@ ignores escape Δv from low Earth orbit and capture Δv at the target.\n\n\
 These are well-known flyby routes the calculator picks out as advantageous\n\
 versus a direct transfer in the same launch window.  Computed on page load —\n\
 expect a second or two for the table to populate.\n\n\
-<div id=\"ga-suggestions\"><em>Calculating suggested trajectories…</em></div>\n\n\
+<button id=\"ga-suggest-btn\" type=\"button\">Calculate suggestions</button>\n\
+<div id=\"ga-suggestions\"><em>Click the button to compute — this runs entirely in your browser and may take 10–20 seconds for outer-planet routes.</em></div>\n\n\
 ### Custom trajectory\n\n\
 <div class=\"calc\">\n\
 <label>From: <input id=\"ga-from\" list=\"calc-bodies\" autocomplete=\"off\" placeholder=\"Body name…\" value=\"Earth\"></label>\n\
@@ -1501,7 +1505,7 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
         .map(|r| (r.id.as_str(), r.name.as_str()))
         .collect();
 
-    // Reverse lookup: contract_id → list of contracts that unlock it via their
+    // Reverse lookup: contract_id → list of contract ids that unlock it via their
     // rewards.  Contracts don't carry an explicit prerequisite field; the
     // dependency lives on the *source* contract as a reward, e.g.
     //   Mars Phase 1.rewards += UnlockContract(parameter1 = "contract_mars_marspreptwo")
@@ -1511,6 +1515,29 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
             if u.starts_with("contract_") {
                 unlocked_by.entry(u.as_str()).or_default().push(c.id.as_str());
             }
+        }
+    }
+
+    // Some contracts aren't unlocked by another contract at all — they're gated
+    // by completing a piece of research (fusion power and asteroid pulling, as
+    // of writing).  Mirror the contract-DAG construction for research, then
+    // fold research-unlocks-contract edges into the depth calculation so those
+    // contracts don't end up at Order 0 alongside true starting contracts.
+    let mut research_prereqs: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for r in &sirenix.research {
+        let entry = research_prereqs.entry(r.id.as_str()).or_default();
+        for p in &r.prereqs {
+            entry.push(p.as_str());
+        }
+    }
+    // research_id → list of research ids that unlock it (mirror direction of contract_unlocks)
+    let mut research_unlockers_of_contract: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for r in &sirenix.research {
+        for c in &r.contract_unlocks {
+            research_unlockers_of_contract
+                .entry(c.as_str())
+                .or_default()
+                .push(r.id.as_str());
         }
     }
 
@@ -1525,13 +1552,53 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
         })
         .collect();
 
-    // Topological depth: a contract with no prereqs (no one unlocks it via rewards)
-    // has depth 0; otherwise depth = 1 + max(depth of each prereq).  Cycles are
-    // broken defensively by treating any in-progress revisit as depth 0.
+    // Topological depth on the research DAG: a research with no prereqs has
+    // depth 0; otherwise 1 + max(depth of each prereq).
+    let mut research_depth: BTreeMap<&str, u32> = BTreeMap::new();
+    fn compute_research_depth<'a>(
+        id: &'a str,
+        prereqs: &BTreeMap<&'a str, Vec<&'a str>>,
+        memo: &mut BTreeMap<&'a str, u32>,
+        visiting: &mut std::collections::BTreeSet<&'a str>,
+    ) -> u32 {
+        if let Some(&d) = memo.get(id) {
+            return d;
+        }
+        if !visiting.insert(id) {
+            return 0;
+        }
+        let d = match prereqs.get(id) {
+            None => 0,
+            Some(srcs) if srcs.is_empty() => 0,
+            Some(srcs) => srcs
+                .iter()
+                .map(|src| compute_research_depth(src, prereqs, memo, visiting))
+                .max()
+                .map(|m| m + 1)
+                .unwrap_or(0),
+        };
+        visiting.remove(id);
+        memo.insert(id, d);
+        d
+    }
+    for r in &sirenix.research {
+        let mut visiting: std::collections::BTreeSet<&str> = Default::default();
+        compute_research_depth(r.id.as_str(), &research_prereqs, &mut research_depth, &mut visiting);
+    }
+
+    // Topological depth on the contract DAG, with research edges folded in.
+    // For each contract c:
+    //   depth(c) = 1 + max(
+    //     depth(c') for every contract c' that unlocks c,
+    //     research_depth(r) for every research r that unlocks c,
+    //   )
+    // If c has neither contract nor research unlockers, depth(c) = 0.
     let mut depth: BTreeMap<&str, u32> = BTreeMap::new();
     fn compute_depth<'a>(
         id: &'a str,
         unlocked_by: &BTreeMap<&'a str, Vec<&'a str>>,
+        research_unlockers: &BTreeMap<&'a str, Vec<&'a str>>,
+        research_depth: &BTreeMap<&'a str, u32>,
         memo: &mut BTreeMap<&'a str, u32>,
         visiting: &mut std::collections::BTreeSet<&'a str>,
     ) -> u32 {
@@ -1542,14 +1609,32 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
             // Cycle — break by treating this node as depth 0.
             return 0;
         }
-        let d = match unlocked_by.get(id) {
-            None => 0,
-            Some(srcs) => srcs
-                .iter()
-                .map(|src| compute_depth(src, unlocked_by, memo, visiting))
+        let contract_max: Option<u32> = unlocked_by.get(id).map(|srcs| {
+            srcs.iter()
+                .map(|src| {
+                    compute_depth(
+                        src,
+                        unlocked_by,
+                        research_unlockers,
+                        research_depth,
+                        memo,
+                        visiting,
+                    )
+                })
                 .max()
-                .map(|m| m + 1)
-                .unwrap_or(0),
+                .unwrap_or(0)
+        });
+        let research_max: Option<u32> = research_unlockers.get(id).map(|rs| {
+            rs.iter()
+                .map(|r| research_depth.get(r).copied().unwrap_or(0))
+                .max()
+                .unwrap_or(0)
+        });
+        let d = match (contract_max, research_max) {
+            (None, None) => 0,
+            (Some(c), None) => c + 1,
+            (None, Some(r)) => r + 1,
+            (Some(c), Some(r)) => c.max(r) + 1,
         };
         visiting.remove(id);
         memo.insert(id, d);
@@ -1557,7 +1642,14 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
     }
     for c in &entries {
         let mut visiting: std::collections::BTreeSet<&str> = Default::default();
-        compute_depth(c.id.as_str(), &unlocked_by, &mut depth, &mut visiting);
+        compute_depth(
+            c.id.as_str(),
+            &unlocked_by,
+            &research_unlockers_of_contract,
+            &research_depth,
+            &mut depth,
+            &mut visiting,
+        );
     }
 
     // Display order: by topological depth (roots first), then by display name.

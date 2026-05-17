@@ -78,8 +78,9 @@
     var fromInput = document.getElementById('calc-from');
     var toInput = document.getElementById('calc-to');
     var datalist = document.getElementById('calc-bodies');
+    var submitBtn = document.getElementById('calc-submit');
     var resultBox = document.getElementById('calc-result');
-    if (!dateInput || !fromInput || !toInput || !datalist || !resultBox) return;
+    if (!dateInput || !fromInput || !toInput || !datalist || !submitBtn || !resultBox) return;
 
     // Populate the shared datalist alphabetically.  Browsers (Chrome,
     // Firefox, Safari) substring-match against the input value, so the
@@ -132,14 +133,17 @@
         '</tbody></table>';
     }
 
-    // Auto-update is cheap (~5 trig evaluations).  Listen to both `input`
-    // (fires on each keystroke) and `change` (fires when the user picks
-    // from the datalist popup, in browsers that don't fire `input` then).
-    ['input', 'change'].forEach(function (ev) {
-      fromInput.addEventListener(ev, update);
-      toInput.addEventListener(ev, update);
+    // Submit-button only.  Auto-update on input was making the page feel
+    // sluggish when the gravity-assist precompute (further down the page)
+    // was running on the same main thread; an explicit submit gives the
+    // user predictable control.  Enter inside any field also triggers it.
+    submitBtn.addEventListener('click', update);
+    [fromInput, toInput, dateInput].forEach(function (inp) {
+      inp.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); update(); }
+      });
     });
-    dateInput.addEventListener('change', update);
+    // Run once on load so the default Earth → Mars result is visible.
     update();
   }
 

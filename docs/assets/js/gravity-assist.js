@@ -143,28 +143,33 @@
     var epoch = args.epochMs;
 
     // Coarse grid: launch dates every 15 days, flyby dates spanning a
-    // reasonable range.  Total grid stays small (<3500 evaluations).
+    // reasonable range.  Step sizes scale up with leg length so outer-planet
+    // routes don't blow up — Earth → Jupiter → Neptune would otherwise have
+    // a ~1260-step leg-2 dimension and ~28 M total grid points.  We cap the
+    // grid to ~200 steps per dimension.
     var LAUNCH_STEP_DAYS = 15;
-    var FLYBY_STEP_DAYS = 15;
+    var MAX_STEPS_PER_DIM = 200;
     // First-leg time: bracket the Hohmann time between Earth and flyby body
     // by [0.4×, 1.8×] to allow shorter/longer-than-Hohmann arcs.
     var hohmann1 = 0.5 * Math.pow((earth.a + flyby.a) / 2, 1.5) * YEAR_DAYS;
     var leg1Min = Math.max(40, hohmann1 * 0.4);
     var leg1Max = hohmann1 * 1.8;
+    var leg1Step = Math.max(15, Math.ceil((leg1Max - leg1Min) / MAX_STEPS_PER_DIM));
     var hohmann2 = 0.5 * Math.pow((flyby.a + target.a) / 2, 1.5) * YEAR_DAYS;
     var leg2Min = Math.max(60, hohmann2 * 0.4);
     var leg2Max = hohmann2 * 1.8;
+    var leg2Step = Math.max(15, Math.ceil((leg2Max - leg2Min) / MAX_STEPS_PER_DIM));
 
     var best = null;
     for (var lMs = fromMs; lMs <= toMs; lMs += LAUNCH_STEP_DAYS * DAY_MS) {
       var earthPos = positionAt(earth, lMs, epoch);
-      for (var leg1 = leg1Min; leg1 <= leg1Max; leg1 += FLYBY_STEP_DAYS) {
+      for (var leg1 = leg1Min; leg1 <= leg1Max; leg1 += leg1Step) {
         var fMs = lMs + leg1 * DAY_MS;
         var flybyPos = positionAt(flyby, fMs, epoch);
         var lam1 = lambert(earthPos.r, flybyPos.r, leg1 / YEAR_DAYS, true);
         if (!lam1) continue;
         var vInfLaunch = vmag(vsub(lam1.v1, earthPos.v));
-        for (var leg2 = leg2Min; leg2 <= leg2Max; leg2 += FLYBY_STEP_DAYS) {
+        for (var leg2 = leg2Min; leg2 <= leg2Max; leg2 += leg2Step) {
           var aMs = fMs + leg2 * DAY_MS;
           var targetPos = positionAt(target, aMs, epoch);
           var lam2 = lambert(flybyPos.r, targetPos.r, leg2 / YEAR_DAYS, true);
@@ -421,12 +426,29 @@
     container.innerHTML = html;
   }
 
+  // Wire up the "Calculate suggestions" button — explicit opt-in only,
+  // because even with the step-cap a long route is a noticeable freeze.
+  function bindSuggestionsButton() {
+    var btn = document.getElementById('ga-suggest-btn');
+    var container = document.getElementById('ga-suggestions');
+    if (!btn || !container) return;
+    btn.addEventListener('click', function () {
+      btn.disabled = true;
+      btn.textContent = 'Calculating…';
+      container.innerHTML = '<em>Searching trajectories — this may take 10–20 seconds for outer-planet routes.</em>';
+      // Defer one frame so the disabled state paints before we block.
+      setTimeout(function () {
+        renderSuggestions();
+        btn.disabled = false;
+        btn.textContent = 'Recalculate';
+      }, 50);
+    });
+  }
+
   if (typeof document !== 'undefined') {
     document.addEventListener('DOMContentLoaded', function () {
       bindDom();
-      // Defer the suggestion compute until the browser has painted the rest
-      // of the page — keeps initial load snappy.
-      setTimeout(renderSuggestions, 50);
+      bindSuggestionsButton();
     });
   }
 

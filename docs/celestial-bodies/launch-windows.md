@@ -23,6 +23,7 @@ The start date defaults to **2020-01-01**, the game's campaign start year.
 <label>From: <input id="calc-from" list="calc-bodies" autocomplete="off" placeholder="Body name…" value="Earth"></label>
 <label>To: <input id="calc-to" list="calc-bodies" autocomplete="off" placeholder="Body name…" value="Mars"></label>
 <label>Start date: <input type="date" id="calc-date" value="2020-01-01"></label>
+<button id="calc-submit" type="button">Calculate</button>
 <datalist id="calc-bodies"></datalist>
 <div id="calc-result"></div>
 </div>
@@ -182,7 +183,8 @@ These are well-known flyby routes the calculator picks out as advantageous
 versus a direct transfer in the same launch window.  Computed on page load —
 expect a second or two for the table to populate.
 
-<div id="ga-suggestions"><em>Calculating suggested trajectories…</em></div>
+<button id="ga-suggest-btn" type="button">Calculate suggestions</button>
+<div id="ga-suggestions"><em>Click the button to compute — this runs entirely in your browser and may take 10–20 seconds for outer-planet routes.</em></div>
 
 ### Custom trajectory
 

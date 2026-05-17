@@ -54,12 +54,13 @@ struct Research {
     branch: String,           // researchType.name (Engineering / Physics / Biotech)
     subbranch: String,        // researchSubType.name with SubBranch_ stripped
     prereqs: Vec<String>,     // ids of required research
-    action: String,           // UnlockFacility / UnlockSpacecraftType / UnlockVehicleType / UnlockBonus / None
-    unlock_target: Option<String>,    // for non-bonus actions: the build_xxx / spacecraft_xxx / lv_xxx id
+    action: String,           // UnlockFacility / UnlockSpacecraftType / UnlockVehicleType / UnlockBonus / UnlockContract / None
+    unlock_target: Option<String>,    // for non-bonus actions: the build_xxx / spacecraft_xxx / lv_xxx / contract_xxx id
     bonus_kind: Option<String>,       // for UnlockBonus: e.g. "ComponentExhaustV"
     bonus_amount: f64,
     bonus_components: Vec<String>,    // e.g. ["eng_chem"]
     show_in_tree: bool,
+    contract_unlocks: Vec<String>,    // every contract id this research unlocks (from unlockData + unlockDataList)
 }
 
 #[derive(Serialize, Debug, Default, PartialEq)]
@@ -249,7 +250,7 @@ fn parse_research(v: &Value) -> Option<Research> {
         .unwrap_or("");
 
     let unlock_target = match action.as_str() {
-        "UnlockFacility" | "UnlockSpacecraftType" | "UnlockVehicleType" => {
+        "UnlockFacility" | "UnlockSpacecraftType" | "UnlockVehicleType" | "UnlockContract" => {
             if parameter1.is_empty() { None } else { Some(parameter1.to_string()) }
         }
         _ => None,
@@ -279,6 +280,34 @@ fn parse_research(v: &Value) -> Option<Research> {
         .and_then(|x| x.as_bool())
         .unwrap_or(true);
 
+    // Collect every contract this research unlocks — from the primary `unlockData`
+    // entry and from any `unlockDataList[]` entries.  A research item can carry
+    // multiple unlock actions (e.g. unlock a facility AND unlock a contract that
+    // depends on that facility); we want all of them so contract depth can chain
+    // through research.
+    let mut contract_unlocks: Vec<String> = Vec::new();
+    if action == "UnlockContract" && !parameter1.is_empty() {
+        contract_unlocks.push(parameter1.to_string());
+    }
+    if let Some(list) = v.get("unlockDataList").and_then(|x| x.as_array()) {
+        for entry in list {
+            let act = entry
+                .get("actionUnlock")
+                .and_then(|x| x.as_str())
+                .unwrap_or("");
+            if act != "UnlockContract" {
+                continue;
+            }
+            if let Some(p1) = entry
+                .get("parameter1")
+                .and_then(|x| x.as_str())
+                .filter(|s| !s.is_empty())
+            {
+                contract_unlocks.push(p1.to_string());
+            }
+        }
+    }
+
     Some(Research {
         id,
         work_hours: lookup_f64(v, &["workHourToComplete"]).unwrap_or(0.0),
@@ -291,6 +320,7 @@ fn parse_research(v: &Value) -> Option<Research> {
         bonus_amount,
         bonus_components,
         show_in_tree,
+        contract_unlocks,
     })
 }
 
