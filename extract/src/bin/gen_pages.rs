@@ -1681,6 +1681,221 @@ types exist:\n\n\
     )
 }
 
+/// Truncate `s` to at most `max_chars` characters, ending at a word boundary
+/// and balancing a stray closing `"` if one would be left dangling.
+fn truncate_premise(s: &str, max_chars: usize) -> String {
+    if s.chars().count() <= max_chars {
+        return s.to_string();
+    }
+    let cut = s
+        .char_indices()
+        .nth(max_chars)
+        .map(|(i, _)| i)
+        .unwrap_or(s.len());
+    let mut head = &s[..cut];
+    if let Some(sp) = head.rfind(|c: char| c.is_whitespace()) {
+        head = &head[..sp];
+    }
+    let mut head_owned: String = head.trim_end().to_string();
+    while let Some(c) = head_owned.chars().last() {
+        if matches!(c, ',' | ';' | ':' | '-' | '—') {
+            head_owned.pop();
+            head_owned.truncate(head_owned.trim_end().len());
+        } else {
+            break;
+        }
+    }
+    if head_owned.chars().filter(|c| *c == '"').count() % 2 == 1 {
+        if let Some(idx) = head_owned.rfind('"') {
+            head_owned.truncate(idx);
+            head_owned.truncate(head_owned.trim_end().len());
+            while let Some(c) = head_owned.chars().last() {
+                if matches!(c, ',' | ';' | ':' | '-' | '—') {
+                    head_owned.pop();
+                    head_owned.truncate(head_owned.trim_end().len());
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+    format!("{}…", head_owned)
+}
+
+/// Resolve a contract-objective `target` id to a human-readable label.
+fn resolve_objective_target(
+    target: &str,
+    fac_name: &BTreeMap<&str, &str>,
+    resource_name: &BTreeMap<&str, &str>,
+    sc_name: &BTreeMap<&str, &str>,
+    lv_name: &BTreeMap<&str, &str>,
+    research_name: &BTreeMap<&str, &str>,
+) -> String {
+    if let Some(rest) = target.strip_prefix("build_") {
+        return smart_title_case(fac_name.get(rest).copied().unwrap_or(rest));
+    }
+    if let Some(rest) = target.strip_prefix("id_resource_") {
+        return resource_name.get(rest).copied().unwrap_or(rest).to_string();
+    }
+    if let Some(rest) = target.strip_prefix("module_") {
+        // Force title-case here — `smart_title_case` is a no-op on strings that
+        // already contain lowercase letters.
+        return title_case_words(&rest.replace('_', " "));
+    }
+    if target.starts_with("research_") {
+        if let Some(nm) = research_name.get(target).copied() {
+            return nm.to_string();
+        }
+        return smart_title_case(&target.trim_start_matches("research_").replace('_', " "));
+    }
+    // `Spacecraft<N><CodeName>` — sirenix-only objective targets that don't
+    // appear in the locale spacecraft list.  Try `research_sc_<lower>` first.
+    if let Some(rest) = target.strip_prefix("Spacecraft") {
+        let codename: String = rest.chars().skip_while(|c| c.is_ascii_digit()).collect();
+        if !codename.is_empty() {
+            let key = format!("research_sc_{}", codename.to_lowercase());
+            if let Some(nm) = research_name.get(key.as_str()).copied() {
+                return nm.to_string();
+            }
+            return codename;
+        }
+    }
+    if let Some(nm) = sc_name.get(target).copied() {
+        return nm.to_string();
+    }
+    if let Some(nm) = lv_name.get(target).copied() {
+        return nm.to_string();
+    }
+    // Launch-vehicle id that didn't match locale (e.g. `lv_chem_superlarge`):
+    // produce a humanized label rather than leaking the raw id.
+    if let Some(rest) = target.strip_prefix("lv_") {
+        let class = if rest.starts_with("chem") {
+            "Chemical"
+        } else if rest.starts_with("nuke") {
+            "Nuclear"
+        } else {
+            ""
+        };
+        let pretty: Vec<String> = rest
+            .split('_')
+            .filter(|p| !p.is_empty() && *p != "chem" && *p != "nuke")
+            .map(|p| {
+                let mut chars = p.chars();
+                match chars.next() {
+                    None => String::new(),
+                    Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+                }
+            })
+            .collect();
+        let modifier = pretty.join(" ");
+        return if class.is_empty() && modifier.is_empty() {
+            "Launch Vehicle".into()
+        } else if class.is_empty() {
+            format!("{modifier} Launch Vehicle")
+        } else if modifier.is_empty() {
+            format!("{class} Launch Vehicle")
+        } else {
+            format!("{class} Launch Vehicle ({modifier})")
+        };
+    }
+    smart_title_case(&target.replace('_', " "))
+}
+
+/// Format a single contract objective into a Requirements-column bullet.
+fn format_objective(
+    o: &ContractObjectiveStat,
+    fac_name: &BTreeMap<&str, &str>,
+    resource_name: &BTreeMap<&str, &str>,
+    sc_name: &BTreeMap<&str, &str>,
+    lv_name: &BTreeMap<&str, &str>,
+    research_name: &BTreeMap<&str, &str>,
+) -> String {
+    let target = o.target.as_deref().map(|t| {
+        resolve_objective_target(t, fac_name, resource_name, sc_name, lv_name, research_name)
+    });
+    // Some objective kinds carry quantity 0 in the source data (the engine
+    // treats "any amount" as 0).  Normalize to at least 1 so the rendered
+    // table doesn't show nonsensical "Build 0× X" / "Have 0× Y" lines.
+    let qty = if o.quantity <= 0.0 { 1.0 } else { o.quantity };
+    match (o.kind.as_str(), target.as_deref()) {
+        ("BuildFacility", Some(t)) => format!("Build {}× {}", fmt_amount(qty), t),
+        ("Possession", Some(t)) => format!("Have {}× {}", fmt_amount(qty), t),
+        // Fleet Expansion: "Possess 10" with no target means 10 spacecraft.
+        ("Possession", None) => format!("Have {}× Spacecraft", fmt_amount(qty)),
+        ("MarketsOffers", Some(t)) | ("MarketPlaceOffers", Some(t)) => {
+            format!("Market trade {}× {}", fmt_amount(qty), t)
+        }
+        ("ChangeHabitabilityParameters", _) => "Adjust habitability parameter".into(),
+        ("ChangeDepositParameters", Some(t)) | ("ChangeDeposit", Some(t)) => {
+            format!("Survey {} deposit", t)
+        }
+        ("Exploration", _) | ("ExplorationObject", _) => "Explore".into(),
+        ("ExplorationInterstellar", _) => "Explore interstellar".into(),
+        ("MakeResearch", Some(t)) => format!("Research: {}", t),
+        ("MakeResearch", None) => "Research".into(),
+        ("CreateSpaceCraft", Some(t)) => format!("Build spacecraft: {}", t),
+        ("CreateSpaceCraft", None) => "Build spacecraft".into(),
+        ("CreateVehicle", Some(t)) => format!("Build launch vehicle: {}", t),
+        ("CreateVehicle", None) => "Build launch vehicle".into(),
+        ("Deliver", Some(t)) => format!("Deliver {}× {}", fmt_amount(qty), t),
+        ("Deliver", None) => "Deliver".into(),
+        ("DetonateNuclearDevice", _) => "Detonate nuclear device".into(),
+        ("MakeEnergyProduction", _) => "Establish energy production".into(),
+        ("ScheduleFly", _) => "Schedule a flight".into(),
+        ("ScheduleFlyGravityAssist", _) => "Schedule a gravity-assist flight".into(),
+        ("ScheduleCyclicalMission", _) => "Schedule a cyclical mission".into(),
+        ("SelectLayer", _) => "Select layer".into(),
+        (kind, Some(t)) => format!("{}: {}× {}", humanize_kind(kind), fmt_amount(qty), t),
+        (kind, None) => humanize_kind(kind),
+    }
+}
+
+/// Convert an objective kind like `"MakeResearch"` into `"Make research"`.
+fn humanize_kind(kind: &str) -> String {
+    let mut out = String::with_capacity(kind.len() + 4);
+    for (i, c) in kind.char_indices() {
+        if i > 0 && c.is_uppercase() {
+            out.push(' ');
+            for l in c.to_lowercase() {
+                out.push(l);
+            }
+        } else if i == 0 {
+            for u in c.to_uppercase() {
+                out.push(u);
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Title-case every word in `s` regardless of its existing case.  Unlike
+/// `smart_title_case`, this always applies — used for ids like
+/// `module_crew_compartment` that arrive lowercase and need real Title Case.
+fn title_case_words(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut at_word_start = true;
+    for c in s.chars() {
+        if c.is_alphabetic() {
+            if at_word_start {
+                for u in c.to_uppercase() {
+                    out.push(u);
+                }
+                at_word_start = false;
+            } else {
+                for l in c.to_lowercase() {
+                    out.push(l);
+                }
+            }
+        } else {
+            out.push(c);
+            at_word_start = c.is_whitespace() || c == '/' || c == '-' || c == '(';
+        }
+    }
+    out
+}
+
 fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
     let contract_name: BTreeMap<&str, &str> = locale
         .contracts
@@ -1709,6 +1924,11 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
         .collect();
     let resource_name: BTreeMap<&str, &str> = locale
         .resources
+        .iter()
+        .map(|r| (r.id.as_str(), r.name.as_str()))
+        .collect();
+    let research_name: BTreeMap<&str, &str> = locale
+        .research
         .iter()
         .map(|r| (r.id.as_str(), r.name.as_str()))
         .collect();
@@ -1874,48 +2094,20 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
         .map(|c| {
             let display = contract_name.get(c.id.as_str()).copied().unwrap_or(c.id.as_str());
             let premise = contract_premise.get(c.id.as_str()).copied().unwrap_or("");
-            let premise = if premise.len() > 240 {
-                let cut = premise
-                    .char_indices()
-                    .nth(240)
-                    .map(|(i, _)| i)
-                    .unwrap_or(premise.len());
-                format!("{}…", &premise[..cut])
-            } else {
-                premise.to_string()
-            };
+            let premise = truncate_premise(premise, 240);
 
             // Objectives: dedupe identical lines (same kind + target + qty).
             let mut obj_bits: Vec<String> = Vec::new();
             let mut seen_obj: std::collections::BTreeSet<String> = Default::default();
             for o in &c.objectives {
-                let pretty_target = o.target.as_deref().map(|t| {
-                    if let Some(rest) = t.strip_prefix("build_") {
-                        smart_title_case(fac_name.get(rest).copied().unwrap_or(rest))
-                    } else if let Some(rest) = t.strip_prefix("id_resource_") {
-                        resource_name.get(rest).copied().unwrap_or(rest).to_string()
-                    } else if let Some(rest) = t.strip_prefix("module_") {
-                        smart_title_case(&rest.replace('_', " "))
-                    } else {
-                        sc_name
-                            .get(t)
-                            .copied()
-                            .or_else(|| lv_name.get(t).copied())
-                            .unwrap_or(t)
-                            .to_string()
-                    }
-                });
-                let line = match (o.kind.as_str(), pretty_target.as_deref()) {
-                    ("BuildFacility", Some(t)) => format!("Build {}× {}", fmt_amount(o.quantity), t),
-                    ("Possession", Some(t)) => format!("Have {}× {}", fmt_amount(o.quantity), t),
-                    ("Possession", None) => format!("Possess {}", fmt_amount(o.quantity)),
-                    ("MarketsOffers", Some(t)) => format!("Market trade {}× {}", fmt_amount(o.quantity), t),
-                    ("ChangeHabitabilityParameters", _) => "Adjust habitability parameter".into(),
-                    ("ChangeDepositParameters", Some(t)) => format!("Survey {} deposit", t),
-                    ("Exploration", _) => "Explore".into(),
-                    (kind, Some(t)) => format!("{}: {}× {}", kind, fmt_amount(o.quantity), t),
-                    (kind, None) => kind.into(),
-                };
+                let line = format_objective(
+                    o,
+                    &fac_name,
+                    &resource_name,
+                    &sc_name,
+                    &lv_name,
+                    &research_name,
+                );
                 if seen_obj.insert(line.clone()) {
                     obj_bits.push(line);
                 }
@@ -1967,17 +2159,30 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
             let name_cell = format!("{anchor}{name_body}");
 
             // Prereq column — which contracts must complete before this one
-            // is offered.  Built from the reverse-rewards lookup.
+            // is offered.  Built from the reverse-rewards lookup.  Filter the
+            // same way `entries` is filtered: drop tutorial/_test contracts
+            // and any source with an empty locale display name.
             let prereq_cell = match unlocked_by.get(c.id.as_str()) {
                 None => "—".to_string(),
-                Some(srcs) => srcs
-                    .iter()
-                    .map(|src| {
-                        let pretty = contract_name.get(src).copied().unwrap_or(src);
-                        link_same_page("contract", src, &escape_cell(pretty))
-                    })
-                    .collect::<Vec<_>>()
-                    .join("<br>"),
+                Some(srcs) => {
+                    let pretty_links: Vec<String> = srcs
+                        .iter()
+                        .filter(|src| !src.contains("_test"))
+                        .filter_map(|src| {
+                            let pretty = contract_name.get(src).copied().unwrap_or("");
+                            if pretty.is_empty() {
+                                None
+                            } else {
+                                Some(link_same_page("contract", src, &escape_cell(pretty)))
+                            }
+                        })
+                        .collect();
+                    if pretty_links.is_empty() {
+                        "—".to_string()
+                    } else {
+                        pretty_links.join("<br>")
+                    }
+                }
             };
 
             let order_cell = depth.get(c.id.as_str()).copied().unwrap_or(0).to_string();
@@ -2672,6 +2877,250 @@ mod tests {
         assert_eq!(ctx.body("Ceres").unwrap().name, "1 Ceres");
         // Comet: taxonomy id "Wild 2" → display "81P Wild " (trailing space) → trimmed match
         assert_eq!(ctx.body("Wild 2").unwrap().name, "81P Wild ");
+    }
+
+    // ---------- Audit fix #2: contracts page never leaks raw internal IDs ----------
+
+    fn contracts_fixture_locale() -> Locale {
+        Locale {
+            celestial_bodies: vec![],
+            spacecraft: vec![
+                NameDesc { id: "spacecraft_chem_small".into(), name: "Iris".into(), description: String::new() },
+                NameDesc { id: "spacecraft_chem_large".into(), name: "Stratos".into(), description: String::new() },
+                NameDesc { id: "spacecraft_electric_small".into(), name: "Hermes".into(), description: String::new() },
+            ],
+            launch_vehicles: vec![
+                NameDesc { id: "lv_chem_seadragon".into(), name: "Albatross".into(), description: String::new() },
+                NameDesc { id: "lv_chemadvanced".into(), name: "Condor".into(), description: String::new() },
+            ],
+            research: vec![
+                ResearchEntry { id: "research_sc_helios".into(), category: "sc".into(), name: "Stratos".into(), description: String::new() },
+                ResearchEntry { id: "research_sc_iris".into(), category: "sc".into(), name: "Iris".into(), description: String::new() },
+                ResearchEntry { id: "research_sc_hermes".into(), category: "sc".into(), name: "Hermes".into(), description: String::new() },
+            ],
+            corporations: vec![],
+            contracts: vec![
+                NameDesc {
+                    id: "contract_tutorial_moonlanding".into(),
+                    name: "Lunar Landing".into(),
+                    description: "It's time for a grand return to the moon.".into(),
+                },
+                NameDesc {
+                    // Carries the `_test` substring; mirrors production where the
+                    // locale name is empty for tutorial-test contracts.
+                    id: "contract_tutorial_moonlandingMultiModuleDeliverTest".into(),
+                    name: String::new(),
+                    description: String::new(),
+                },
+                NameDesc {
+                    id: "contract_mars_terraform_water".into(),
+                    name: "Blue Mars".into(),
+                    description: "Bringing enough water to Mars will make it possible for many organisms to thrive and help regulate temperature. Doing it will require a large-scale operation, but with enough persistence and good planning, we'll wipe the name Red Planet\" from books.\"".into(),
+                },
+                NameDesc {
+                    id: "contract_general_fleet".into(),
+                    name: "Fleet Expansion".into(),
+                    description: "We need more ships.".into(),
+                },
+                NameDesc {
+                    id: "contract_downstream".into(),
+                    name: "Downstream Contract".into(),
+                    description: "Downstream of the test contract.".into(),
+                },
+            ],
+            resources: vec![],
+            facilities: vec![],
+            habitability_scales: BTreeMap::new(),
+            cargo: vec![],
+        }
+    }
+
+    fn make_contract(id: &str, objectives: Vec<ContractObjectiveStat>, unlock_rewards: Vec<String>) -> ContractStat {
+        ContractStat {
+            id: id.into(),
+            is_locked: false,
+            is_final: false,
+            objectives,
+            money_reward: 0.0,
+            unlock_rewards,
+            facility_grants: vec![],
+            spacecraft_grants: vec![],
+            launch_vehicle_grants: vec![],
+            resource_grants: vec![],
+        }
+    }
+
+    fn obj(kind: &str, quantity: f64, target: Option<&str>) -> ContractObjectiveStat {
+        ContractObjectiveStat {
+            kind: kind.into(),
+            quantity,
+            target: target.map(|s| s.into()),
+        }
+    }
+
+    #[test]
+    fn make_research_renders_research_display_name_no_quantity() {
+        let locale = contracts_fixture_locale();
+        let sirenix = Sirenix {
+            contracts: vec![make_contract(
+                "contract_tutorial_moonlanding",
+                vec![obj("MakeResearch", 0.0, Some("research_sc_helios"))],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let page = page_contracts(&locale, &sirenix);
+        assert!(page.contains("Stratos"), "page should mention research display name:\n{page}");
+        assert!(!page.contains("research_sc_helios"), "raw research id leaked:\n{page}");
+        assert!(!page.contains("0×"), "zero-quantity leaked:\n{page}");
+        assert!(!page.contains("MakeResearch"), "raw kind leaked:\n{page}");
+    }
+
+    #[test]
+    fn create_spacecraft_renders_spacecraft_display_name() {
+        let locale = contracts_fixture_locale();
+        let sirenix = Sirenix {
+            contracts: vec![make_contract(
+                "contract_tutorial_moonlanding",
+                vec![obj("CreateSpaceCraft", 0.0, Some("Spacecraft3Helios"))],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let page = page_contracts(&locale, &sirenix);
+        assert!(
+            !page.contains("Spacecraft3Helios"),
+            "raw spacecraft objective id leaked:\n{page}"
+        );
+        assert!(!page.contains("0×"), "zero-quantity leaked:\n{page}");
+        assert!(
+            page.contains("Helios") || page.contains("Stratos"),
+            "spacecraft display name missing:\n{page}"
+        );
+    }
+
+    #[test]
+    fn create_vehicle_renders_launch_vehicle_display_name() {
+        let locale = contracts_fixture_locale();
+        let sirenix = Sirenix {
+            contracts: vec![make_contract(
+                "contract_tutorial_moonlanding",
+                vec![obj("CreateVehicle", 0.0, Some("lv_chem_superlarge"))],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let page = page_contracts(&locale, &sirenix);
+        assert!(
+            !page.contains("lv_chem_superlarge"),
+            "raw lv objective id leaked:\n{page}"
+        );
+        assert!(!page.contains("0×"), "zero-quantity leaked:\n{page}");
+        assert!(
+            page.contains("Launch Vehicle") || page.contains("Chemical") || page.contains("Albatross"),
+            "no launch-vehicle display name:\n{page}"
+        );
+    }
+
+    #[test]
+    fn prereq_column_omits_or_renames_test_contracts() {
+        let locale = contracts_fixture_locale();
+        let sirenix = Sirenix {
+            contracts: vec![
+                make_contract(
+                    "contract_tutorial_moonlandingMultiModuleDeliverTest",
+                    vec![],
+                    vec!["contract_downstream".into()],
+                ),
+                make_contract("contract_downstream", vec![], vec![]),
+            ],
+            ..Default::default()
+        };
+        let page = page_contracts(&locale, &sirenix);
+        assert!(
+            !page.contains("moonlandingMultiModuleDeliverTest"),
+            "raw _test id leaked into prereq column:\n{page}"
+        );
+        let row = page
+            .lines()
+            .find(|l| l.contains("Downstream Contract"))
+            .expect("Downstream Contract row present");
+        assert!(
+            !row.contains("[](#"),
+            "empty-name prereq link leaked: {row}"
+        );
+    }
+
+    #[test]
+    fn premise_truncation_does_not_end_mid_quoted_string() {
+        let locale = contracts_fixture_locale();
+        let sirenix = Sirenix {
+            contracts: vec![make_contract("contract_mars_terraform_water", vec![], vec![])],
+            ..Default::default()
+        };
+        let page = page_contracts(&locale, &sirenix);
+        assert!(
+            !page.contains("Red Planet\" fr"),
+            "premise truncates mid-word after stray closing quote:\n{page}"
+        );
+        let row = page
+            .lines()
+            .find(|l| l.contains("Blue Mars"))
+            .expect("Blue Mars row present");
+        let quote_count = row.chars().filter(|c| *c == '"').count();
+        assert_eq!(
+            quote_count % 2,
+            0,
+            "row has unbalanced quotes: {row}"
+        );
+    }
+
+    #[test]
+    fn possession_with_no_target_renders_spacecraft_label() {
+        let locale = contracts_fixture_locale();
+        let sirenix = Sirenix {
+            contracts: vec![make_contract(
+                "contract_general_fleet",
+                vec![obj("Possession", 10.0, None)],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let page = page_contracts(&locale, &sirenix);
+        let row = page
+            .lines()
+            .find(|l| l.contains("Fleet Expansion"))
+            .expect("Fleet Expansion row present");
+        assert!(
+            row.contains("Spacecraft"),
+            "Possess-without-target should label as Spacecraft: {row}"
+        );
+    }
+
+    #[test]
+    fn deliver_module_target_renders_friendly_label() {
+        let locale = contracts_fixture_locale();
+        let sirenix = Sirenix {
+            contracts: vec![make_contract(
+                "contract_tutorial_moonlanding",
+                vec![obj("Deliver", 1.0, Some("module_crew_compartment"))],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let page = page_contracts(&locale, &sirenix);
+        assert!(
+            page.contains("Crew Compartment"),
+            "module target should render Title Case:\n{page}"
+        );
+        let row = page
+            .lines()
+            .find(|l| l.contains("Lunar Landing"))
+            .expect("row present");
+        assert!(
+            !row.contains("× crew compartment"),
+            "raw lowercased module target leaked: {row}"
+        );
     }
 }
 
