@@ -3089,19 +3089,22 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
         {
             continue;
         }
-        // Split by where the facility can be placed.  Surface-only → ground
-        // table; orbit-only → orbital table; "Surface, Orbit" facilities
-        // (habitats etc.) go in the ground table only, with a small "(also
-        // orbital)" marker on the name cell — duplicate rows confuse readers.
+        // Split by where the facility can be placed.  Surface → ground table,
+        // Orbit → orbital table.  A facility with BOTH ("Surface, Orbit") is
+        // emitted in BOTH tables — player wants to see it in whichever
+        // context they're scanning.  The anchor uniqueness was handled
+        // upstream by emitting `<a id="...">` only on the first occurrence.
         let p = f.placement.as_str();
         let surface_ok = p.contains("Surface") || p.contains("SurfaceAndAsteroid");
         let orbit_ok = p.contains("Orbit");
         if surface_ok {
             ground.push(f);
-        } else if orbit_ok {
+        }
+        if orbit_ok {
             orbital.push(f);
-        } else {
-            // Placement empty / unknown — show on ground as default rather than drop.
+        }
+        if !surface_ok && !orbit_ok {
+            // Placement empty / unknown — default to ground rather than drop.
             ground.push(f);
         }
     }
@@ -3118,7 +3121,14 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
      -> Vec<String> {
         let id_no_prefix = f.id.strip_prefix("build_").unwrap_or(&f.id);
         let raw_display = facility_name.get(id_no_prefix).copied().unwrap_or(id_no_prefix);
-        let display = smart_title_case(raw_display);
+        let mut display = smart_title_case(raw_display);
+        // Disambiguate tier variants whose locale display name collides with
+        // the small variant — `icemine` and `icemine_big` both resolve to
+        // "Water Ice Extractor" (same for metalmine / metalmine_big etc.).
+        // Append "(Large)" so the player can tell the two rows apart.
+        if id_no_prefix.ends_with("_big") || id_no_prefix.ends_with("-big") {
+            display.push_str(" (Large)");
+        }
         // Prefer the reverse-lookup (which research unlocks this facility?) over
         // the facility's own `lockByHelpNotUse` field — the former is set for
         // every researched facility, the latter only for a few.
@@ -3148,19 +3158,10 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
             "—".to_string()
         };
         let desc = facility_desc.get(id_no_prefix).copied().unwrap_or("");
-        // Tag Surface-and-Orbit facilities so the player knows the row in the
-        // Ground table also covers orbital placement (avoids the previous
-        // duplicate-row rendering in both sections).
-        let placement_marker = if f.placement.contains("Surface") && f.placement.contains("Orbit") {
-            "<br><sub>(also orbital)</sub>"
-        } else {
-            ""
-        };
         let name_cell = format!(
-            "{anchor}**{name}**{marker}",
+            "{anchor}**{name}**",
             anchor = anchor_tag("facility", id_no_prefix),
             name = escape_cell(&display),
-            marker = placement_marker,
         );
         let time = if f.build_time_days > 0.0 {
             fmt_amount(f.build_time_days)
