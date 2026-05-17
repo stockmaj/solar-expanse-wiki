@@ -155,12 +155,9 @@ struct FacilityStat {
     workers_required: i64,
     energy_consumption: f64,
     research_prereq: Option<String>,
-    #[allow(dead_code)]
     is_obsolete: bool,
-    #[allow(dead_code)]
-    can_be_scrapped: bool,
-    #[allow(dead_code)]
-    can_be_turned_off: bool,
+    // Note: `can_be_scrapped` and `can_be_turned_off` exist in the source dump
+    // but are not rendered on the wiki — serde silently drops them.
 }
 
 #[derive(Deserialize, Clone)]
@@ -2050,6 +2047,47 @@ fn smart_title_case(s: &str) -> String {
     out
 }
 
+/// Map a `*_deposition` (Release Station) facility id to the resource id it
+/// releases.  The deposition prefix matches the resource id directly for most
+/// resources; `carbon` is the lone exception (resource id is `volatile`).
+fn release_station_resource_id(facility_id: &str) -> Option<&'static str> {
+    let prefix = facility_id.strip_suffix("_deposition")?;
+    match prefix {
+        "carbon" => Some("volatile"),
+        "co2" => Some("co2"),
+        "hel3" => Some("hel3"),
+        "hydrogen" => Some("hydrogen"),
+        "metal" => Some("metal"),
+        "nitrogen" => Some("nitrogen"),
+        "noblegas" => Some("noblegas"),
+        "oxygen" => Some("oxygen"),
+        "raremetal" => Some("raremetal"),
+        "silicon" => Some("silicon"),
+        "uran" => Some("uran"),
+        _ => None,
+    }
+}
+
+/// Fill in `{0}`-style format slots in a facility's locale description.  The
+/// game-side locale strings carry C#-style placeholders (e.g. Release Stations:
+/// "Releases {0} to the surface").  Without substitution they leak through to
+/// the wiki — this resolves the known cases.
+fn substitute_facility_desc(
+    facility_id: &str,
+    desc: &str,
+    resource_name: &BTreeMap<&str, &str>,
+) -> String {
+    if !desc.contains("{0}") {
+        return desc.to_string();
+    }
+    if let Some(res_id) = release_station_resource_id(facility_id) {
+        if let Some(name) = resource_name.get(res_id) {
+            return desc.replace("{0}", name);
+        }
+    }
+    desc.to_string()
+}
+
 fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
     let facility_name: BTreeMap<&str, &str> = locale
         .facilities
@@ -2134,11 +2172,23 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
     let row_for = |f: &FacilityStat,
                    facility_name: &BTreeMap<&str, &str>,
                    research_name: &BTreeMap<&str, &str>,
-                   resource_name: &BTreeMap<&str, &str>|
+                   resource_name: &BTreeMap<&str, &str>,
+                   with_anchor: bool|
      -> Vec<String> {
         let id_no_prefix = f.id.strip_prefix("build_").unwrap_or(&f.id);
         let raw_display = facility_name.get(id_no_prefix).copied().unwrap_or(id_no_prefix);
-        let display = smart_title_case(raw_display);
+        // Append a tier suffix for the "big" variant so its row is distinct
+        // from the regular variant.  In the locale data, "carbonmine" and
+        // "carbonmine_big" carry identical names ("CARBON MINE"); without a
+        // suffix the wiki shows two identical rows.
+        let display = {
+            let titled = smart_title_case(raw_display);
+            if id_no_prefix.ends_with("_big") || id_no_prefix.ends_with("-big") {
+                format!("{titled} (Large)")
+            } else {
+                titled
+            }
+        };
         // Prefer the reverse-lookup (which research unlocks this facility?) over
         // the facility's own `lockByHelpNotUse` field — the former is set for
         // every researched facility, the latter only for a few.
@@ -2167,12 +2217,17 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
         } else {
             "—".to_string()
         };
-        let desc = facility_desc.get(id_no_prefix).copied().unwrap_or("");
-        let name_cell = format!(
-            "{anchor}**{name}**",
-            anchor = anchor_tag("facility", id_no_prefix),
-            name = escape_cell(&display)
-        );
+        let raw_desc = facility_desc.get(id_no_prefix).copied().unwrap_or("");
+        let desc = substitute_facility_desc(id_no_prefix, raw_desc, resource_name);
+        let name_cell = if with_anchor {
+            format!(
+                "{anchor}**{name}**",
+                anchor = anchor_tag("facility", id_no_prefix),
+                name = escape_cell(&display)
+            )
+        } else {
+            format!("**{name}**", name = escape_cell(&display))
+        };
         vec![
             name_cell,
             f.facility_type.clone(),
@@ -2181,7 +2236,7 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
             energy,
             maint,
             prereq,
-            escape_cell(desc),
+            escape_cell(&desc),
         ]
     };
 
@@ -2196,13 +2251,31 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
         "Description",
     ];
 
+    // Track which facility ids already received their canonical anchor on the
+    // Ground table; the Orbital table reuses those rows (for "Surface, Orbit"
+    // facilities) but renders without an anchor so the page has at most one
+    // `<a id="facility-...">` per id.  Browsers only honor the first anchor
+    // anyway — a duplicate silently breaks inbound links to the second row.
+    let mut anchored_ids: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
     let ground_rows: Vec<Vec<String>> = ground
         .iter()
-        .map(|f| row_for(f, &facility_name, &research_name, &resource_name))
+        .map(|f| {
+            let id_no_prefix = f.id.strip_prefix("build_").unwrap_or(&f.id).to_string();
+            anchored_ids.insert(id_no_prefix);
+            row_for(f, &facility_name, &research_name, &resource_name, true)
+        })
         .collect();
     let orbital_rows: Vec<Vec<String>> = orbital
         .iter()
-        .map(|f| row_for(f, &facility_name, &research_name, &resource_name))
+        .map(|f| {
+            let id_no_prefix = f.id.strip_prefix("build_").unwrap_or(&f.id);
+            let with_anchor = !anchored_ids.contains(id_no_prefix);
+            if with_anchor {
+                anchored_ids.insert(id_no_prefix.to_string());
+            }
+            row_for(f, &facility_name, &research_name, &resource_name, with_anchor)
+        })
         .collect();
 
     let header_tips: [Option<&str>; 8] = [
@@ -2672,6 +2745,168 @@ mod tests {
         assert_eq!(ctx.body("Ceres").unwrap().name, "1 Ceres");
         // Comet: taxonomy id "Wild 2" → display "81P Wild " (trailing space) → trimmed match
         assert_eq!(ctx.body("Wild 2").unwrap().name, "81P Wild ");
+    }
+
+    // ---------- Audit fix #4: facility page anchor/desc/tier bugs ----------
+
+    fn facility_stat(id: &str, placement: &str, ftype: &str) -> FacilityStat {
+        FacilityStat {
+            id: id.into(),
+            descriptor: "Ground".into(),
+            placement: placement.into(),
+            facility_type: ftype.into(),
+            build_cost: vec![],
+            maintenance_per_day: 0.0,
+            workers_required: 0,
+            energy_consumption: 0.0,
+            research_prereq: None,
+            is_obsolete: false,
+        }
+    }
+
+    fn facility_locale_entry(id: &str, name: &str, desc: &str) -> Facility {
+        Facility {
+            id: id.into(),
+            name: name.into(),
+            description: desc.into(),
+        }
+    }
+
+    fn facility_page_locale(
+        facilities: Vec<Facility>,
+        resources: Vec<ResourceEntry>,
+    ) -> Locale {
+        Locale {
+            celestial_bodies: vec![],
+            spacecraft: vec![],
+            launch_vehicles: vec![],
+            research: vec![],
+            corporations: vec![],
+            contracts: vec![],
+            resources,
+            facilities,
+            habitability_scales: BTreeMap::new(),
+            cargo: vec![],
+        }
+    }
+
+    fn facility_page_sirenix(facilities: Vec<FacilityStat>) -> Sirenix {
+        Sirenix {
+            facilities,
+            ..Default::default()
+        }
+    }
+
+    fn count_occurrences(haystack: &str, needle: &str) -> usize {
+        haystack.matches(needle).count()
+    }
+
+    #[test]
+    fn facility_with_both_placement_emits_anchor_only_once() {
+        // A habitation facility whose placement covers both surface and orbit
+        // (e.g. City Station) used to appear in BOTH the ground and orbital
+        // sections with the same <a id="facility-..."> anchor.  Browsers honor
+        // the first anchor only, silently breaking inbound links to the second
+        // row.  The anchor must be unique on the page.
+        let locale = facility_page_locale(
+            vec![facility_locale_entry(
+                "space_0gcity",
+                "CITY STATION",
+                "Vast, spinning ring.",
+            )],
+            vec![],
+        );
+        let sirenix = facility_page_sirenix(vec![facility_stat(
+            "build_space_0gcity",
+            "Surface, Orbit",
+            "Habitation",
+        )]);
+        let page = page_facilities(&locale, &sirenix);
+        assert_eq!(
+            count_occurrences(&page, "id=\"facility-space-0gcity\""),
+            1,
+            "anchor id=\"facility-space-0gcity\" should be unique on the page\n--- page ---\n{page}"
+        );
+        assert!(
+            page.contains("City Station"),
+            "City Station should still be listed on the page"
+        );
+    }
+
+    #[test]
+    fn release_station_description_substitutes_resource_name() {
+        // The locale string is literally "Releases {0} to the surface" — a
+        // C#-style format slot.  The wiki must substitute the released resource
+        // name, not emit the raw slot.
+        let locale = facility_page_locale(
+            vec![facility_locale_entry(
+                "carbon_deposition",
+                "Carbon Release Station",
+                "Releases {0} to the surface",
+            )],
+            vec![ResourceEntry {
+                id: "volatile".into(),
+                name: "Carbon".into(),
+            }],
+        );
+        let sirenix = facility_page_sirenix(vec![facility_stat(
+            "build_carbon_deposition",
+            "Surface",
+            "Mining",
+        )]);
+        let page = page_facilities(&locale, &sirenix);
+        assert!(
+            !page.contains("{0}"),
+            "rendered page must not contain the raw format slot\n--- page ---\n{page}"
+        );
+        assert!(
+            page.contains("Releases Carbon to the surface"),
+            "released-resource name should be substituted into the description\n--- page ---\n{page}"
+        );
+    }
+
+    #[test]
+    fn large_tier_facility_gets_distinct_display_name() {
+        // `carbonmine` and `carbonmine_big` share the same locale name
+        // ("CARBON MINE").  Two rows with identical names look like a rendering
+        // bug to a reader.  The "big" tier should carry a tier marker so each
+        // row is uniquely identifiable.
+        let locale = facility_page_locale(
+            vec![
+                facility_locale_entry("carbonmine", "CARBON MINE", "Extracts carbon."),
+                facility_locale_entry("carbonmine_big", "CARBON MINE", "Extracts carbon."),
+            ],
+            vec![],
+        );
+        let sirenix = facility_page_sirenix(vec![
+            facility_stat("build_carbonmine", "Surface", "Mining"),
+            facility_stat("build_carbonmine_big", "Surface", "Mining"),
+        ]);
+        let page = page_facilities(&locale, &sirenix);
+        let small_row = page
+            .lines()
+            .find(|l| l.contains("id=\"facility-carbonmine\""))
+            .expect("small variant row present");
+        let big_row = page
+            .lines()
+            .find(|l| l.contains("id=\"facility-carbonmine-big\""))
+            .expect("big variant row present");
+        let extract_name = |row: &str| -> String {
+            let start = row.find("**").expect("opening **") + 2;
+            let rest = &row[start..];
+            let end = rest.find("**").expect("closing **");
+            rest[..end].to_string()
+        };
+        let small_name = extract_name(small_row);
+        let big_name = extract_name(big_row);
+        assert_ne!(
+            small_name, big_name,
+            "small and large tier should not share the same display name (both = {small_name:?})"
+        );
+        assert!(
+            big_name.contains("Large") || big_name.contains("Big") || big_name.contains("II"),
+            "large-tier name should carry a tier marker; got {big_name:?}"
+        );
     }
 }
 
