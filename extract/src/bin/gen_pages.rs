@@ -918,12 +918,12 @@ lift them to space.\n\n",
                 "Mass (t)",
                 "Cargo (t)",
                 "Fuel (t)",
-                "Engine thrust",
+                "Thrust",
                 "Exhaust V",
                 "Reusable",
                 "Built at",
                 "Build cost",
-                "Build time (d)",
+                "Time (d)",
                 "Description",
             ],
             rows,
@@ -1044,13 +1044,13 @@ fn page_launch_vehicles(locale: &Locale, sirenix: &Sirenix) -> String {
     let table = md_table(
         &[
             "Launch Vehicle",
-            "Max Payload (t)",
+            "Payload (t)",
             "Reusable",
-            "Crew Rated",
+            "Crew",
             "Build cost",
-            "Build time (d)",
-            "Launch cost",
-            "Maintenance / day",
+            "Time (d)",
+            "Launch",
+            "Maint",
             "Description",
         ],
         &rows,
@@ -1206,8 +1206,8 @@ fn page_resources(locale: &Locale, sirenix: &Sirenix) -> String {
         &[
             "Resource",
             "Type",
-            "Base market price",
-            "Produced by",
+            "Price",
+            "Producers",
             "Description",
         ],
         &rows,
@@ -1446,6 +1446,17 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
         .map(|r| (r.id.as_str(), r.name.as_str()))
         .collect();
 
+    // Build a facility_id → research_id map by walking the research nodes that
+    // declare an UnlockFacility action.  The facility's own `lockByHelpNotUse`
+    // field is set only for a handful of facilities, but every researched
+    // facility has a corresponding research with parameter1 = build_<id>.
+    let facility_unlocked_by: BTreeMap<&str, &str> = sirenix
+        .research
+        .iter()
+        .filter(|r| r.action == "UnlockFacility")
+        .filter_map(|r| r.unlock_target.as_deref().map(|t| (t, r.id.as_str())))
+        .collect();
+
     let mut ground: Vec<&FacilityStat> = Vec::new();
     let mut orbital: Vec<&FacilityStat> = Vec::new();
     for f in &sirenix.facilities {
@@ -1457,6 +1468,12 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
         if f.facility_type == "FacilitySegment" {
             continue;
         }
+        // Spacecraft-payload modules (engine, crew, mining-rig, etc.) come in via
+        // SpaceModuleDescriptor.  Treat them as spacecraft payload, not facilities;
+        // skip them on the Facilities page.
+        if f.descriptor == "Orbital" {
+            continue;
+        }
         // Drop entries without a player-facing locale name; their data is incomplete.
         let id_no_prefix = f.id.strip_prefix("build_").unwrap_or(&f.id);
         if !locale
@@ -1466,9 +1483,19 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
         {
             continue;
         }
-        if f.descriptor == "Orbital" {
+        // Split by where the facility can be placed.  "Orbit" → orbital section;
+        // "Surface" → ground section; "Surface, Orbit" appears in both.
+        let p = f.placement.as_str();
+        let surface_ok = p.contains("Surface") || p.contains("SurfaceAndAsteroid");
+        let orbit_ok = p.contains("Orbit");
+        if surface_ok {
+            ground.push(f);
+        }
+        if orbit_ok {
             orbital.push(f);
-        } else {
+        }
+        if !surface_ok && !orbit_ok {
+            // Placement empty / unknown — show on ground as default rather than drop.
             ground.push(f);
         }
     }
@@ -1486,10 +1513,16 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
         let id_no_prefix = f.id.strip_prefix("build_").unwrap_or(&f.id);
         let raw_display = facility_name.get(id_no_prefix).copied().unwrap_or(id_no_prefix);
         let display = smart_title_case(raw_display);
-        let prereq = match &f.research_prereq {
-            Some(r) => research_name.get(r.as_str()).copied().unwrap_or(r.as_str()).to_string(),
-            None => "—".to_string(),
-        };
+        // Prefer the reverse-lookup (which research unlocks this facility?) over
+        // the facility's own `lockByHelpNotUse` field — the former is set for
+        // every researched facility, the latter only for a few.
+        let prereq_id = facility_unlocked_by
+            .get(f.id.as_str())
+            .copied()
+            .or_else(|| f.research_prereq.as_deref());
+        let prereq = prereq_id
+            .map(|r| research_name.get(r).copied().unwrap_or(r).to_string())
+            .unwrap_or_else(|| "—".to_string());
         let workers = if f.workers_required > 0 {
             f.workers_required.to_string()
         } else {
@@ -1523,9 +1556,9 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
         "Type",
         "Build cost",
         "Workers",
-        "Energy/day",
-        "Maintenance",
-        "Research prereq",
+        "Energy",
+        "Maint",
+        "Prereq",
         "Description",
     ];
 
@@ -1723,7 +1756,7 @@ Physics, Biotech), each subdivided into focused sub-branches.\n\n",
                 })
                 .collect();
             out.push_str(&md_table(
-                &["Research", "Cost (work hours)", "Prerequisites", "Unlocks", "Description"],
+                &["Research", "Cost (h)", "Prereqs", "Unlocks", "Description"],
                 &rows,
             ));
             out.push('\n');

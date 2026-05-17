@@ -10,13 +10,13 @@ Physics, Biotech), each subdivided into focused sub-branches.
 
 ### Agriculture
 
-| Research | Cost (work hours) | Prerequisites | Unlocks | Description |
+| Research | Cost (h) | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- |
 | **Agriculture** | 288k | — | — | The growth of food and plants outside of Earth presents new challenges to be solved. |
 
 ### Biotech
 
-| Research | Cost (work hours) | Prerequisites | Unlocks | Description |
+| Research | Cost (h) | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- |
 | **Biotech** | 288k | — | — | Application of organisms and biology in technological contexts |
 | **Space Farming** | 1.2M | Biotech | Builds **Hydroponic Farm** | Although small growth experiments have been conducted in 0g, there are still adaptations needed to allow large scale agriculture in extraterrestrial environments. Usage of appropriate aggregate medium, artificial lighting, radiation shielding, and local power sourcing could allow colonies to feed themselves. |
@@ -32,7 +32,7 @@ Physics, Biotech), each subdivided into focused sub-branches.
 
 ### Colonization
 
-| Research | Cost (work hours) | Prerequisites | Unlocks | Description |
+| Research | Cost (h) | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- |
 | **Planetary Habitats** | 1.2M | Life Support | Builds **Outpost** | Permanent solution for extraterrestrial bases. |
 | **Colony Construction** | 2.2M | — | — | With our experience in construction and habitation on other planets we can finally realize the dream of permanent colonies outside of Earth. |
@@ -44,7 +44,7 @@ Physics, Biotech), each subdivided into focused sub-branches.
 
 ### LifeSupport
 
-| Research | Cost (work hours) | Prerequisites | Unlocks | Description |
+| Research | Cost (h) | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- |
 | **Life Support** | 648k | — | — | It is essential to develop technologies that help sustain our astronauts in good health. |
 | **Crewed Flight** | 1.2M | Life Support | Builds **module_crew_compartment** | Safe orbital transport of small crews. |
@@ -61,13 +61,13 @@ Physics, Biotech), each subdivided into focused sub-branches.
 
 ### Spacecraft
 
-| Research | Cost (work hours) | Prerequisites | Unlocks | Description |
+| Research | Cost (h) | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- |
 | **Interstellar Travel** | 10.3M | Zeus<br>In-Orbit Production<br>Diamondoids | Builds **Interstellar Vehicle Assembly** | We shall lay down the foundations to construct a great craft that will bring us to other stars. |
 
 ### Terraforming
 
-| Research | Cost (work hours) | Prerequisites | Unlocks | Description |
+| Research | Cost (h) | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- |
 | **Terraforming** | 648k | — | — | Transformation of celestial objects into an Earth-like environment |
 | **Carbon Release** | 1.2M | Terraforming | Builds **Carbon Power Plant** | We can slowly raise the temperature and pressure of our environment by processing and releasing carbon dioxide from local minerals. |
@@ -82,7 +82,7 @@ Physics, Biotech), each subdivided into focused sub-branches.
 
 ### Chemical
 
-| Research | Cost (work hours) | Prerequisites | Unlocks | Description |
+| Research | Cost (h) | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- |
 | **Chemical Propulsion** | 288k | — | — | Powerful but inefficient, chemical engines powered the first rockets, and remain the main propulsion for launch vehicles. |
 | **Solid Propellant Rockets** | 1.2M | Chemical Propulsion | — | The simplest form of propulsion, a solid fuel is ignited and directed out of the exhaust to catch fire. While high in thrust and simple in design, the length of the burn cannot be controlled and the thruster will keep firing until out of fuel. |
@@ -94,19 +94,19 @@ Physics, Biotech), each subdivided into focused sub-branches.
 
 ### Colonization
 
-| Research | Cost (work hours) | Prerequisites | Unlocks | Description |
+| Research | Cost (h) | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- |
 | **Orbital Gas Extractor** | 5.5M | In-Orbit Production | Builds **Orbital Gas Extractor** | Orbital mining station for extracting gases from atmospheres, including gas giants. |
 
 ### Electromagnetism
 
-| Research | Cost (work hours) | Prerequisites | Unlocks | Description |
+| Research | Cost (h) | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- |
 | **Metamaterials** | 2.2M | — | +0 PowerProduction | Composite materials composed in a way that allows them to have properties not normally observed in naturally occurring elements. |
 
 ### LaunchFacility
 
-| Research | Cost (work hours) | Prerequisites | Unlocks | Description |
+| Research | Cost (h) | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- |
 | **Launch Facility** | 648k | — | — | Launch infrastructure that can substantially help with reaching orbit. |
 | **Launch Pad** | 1.2M | Launch Facility | Builds **Launch Pad** | Proper launch infrastructure can make our landings easier and safer. |
@@ -119,7 +119,7 @@ Physics, Biotech), each subdivided into focused sub-branches.
 
 ### LaunchVehicle
 
-| Research | Cost (work hours) | Prerequisites | Unlocks | Description |
+| Research | Cost (h) | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- |
 | **Launch Vehicles** | 648k | Chemical Propulsion | — | The primary solution for surface-to-orbit transport. |
 | **Aluminium-Ice Rockets** | 864k | Reusable Launch Vehicles | Launch Vehicle: **Al-Ice Rocket** | Microscopic particles of aluminium suspended in ice. Once ignited, the aluminium reacts with oxygen from the ice, creating heat, while the liberated hydrogen helps with burn efficiency. While not powerful or efficient enough for Earth, this type of rocket can easily be assembled on-site and does not require extensive cooling that typical cryogenic propellants need. |
@@ -137,7 +137,7 @@ Physics, Biotech), each subdivided into focused sub-branches.
 
 ### Material
 
-| Research | Cost (work hours) | Prerequisites | Unlocks | Description |
+| Research | Cost (h) | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- |
 | **Advanced Materials** | 144k | — | — | Advanced Material Science |
 | **Materials** | 648k | — | Builds **Alloy Smelting** | Material Science |
@@ -157,7 +157,7 @@ Physics, Biotech), each subdivided into focused sub-branches.
 
 ### Mining
 
-| Research | Cost (work hours) | Prerequisites | Unlocks | Description |
+| Research | Cost (h) | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- |
 | **Mining** | 648k | — | — | Extraction of resources from celestial objects |
 | **In-Situ Resource Utilization** | 1.2M | Mining | Builds **Metal Mining Base** | We cannot bring everything we need where we're going. We have to be ready to extract what's needed directly from the ground we step on. |
@@ -171,7 +171,7 @@ Physics, Biotech), each subdivided into focused sub-branches.
 
 ### Spacecraft
 
-| Research | Cost (work hours) | Prerequisites | Unlocks | Description |
+| Research | Cost (h) | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- |
 | **Advanced Spacecraft** | 72k | — | — | Dedicated space vehicles for travel between orbits. |
 | **Stratos** | 144k | Spacecraft | Spacecraft: **Stratos** | Powerful upper stage capable of independent operation in space, ideal workhorse for the moon and beyond. |
@@ -202,7 +202,7 @@ Physics, Biotech), each subdivided into focused sub-branches.
 
 ### Computing
 
-| Research | Cost (work hours) | Prerequisites | Unlocks | Description |
+| Research | Cost (h) | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- |
 | **Computing** | 648k | — | — | The study of computer science and construction of processing units. |
 | **Microprocessors** | 1.2M | Computing | — | Miniature processing units, freeing us of the need for enormous computer frames. |
@@ -218,7 +218,7 @@ Physics, Biotech), each subdivided into focused sub-branches.
 
 ### Electromagnetism
 
-| Research | Cost (work hours) | Prerequisites | Unlocks | Description |
+| Research | Cost (h) | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- |
 | **Electromagnetism** | 648k | — | — | The study of electricity and magnetism. |
 | **Phased-Arrays** | 864k | — | — | A set of radio antennas controlled by a computer, capable of being steered in a specific direction without moving the antenna itself. |
@@ -230,7 +230,7 @@ Physics, Biotech), each subdivided into focused sub-branches.
 
 ### Electroprop
 
-| Research | Cost (work hours) | Prerequisites | Unlocks | Description |
+| Research | Cost (h) | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- |
 | **Electric Propulsion** | 648k | — | — | Highly efficient but low in thrust, electric drives can handle great distances but are limited by their need for power. |
 | **Hall Thruster** | 1.2M | Electric Propulsion | +35 ComponentExhaustV on eng_electric, eng_electricmpd, eng_electrichermes | Ions are accelerated outside this thruster through the use of the Hall Current, giving it its name. |
@@ -242,7 +242,7 @@ Physics, Biotech), each subdivided into focused sub-branches.
 
 ### Exploration
 
-| Research | Cost (work hours) | Prerequisites | Unlocks | Description |
+| Research | Cost (h) | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- |
 | **Observation** | 648k | — | — | Astronomy, observation, and study of celestial objects |
 | **Improved Optics** | 1.2M | Observation | +30 ObservationSpeed | Improvements in the creation of large lenses can help us observe distant objects. |
@@ -252,7 +252,7 @@ Physics, Biotech), each subdivided into focused sub-branches.
 
 ### Fusion
 
-| Research | Cost (work hours) | Prerequisites | Unlocks | Description |
+| Research | Cost (h) | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- |
 | **Fusion Theory** | 3.0M | Nuclear Power<br>Superconducting Magnets | — | The use of nuclear fusion to generate power. |
 | **Magnetic Field Containment** | 4.1M | Fusion Theory | Builds **Fusion Reactor** | In our quest to achieve nuclear fusion, one of the greatest problems is containing hot fusion fuel plasma inside a magnetic field, at pressures great enough to allow ignition. |
@@ -265,7 +265,7 @@ Physics, Biotech), each subdivided into focused sub-branches.
 
 ### Nuclear
 
-| Research | Cost (work hours) | Prerequisites | Unlocks | Description |
+| Research | Cost (h) | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- |
 | **Nuclear Power** | 648k | — | Builds **Nuclear Reactor** | The use of nuclear fission to generate power. |
 | **High Temperature NTR** | 864k | — | — | We can increase the performance of our engines by keeping the fuel elements close to the melting point, increasing the power available for thrust. |
@@ -282,7 +282,7 @@ Physics, Biotech), each subdivided into focused sub-branches.
 
 ### Power
 
-| Research | Cost (work hours) | Prerequisites | Unlocks | Description |
+| Research | Cost (h) | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- |
 | **Power** | 648k | — | — | Provides electricity for planetary bases. |
 | **Geothermal Power Turbine** | 1.2M | Power | Builds **Geothermal Power** | Active planetary geology provides thermal gradients that can be utilized to generate power. |
