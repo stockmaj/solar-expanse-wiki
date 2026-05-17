@@ -1453,6 +1453,128 @@ fn page_launch_vehicles(locale: &Locale, sirenix: &Sirenix) -> String {
     let chem_table = md_table_with_tips(&headers, &tooltips, &chem_rows);
     let nuke_table = md_table_with_tips(&headers, &tooltips, &nuke_rows);
 
+    // Alternative-launch-methods table is generated from `sirenix.facilities`
+    // filtered to LaunchFacility so the rows stay in sync with the facilities
+    // page.  We duplicate the view here (rather than just linking) so the
+    // launch-vehicles page is self-contained for players comparing rockets
+    // against non-rocket lifters.
+    let facility_name: BTreeMap<&str, &str> = locale
+        .facilities
+        .iter()
+        .map(|f| (f.id.as_str(), f.name.as_str()))
+        .collect();
+    let facility_desc: BTreeMap<&str, &str> = locale
+        .facilities
+        .iter()
+        .map(|f| (f.id.as_str(), f.description.as_str()))
+        .collect();
+    let research_name: BTreeMap<&str, &str> = locale
+        .research
+        .iter()
+        .map(|r| (r.id.as_str(), r.name.as_str()))
+        .collect();
+    let facility_unlocked_by: BTreeMap<&str, &str> = sirenix
+        .research
+        .iter()
+        .filter(|r| r.action == "UnlockFacility")
+        .filter_map(|r| r.unlock_target.as_deref().map(|t| (t, r.id.as_str())))
+        .collect();
+
+    let mut alt_methods: Vec<&FacilityStat> = sirenix
+        .facilities
+        .iter()
+        .filter(|f| f.facility_type == "LaunchFacility")
+        .filter(|f| !f.is_obsolete)
+        .collect();
+    // Sort by total build-cost amount ascending so the cheapest pad leads.
+    let cost_total = |f: &&FacilityStat| -> f64 {
+        f.build_cost.iter().map(|c| c.amount).sum::<f64>()
+    };
+    alt_methods.sort_by(|a, b| {
+        cost_total(a)
+            .partial_cmp(&cost_total(b))
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.id.cmp(&b.id))
+    });
+
+    let alt_row = |f: &FacilityStat| -> Vec<String> {
+        let id_no_prefix = f.id.strip_prefix("build_").unwrap_or(&f.id);
+        let raw_display = facility_name.get(id_no_prefix).copied().unwrap_or(id_no_prefix);
+        let display = smart_title_case(raw_display);
+        let name_cell = format!(
+            "{anchor}**{link}**",
+            anchor = anchor_tag("lv-launch", id_no_prefix),
+            link = link_cross_page("facilities", "facility", id_no_prefix, &escape_cell(&display)),
+        );
+        let time = if f.build_time_days > 0.0 {
+            fmt_amount(f.build_time_days)
+        } else {
+            "—".to_string()
+        };
+        let workers = if f.workers_required > 0 {
+            f.workers_required.to_string()
+        } else {
+            "—".to_string()
+        };
+        let energy = if f.energy_consumption > 0.0 {
+            fmt_amount(f.energy_consumption)
+        } else {
+            "—".to_string()
+        };
+        let maint = if f.maintenance_per_day > 0.0 {
+            fmt_abbrev(f.maintenance_per_day)
+        } else {
+            "—".to_string()
+        };
+        let prereq_id = facility_unlocked_by
+            .get(f.id.as_str())
+            .copied()
+            .or_else(|| f.research_prereq.as_deref());
+        let prereq = prereq_id
+            .map(|r| {
+                let name = research_name.get(r).copied().unwrap_or(r).to_string();
+                link_cross_page("research", "research", r, &escape_cell(&name))
+            })
+            .unwrap_or_else(|| "—".to_string());
+        let desc = facility_desc.get(id_no_prefix).copied().unwrap_or("");
+        vec![
+            name_cell,
+            fmt_build_cost(&f.build_cost, &resource_name),
+            time,
+            workers,
+            energy,
+            maint,
+            fmt_launch_bonus(f.bonus_data.as_ref()),
+            prereq,
+            escape_cell(desc),
+        ]
+    };
+
+    let alt_headers = [
+        "Method",
+        "Build cost",
+        "Time",
+        "Workers",
+        "Energy",
+        "Maint",
+        "Launch bonus",
+        "Prereq",
+        "Description",
+    ];
+    let alt_tips: [Option<&str>; 9] = [
+        None,
+        Some("Resources required to construct"),
+        Some("Build time in days"),
+        Some("On-site population required for full output"),
+        Some("Energy consumed per day"),
+        Some("Daily maintenance cost"),
+        Some("Discount or capacity gain applied to launches that originate here"),
+        Some("Research that unlocks this facility"),
+        None,
+    ];
+    let alt_rows: Vec<Vec<String>> = alt_methods.iter().map(|f| alt_row(f)).collect();
+    let alt_table = md_table_with_tips(&alt_headers, &alt_tips, &alt_rows);
+
     format!(
         "# Launch Vehicles\n\n\
 Surface-to-orbit lifters. Every spacecraft that's built on a planet's surface\n\
@@ -1474,15 +1596,9 @@ Three propulsion families are unlocked across the tech tree:\n\n\
 - **Launch cost** is the cash fee paid every launch; **Maintenance** is the daily upkeep cost while idle on the pad.\n\n\
 ## Alternative launch methods\n\n\
 The game also models several non-rocket launch systems unlocked through\n\
-research and built as facilities at the launch site:\n\n\
-| Method | Notes |\n\
-| --- | --- |\n\
-| **Launch Pad** | Organized launch infrastructure, reduces launch cost. |\n\
-| **MagRails** | Long ramp built atop suitable terrain, outfitted with MagLev tracks. |\n\
-| **Mass Driver** | Set of superconducting electromagnetic accelerators able to launch payloads directly into orbit. |\n\
-| **Magnetic Catapult** | Larger mass driver capable of launching payloads on interplanetary trajectories by itself. |\n\
-| **Spin Launcher** | Launches payloads via extremely high rotary acceleration. |\n\
-| **Space Elevator** | Supermaterial cable from surface to geostationary orbit. |\n\n\
+research and built as facilities at the launch site. Each row links to the\n\
+matching entry on the [Facilities](../facilities/) page.\n\n\
+{alt_table}\n\
 ## See also\n\n\
 - [Spacecraft](../spacecraft/)\n\
 - [Research](../research/) — Launch Vehicles tech category\n"
@@ -4753,6 +4869,122 @@ mod tests {
         assert!(
             !row.contains("None"),
             "raw role enum leaked: {row}"
+        );
+    }
+
+    // ---------- Launch-vehicles page: alternative-launch-methods table ----------
+
+    /// Locale fixture used by the alternative-launch-methods tests.  Mirrors
+    /// `facility_fixture_locale` but adds a `launch_massdriver` row plus a
+    /// resource entry so `fmt_build_cost` can resolve a label.
+    fn alt_launch_fixture_locale() -> Locale {
+        let mut locale = facility_fixture_locale();
+        // Override the shared fixture's "Launchpad" with the real-game display
+        // name so the alt-launch tests can assert on it directly.
+        for f in &mut locale.facilities {
+            if f.id == "launch_pad" {
+                f.name = "Launch Pad".into();
+            }
+        }
+        locale.facilities.push(Facility {
+            id: "launch_massdriver".into(),
+            name: "Stationary Mass Driver".into(),
+            description: "Set of superconducting electromagnetic accelerators.".into(),
+        });
+        locale.resources.push(ResourceEntry {
+            id: "steel".into(),
+            name: "Steel".into(),
+        });
+        locale
+    }
+
+    #[test]
+    fn alternative_launch_methods_table_uses_facility_data() {
+        let locale = alt_launch_fixture_locale();
+        let mut pad = facility_stat("build_launch_pad", "LaunchFacility");
+        pad.build_cost = vec![ResourceCost { resource_id: "steel".into(), amount: 1500.0 }];
+        pad.build_time_days = 40.0;
+        pad.bonus_data = Some(("LaunchCost".into(), 10.0));
+        let mut md = facility_stat("build_launch_massdriver", "LaunchFacility");
+        md.build_cost = vec![ResourceCost { resource_id: "steel".into(), amount: 75_000.0 }];
+        md.build_time_days = 365.0;
+        md.bonus_data = Some(("LaunchCost".into(), 90.0));
+        let sirenix = Sirenix {
+            facilities: vec![pad, md],
+            ..Default::default()
+        };
+        let page = page_launch_vehicles(&locale, &sirenix);
+        let alt = page
+            .split("## Alternative launch methods")
+            .nth(1)
+            .expect("Alternative launch methods section present");
+        // The hand-coded prose ("Long ramp built atop suitable terrain") must
+        // be gone — the section now comes from data.
+        assert!(
+            !alt.contains("Long ramp built atop suitable terrain"),
+            "hand-coded prose still present: {alt}"
+        );
+        // Each fixture facility should have a row whose Build cost cell shows
+        // the real fixture amount (1.5k / 75k), not "—".
+        let pad_row = alt
+            .lines()
+            .find(|l| l.contains("[Launch Pad]"))
+            .unwrap_or_else(|| panic!("Launch Pad row present:\n{alt}"));
+        assert!(
+            pad_row.contains("1.5k"),
+            "Launch Pad row should show build cost 1.5k steel: {pad_row}"
+        );
+        let md_row = alt
+            .lines()
+            .find(|l| l.contains("[Stationary Mass Driver]"))
+            .unwrap_or_else(|| panic!("Mass Driver row present:\n{alt}"));
+        assert!(
+            md_row.contains("75k"),
+            "Mass Driver row should show build cost 75k steel: {md_row}"
+        );
+    }
+
+    #[test]
+    fn alternative_launch_methods_omits_non_launch_facilities() {
+        let locale = alt_launch_fixture_locale();
+        let pad = facility_stat("build_launch_pad", "LaunchFacility");
+        let hab = facility_stat("build_habitat", "Habitation");
+        let sirenix = Sirenix {
+            facilities: vec![pad, hab],
+            ..Default::default()
+        };
+        let page = page_launch_vehicles(&locale, &sirenix);
+        let alt = page
+            .split("## Alternative launch methods")
+            .nth(1)
+            .expect("Alternative launch methods section present");
+        assert!(
+            !alt.contains("**Habitat**"),
+            "non-LaunchFacility leaked into table: {alt}"
+        );
+    }
+
+    #[test]
+    fn alternative_launch_methods_links_to_facility_anchor() {
+        let locale = alt_launch_fixture_locale();
+        let pad = facility_stat("build_launch_pad", "LaunchFacility");
+        let md = facility_stat("build_launch_massdriver", "LaunchFacility");
+        let sirenix = Sirenix {
+            facilities: vec![pad, md],
+            ..Default::default()
+        };
+        let page = page_launch_vehicles(&locale, &sirenix);
+        let alt = page
+            .split("## Alternative launch methods")
+            .nth(1)
+            .expect("Alternative launch methods section present");
+        assert!(
+            alt.contains("../facilities/#facility-launch-pad"),
+            "missing cross-page link to facilities/#facility-launch-pad: {alt}"
+        );
+        assert!(
+            alt.contains("../facilities/#facility-launch-massdriver"),
+            "missing cross-page link to facilities/#facility-launch-massdriver: {alt}"
         );
     }
 
