@@ -200,6 +200,26 @@ struct Contract {
     /// Duration (in years) the contract remains offerable before it
     /// disappears. `0` means "never expires".
     years_to_expire: f64,
+    /// Distinct non-None `layer` values found across this contract's
+    /// objectives.  In production data the only non-None value is `"Asteroid"`
+    /// — it signals that the player must have reached the asteroid belt to
+    /// progress this contract, regardless of what the `unlock_rewards` chain
+    /// claims (some asteroid contracts have no upstream contract at all but
+    /// are still gated by getting there).  Used downstream in `gen_pages` to
+    /// bump the depth/Order column for these contracts so they appear after
+    /// the asteroid-belt gate (`contract_asteroid_first`).
+    #[serde(default)]
+    objective_layers: Vec<String>,
+    /// True iff at least one of this contract's objectives carries
+    /// `layer: "None"` (i.e. an objective explicitly NOT gated to any layer).
+    /// In production data, the Sirenix dump defaults every objective's `layer`
+    /// to `"Asteroid"`; the handful of contracts that have an explicit
+    /// `"None"` objective (currently Humans on Mars and Space Dock) are the
+    /// ones that bridge from non-asteroid play into the asteroid belt.  This
+    /// flag lets `gen_pages` distinguish "fully asteroid-gated" contracts
+    /// (no None) from those that mix Earth/Moon/Mars work with asteroid work.
+    #[serde(default)]
+    has_layer_none_objective: bool,
 }
 
 /// One row from the dump's `StartGameEpoch` table. Each entry pins down the
@@ -766,8 +786,24 @@ fn parse_contract(v: &Value) -> Option<Contract> {
     }
 
     let mut objectives: Vec<ContractObjective> = Vec::new();
+    let mut objective_layers: Vec<String> = Vec::new();
+    let mut has_layer_none_objective = false;
     if let Some(obj_arr) = v.get("objectives").and_then(|x| x.as_array()) {
         for o in obj_arr {
+            // Capture the per-objective `layer` regardless of whether the
+            // objective itself is well-formed (kind may be empty / skipped).
+            // We dedupe while preserving first-seen order.  "None" and empty
+            // mean "no layer gating" and are dropped from objective_layers,
+            // but we record their presence in has_layer_none_objective so
+            // downstream code can distinguish mixed (asteroid + None) contracts
+            // from fully asteroid-gated ones.
+            if let Some(layer) = o.get("layer").and_then(|x| x.as_str()) {
+                if layer.is_empty() || layer == "None" {
+                    has_layer_none_objective = true;
+                } else if !objective_layers.iter().any(|l| l == layer) {
+                    objective_layers.push(layer.to_string());
+                }
+            }
             let kind = o
                 .get("objectiveType")
                 .and_then(|x| x.as_str())
@@ -818,6 +854,8 @@ fn parse_contract(v: &Value) -> Option<Contract> {
         resource_grants,
         date_start_active,
         years_to_expire,
+        objective_layers,
+        has_layer_none_objective,
     })
 }
 
@@ -1966,5 +2004,48 @@ mod tests {
         assert_eq!(cost[0].resource_id, "steel");
         assert_eq!(cost[1].resource_id, "water");
         assert_eq!(cost[0].amount, 12.5);
+    }
+
+    #[test]
+    fn parses_objective_layers_field() {
+        // Each objective in the dump carries a `layer` field; "None" or empty
+        // string means "no layer gating", anything else (e.g. "Asteroid") means
+        // the player needs access to that layer to attempt the objective.  We
+        // collect distinct non-None layers across all of a contract's objectives.
+        let v = serde_json::json!({
+            "id": "contract_asteroid_base",
+            "isLocked": false,
+            "isFinalContract": false,
+            "dateStartActive": "",
+            "yearsToExpire": 0,
+            "objectives": [
+                { "objectiveType": "Possession", "howMuch": 1, "layer": "Asteroid" },
+                { "objectiveType": "BuildFacility", "howMuch": 1, "layer": "None" }
+            ],
+            "rewards": []
+        });
+        let c = parse_contract(&v).expect("contract should parse");
+        assert_eq!(c.objective_layers, vec!["Asteroid".to_string()]);
+    }
+
+    #[test]
+    fn parses_objective_layers_dedupes() {
+        // Multiple objectives with the same non-None layer should produce a
+        // single deduped entry in objective_layers.
+        let v = serde_json::json!({
+            "id": "contract_asteroid_mining",
+            "isLocked": false,
+            "isFinalContract": false,
+            "dateStartActive": "",
+            "yearsToExpire": 0,
+            "objectives": [
+                { "objectiveType": "Possession", "howMuch": 1, "layer": "Asteroid" },
+                { "objectiveType": "Possession", "howMuch": 2, "layer": "Asteroid" },
+                { "objectiveType": "BuildFacility", "howMuch": 1, "layer": "Asteroid" }
+            ],
+            "rewards": []
+        });
+        let c = parse_contract(&v).expect("contract should parse");
+        assert_eq!(c.objective_layers, vec!["Asteroid".to_string()]);
     }
 }
