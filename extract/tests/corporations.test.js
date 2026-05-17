@@ -203,6 +203,77 @@ test('renderTableMarkup: row order is cash, LVs, spacecraft, then research', () 
     JSON.stringify({ cashIdx, lvIdx, scIdx, crewedIdx }));
 });
 
+test('renderTableMarkup: splits into two tables on a div.corp-comparison-split', () => {
+  const cmp = C.buildComparison(FIXTURE, 'StartGameColonization', 'Pioneer');
+  const html = C.renderTableMarkup(cmp);
+  // Outer wrapper div.
+  assert.ok(/<div class="corp-comparison-split">/.test(html),
+    'expected outer wrapper div.corp-comparison-split, got:\n' + html);
+  // Exactly two <table> elements inside.
+  const tableOpens = (html.match(/<table\b/g) || []).length;
+  assert.equal(tableOpens, 2,
+    'expected exactly 2 <table> elements, got ' + tableOpens + '\n' + html);
+  // Each marked with its side class.
+  assert.ok(/<table class="corp-comparison-left"/.test(html),
+    'expected a left table');
+  assert.ok(/<table class="corp-comparison-right"/.test(html),
+    'expected a right table');
+});
+
+test('renderTableMarkup: left table holds cash/LVs/SC; right table holds research', () => {
+  const cmp = C.buildComparison(FIXTURE, 'StartGameColonization', 'Pioneer');
+  const html = C.renderTableMarkup(cmp);
+  // Carve the document into the two tables (between table-open and the
+  // following </table>) and assert each contains/excludes the right rows.
+  function tableBody(cls) {
+    const re = new RegExp('<table class="' + cls + '"[\\s\\S]*?</table>');
+    const m = html.match(re);
+    assert.ok(m, 'could not locate <table class="' + cls + '">');
+    return m[0];
+  }
+  const left  = tableBody('corp-comparison-left');
+  const right = tableBody('corp-comparison-right');
+
+  // Left: cash, LVs, SC — but no research items / category headers.
+  assert.ok(left.indexOf('Starting cash')               !== -1, 'left missing cash');
+  assert.ok(left.indexOf('Pre-built launch vehicles')   !== -1, 'left missing LV row');
+  assert.ok(left.indexOf('Pre-built spacecraft')        !== -1, 'left missing SC row');
+  assert.equal(left.indexOf('Crewed Flight'), -1, 'left should not have research rows');
+  assert.equal(left.indexOf('corp-research-category'), -1,
+    'left should not have category-header rows');
+
+  // Right: research rows (category headers + items), no cash/fleet rows.
+  assert.ok(right.indexOf('Crewed Flight')         !== -1, 'right missing Crewed Flight');
+  assert.ok(right.indexOf('Hydrolox')              !== -1, 'right missing Hydrolox');
+  assert.ok(right.indexOf('corp-research-category') !== -1,
+    'right missing category header rows');
+  assert.equal(right.indexOf('Starting cash'),             -1, 'right should not have cash');
+  assert.equal(right.indexOf('Pre-built launch vehicles'), -1, 'right should not have LV row');
+  assert.equal(right.indexOf('Pre-built spacecraft'),      -1, 'right should not have SC row');
+});
+
+test('renderTableMarkup: each table has its own <thead> row with all corp names', () => {
+  const cmp = C.buildComparison(FIXTURE, 'StartGameColonization', 'Pioneer');
+  const html = C.renderTableMarkup(cmp);
+  // Two separate <thead> blocks.
+  const theadOpens = (html.match(/<thead\b/g) || []).length;
+  assert.equal(theadOpens, 2,
+    'expected 2 <thead> blocks (one per table), got ' + theadOpens);
+  function tableBody(cls) {
+    const re = new RegExp('<table class="' + cls + '"[\\s\\S]*?</table>');
+    return html.match(re)[0];
+  }
+  const left  = tableBody('corp-comparison-left');
+  const right = tableBody('corp-comparison-right');
+  // Both heads list every corp name.
+  ['SoleX', 'NASA', 'ESA', 'CNSA', 'Roscosmos'].forEach(function (name) {
+    assert.ok(left.indexOf('<th>' + name + '</th>')  !== -1,
+      'left thead missing corp ' + name);
+    assert.ok(right.indexOf('<th>' + name + '</th>') !== -1,
+      'right thead missing corp ' + name);
+  });
+});
+
 // ---- Sol-system (Realistic) scenarios from the live CORP_DATA blob -----
 // These assertions mirror the four-scenario routing built from
 // PlanetarySystem_Realistic.mapEpochToToStartData on the Rust side.

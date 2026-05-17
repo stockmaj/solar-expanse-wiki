@@ -127,58 +127,70 @@
       .replace(/"/g, '&quot;');
   }
 
-  // Render an HTML <table> from the buildComparison() result.  Kept in this
-  // module so the test suite can assert on its row ordering without needing
-  // jsdom.
+  // Render the comparison view from the buildComparison() result.
+  //
+  // Layout: a flex/grid wrapper holding two side-by-side tables that share
+  // the same per-corp <thead> row.
+  //   - Left table:  Starting cash / Pre-built LVs / Pre-built spacecraft
+  //                  (the small fleet/economy block).
+  //   - Right table: Completed research, grouped by category.
+  // On narrow viewports the wrapper stacks the two tables vertically
+  // (see .corp-comparison-split CSS in wiki.css).
+  //
+  // Kept in this module so the test suite can assert on the markup shape
+  // without needing jsdom.
   function renderTableMarkup(cmp) {
     if (!cmp.corpNames.length) {
       return '<p><em>No corporation data for this scenario.</em></p>';
     }
+    // Per-corp <thead> row — emitted into both tables so each one is
+    // self-readable when the layout stacks vertically on narrow screens.
     var head = '<tr><th>Item</th>' +
       cmp.corpNames.map(function (n) {
         return '<th>' + escapeHtml(n) + '</th>';
       }).join('') + '</tr>';
 
-    var rows = [];
-    rows.push('<tr><td><strong>Starting cash</strong></td>' +
+    // ----- Left table: economy / pre-built fleet -----
+    var leftRows = [];
+    leftRows.push('<tr><td><strong>Starting cash</strong></td>' +
       cmp.cash.map(function (v) {
         return '<td style="text-align:center">' + escapeHtml(formatMoney(v)) + '</td>';
       }).join('') + '</tr>');
-    rows.push('<tr><td><strong title="Number of launch vehicles already assembled in the corp\'s fleet at scenario start (not how many they could research)">Pre-built launch vehicles</strong></td>' +
+    leftRows.push('<tr><td><strong title="Number of launch vehicles already assembled in the corp\'s fleet at scenario start (not how many they could research)">Pre-built launch vehicles</strong></td>' +
       cmp.lvCounts.map(function (v) {
         return '<td style="text-align:center">' + v + '</td>';
       }).join('') + '</tr>');
-    rows.push('<tr><td><strong title="Number of spacecraft already constructed in the corp\'s fleet at scenario start (not how many craft types they could build)">Pre-built spacecraft</strong></td>' +
+    leftRows.push('<tr><td><strong title="Number of spacecraft already constructed in the corp\'s fleet at scenario start (not how many craft types they could build)">Pre-built spacecraft</strong></td>' +
       cmp.scCounts.map(function (v) {
         return '<td style="text-align:center">' + v + '</td>';
       }).join('') + '</tr>');
-    // Section separator before research rows.
-    if (cmp.researchRows.length) {
-      rows.push('<tr class="corp-research-header"><td colspan="' +
-        (cmp.corpNames.length + 1) +
-        '" style="background:var(--bg-elev);color:var(--accent);text-align:left;font-weight:600;border-top:2px solid var(--accent-dim);padding-top:8px">Completed research</td></tr>');
-    }
-    // Emit research rows grouped by category. The rows are already sorted
-    // category-then-name in buildComparison(), so consecutive entries with
-    // the same category form a single group — we prepend exactly one
-    // category-header row per group.
+
+    // ----- Right table: completed research, grouped by category -----
+    // The rows are already sorted category-then-name in buildComparison(),
+    // so consecutive entries with the same category form a single group —
+    // we prepend exactly one category-header row per group.
+    var rightRows = [];
     var prevCategory = null;
     cmp.researchRows.forEach(function (r) {
       if (r.category !== prevCategory) {
-        rows.push('<tr class="corp-research-category"><td colspan="' +
+        rightRows.push('<tr class="corp-research-category"><td colspan="' +
           (cmp.corpNames.length + 1) +
           '" style="padding-left:16px;color:var(--accent-dim,#88a);text-align:left;font-weight:600;font-size:0.9em;border-top:1px solid var(--border,#444);background:transparent">' +
           escapeHtml(r.category) + '</td></tr>');
         prevCategory = r.category;
       }
-      rows.push('<tr><td style="padding-left:32px">' + escapeHtml(r.name) + '</td>' +
+      rightRows.push('<tr><td style="padding-left:32px">' + escapeHtml(r.name) + '</td>' +
         r.held.map(function (h) {
           return '<td style="text-align:center">' + (h ? '✓' : '—') + '</td>';
         }).join('') + '</tr>');
     });
 
-    return '<table class="corp-comparison-table"><thead>' + head +
-      '</thead><tbody>' + rows.join('') + '</tbody></table>';
+    var leftTable = '<table class="corp-comparison-left"><thead>' + head +
+      '</thead><tbody>' + leftRows.join('') + '</tbody></table>';
+    var rightTable = '<table class="corp-comparison-right"><thead>' + head +
+      '</thead><tbody>' + rightRows.join('') + '</tbody></table>';
+
+    return '<div class="corp-comparison-split">' + leftTable + rightTable + '</div>';
   }
 
   // ----- DOM binding -----------------------------------------------------

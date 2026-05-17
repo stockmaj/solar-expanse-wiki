@@ -347,6 +347,29 @@ main hr {
   margin-top: 4px;
 }
 
+/* ---------- Corporation comparison split layout (/corporations/) ----------
+ *
+ * The comparison view renders as two side-by-side tables that share the
+ * per-corp <thead> row:
+ *   - Left: Starting cash + pre-built fleet (3 short rows).
+ *   - Right: Completed research, grouped by tech-tree category (long).
+ *
+ * The left table sizes to its content (flex 0 0 auto) so the small fleet
+ * block doesn't stretch; the right table fills the remaining width.
+ * On narrow viewports the wrapper stacks vertically so each table keeps
+ * its full width and the research matrix stays readable.
+ */
+.corp-comparison-split {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+.corp-comparison-split > table { flex: 0 0 auto; }
+.corp-comparison-right { flex: 1 1 auto; }
+@media (max-width: 900px) {
+  .corp-comparison-split { flex-direction: column; }
+}
+
 /* ---------- Colony construction calculator (/calculator/) ---------- */
 
 #calc-root .calc-bonuses {
