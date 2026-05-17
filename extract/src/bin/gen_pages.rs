@@ -64,8 +64,8 @@ struct ResourceEntry {
 
 #[derive(Deserialize)]
 struct Facility {
-    #[allow(dead_code)]
     id: String,
+    name: String,
     #[allow(dead_code)]
     description: String,
 }
@@ -80,6 +80,95 @@ struct Sirenix {
     spacecraft: Vec<SpacecraftStat>,
     #[serde(default)]
     launch_vehicles: Vec<LaunchVehicleStat>,
+    #[serde(default)]
+    research: Vec<ResearchStat>,
+    #[serde(default)]
+    facilities: Vec<FacilityStat>,
+    #[serde(default)]
+    space_components: Vec<SpaceComponentStat>,
+    #[serde(default)]
+    resources: Vec<ResourceStat>,
+    #[serde(default)]
+    contracts: Vec<ContractStat>,
+}
+
+#[derive(Deserialize, Clone)]
+struct ResourceStat {
+    id: String,
+    resource_type: String,
+    market_price_base: f64,
+    show_on_ui: bool,
+    #[allow(dead_code)]
+    can_be_left_on_object: bool,
+}
+
+#[derive(Deserialize, Clone)]
+struct ContractStat {
+    id: String,
+    #[allow(dead_code)]
+    is_locked: bool,
+    is_final: bool,
+    money_reward: f64,
+    unlock_rewards: Vec<String>,
+    facility_grants: Vec<String>,
+    spacecraft_grants: Vec<String>,
+    launch_vehicle_grants: Vec<String>,
+    resource_grants: Vec<ResourceCost>,
+}
+
+#[derive(Deserialize, Clone)]
+struct FacilityStat {
+    id: String,
+    descriptor: String,
+    placement: String,
+    facility_type: String,
+    build_cost: Vec<ResourceCost>,
+    maintenance_per_day: f64,
+    workers_required: i64,
+    energy_consumption: f64,
+    research_prereq: Option<String>,
+    #[allow(dead_code)]
+    is_obsolete: bool,
+    #[allow(dead_code)]
+    can_be_scrapped: bool,
+    #[allow(dead_code)]
+    can_be_turned_off: bool,
+}
+
+#[derive(Deserialize, Clone)]
+struct SpaceComponentStat {
+    id: String,
+    category: String,
+    thrust: f64,
+    exhaust_v: f64,
+    #[allow(dead_code)]
+    mass: f64,
+    #[allow(dead_code)]
+    power: f64,
+    #[allow(dead_code)]
+    fuel_capacity: f64,
+    #[allow(dead_code)]
+    cargo_capacity: f64,
+    #[allow(dead_code)]
+    life_support_max: f64,
+    fuel_type: Option<String>,
+    #[allow(dead_code)]
+    is_locked: bool,
+}
+
+#[derive(Deserialize, Clone)]
+struct ResearchStat {
+    id: String,
+    work_hours: f64,
+    branch: String,
+    subbranch: String,
+    prereqs: Vec<String>,
+    action: String,
+    unlock_target: Option<String>,
+    bonus_kind: Option<String>,
+    bonus_amount: f64,
+    bonus_components: Vec<String>,
+    show_in_tree: bool,
 }
 
 #[derive(Deserialize, Clone)]
@@ -747,30 +836,80 @@ lift them to space.\n\n",
 }
 
 
-fn page_launch_vehicles(locale: &Locale) -> String {
-    let mut items: Vec<&NameDesc> = locale
+fn page_launch_vehicles(locale: &Locale, sirenix: &Sirenix) -> String {
+    let id_to_name: BTreeMap<&str, &str> = locale
         .launch_vehicles
         .iter()
-        .filter(|x| !x.name.is_empty())
+        .map(|x| (x.id.as_str(), x.name.as_str()))
         .collect();
-    items.sort_by(|a, b| a.name.cmp(&b.name));
-    let rows: Vec<Vec<String>> = items
+    let id_to_desc: BTreeMap<&str, &str> = locale
+        .launch_vehicles
         .iter()
-        .map(|x| {
-            let desc = if x.description.is_empty() {
-                "—".to_string()
-            } else {
-                escape_cell(&x.description)
-            };
-            vec![format!("**{}**", escape_cell(&x.name)), desc]
+        .map(|x| (x.id.as_str(), x.description.as_str()))
+        .collect();
+    let resource_name: BTreeMap<&str, &str> = locale
+        .resources
+        .iter()
+        .map(|r| (r.id.as_str(), r.name.as_str()))
+        .collect();
+
+    let mut entries: Vec<&LaunchVehicleStat> = sirenix
+        .launch_vehicles
+        .iter()
+        .filter(|lv| id_to_name.get(lv.id.as_str()).map_or(false, |n| !n.is_empty()))
+        .collect();
+    entries.sort_by(|a, b| {
+        a.max_payload
+            .partial_cmp(&b.max_payload)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.id.cmp(&b.id))
+    });
+
+    let rows: Vec<Vec<String>> = entries
+        .iter()
+        .map(|lv| {
+            let display = id_to_name.get(lv.id.as_str()).copied().unwrap_or(lv.id.as_str());
+            let desc = id_to_desc.get(lv.id.as_str()).copied().unwrap_or("");
+            vec![
+                format!("**{}**", escape_cell(display)),
+                fmt_amount(lv.max_payload),
+                fmt_reusability(lv.reusability).into(),
+                if lv.can_send_human { "Yes" } else { "No" }.into(),
+                fmt_build_cost(&lv.build_cost, &resource_name),
+                fmt_amount(lv.build_time_days),
+                format!("₡{}", fmt_amount(lv.launch_cost)),
+                format!("₡{}", fmt_amount(lv.maintenance_cost_per_day)),
+                escape_cell(desc),
+            ]
         })
         .collect();
-    let table = md_table(&["Launch Vehicle", "Description"], &rows);
+    let table = md_table(
+        &[
+            "Launch Vehicle",
+            "Max Payload (t)",
+            "Reusable",
+            "Crew Rated",
+            "Build cost",
+            "Build time (d)",
+            "Launch cost",
+            "Maintenance (₡/d)",
+            "Description",
+        ],
+        &rows,
+    );
+
     format!(
         "# Launch Vehicles\n\n\
-Surface-to-orbit lifters. Every spacecraft has to ride one of these to reach\n\
-space, and choice of LV strongly affects launch cost.\n\n\
+Surface-to-orbit lifters. Every spacecraft that's built on a planet's surface\n\
+has to ride one of these to reach orbit, and the launch cost paid here is paid\n\
+on **every** launch — reusable vehicles amortise their build cost over many\n\
+flights.\n\n\
 {table}\n\
+## Reading the table\n\n\
+- **Max Payload** is the heaviest load (in tonnes) the vehicle can carry to low orbit.\n\
+- **Reusable** — *Yes* means the vehicle survives reentry and can fly again; *No* means each launch consumes the vehicle.\n\
+- **Crew Rated** — whether the vehicle can carry humans, not just cargo.\n\
+- **Launch cost** is the cash fee paid every launch; **Maintenance** is the daily upkeep cost while idle on the pad.\n\n\
 ## Alternative launch methods\n\n\
 The game also models several non-rocket launch systems unlocked through\n\
 research and built as facilities at the launch site:\n\n\
@@ -808,96 +947,582 @@ different research head start and corporate flavor.\n\n",
     out
 }
 
-fn page_resources(locale: &Locale) -> String {
-    let mut seen = std::collections::BTreeSet::new();
-    let mut items: Vec<&ResourceEntry> = locale
+fn page_resources(locale: &Locale, sirenix: &Sirenix) -> String {
+    let res_name: BTreeMap<&str, &str> = locale
         .resources
         .iter()
-        .filter(|r| !r.name.is_empty() && seen.insert(r.name.clone()))
+        .map(|r| (r.id.as_str(), r.name.as_str()))
         .collect();
-    items.sort_by(|a, b| a.name.cmp(&b.name));
-    let rows: Vec<Vec<String>> = items
+    let res_desc: BTreeMap<&str, String> = locale
+        .resources
         .iter()
-        .map(|r| vec![format!("**{}**", escape_cell(&r.name))])
-        .collect();
-    let table = md_table(&["Resource"], &rows);
-    format!(
-        "# Resources\n\n\
-Every cargo type tracked by the game. Resources are produced by facilities,\n\
-shipped between worlds, traded on the marketplace, and consumed in\n\
-construction.\n\n\
-{table}"
-    )
-}
-
-fn page_contracts(locale: &Locale) -> String {
-    let mut items: Vec<&NameDesc> = locale.contracts.iter().collect();
-    items.sort_by(|a, b| a.name.cmp(&b.name));
-    let rows: Vec<Vec<String>> = items
-        .iter()
-        .map(|c| {
-            let desc = escape_cell(&c.description);
-            let desc = if desc.len() > 200 {
-                format!("{}…", &desc[..desc.char_indices().nth(200).map(|(i, _)| i).unwrap_or(desc.len())])
-            } else {
-                desc
-            };
-            vec![format!("**{}**", escape_cell(&c.name)), desc]
+        .filter_map(|r| {
+            let desc_id = format!("{}_Description", r.id);
+            locale
+                .resources
+                .iter()
+                .find(|d| d.id == desc_id)
+                .map(|d| (r.id.clone(), d.name.clone()))
+        })
+        .map(|(k, v)| {
+            let leak: &'static str = Box::leak(k.into_boxed_str());
+            (leak, v)
         })
         .collect();
-    let table = md_table(&["Contract", "Premise"], &rows);
-    format!(
-        "# Contracts\n\n\
-Story and freelance contracts that drive game progression. Many contracts have\n\
-tutorial counterparts that walk new players through unfamiliar mechanics.\n\n\
-{table}"
-    )
-}
-
-fn page_research(locale: &Locale) -> String {
-    let categories: Vec<&ResearchEntry> = locale
-        .research
+    // Map facility id → human name to surface where each resource is produced.
+    let fac_name: BTreeMap<&str, &str> = locale
+        .facilities
         .iter()
-        .filter(|r| r.category == "category")
+        .map(|f| (f.id.as_str(), f.name.as_str()))
         .collect();
-    let topics: Vec<&ResearchEntry> = locale
-        .research
+    let fac_desc: BTreeMap<&str, &str> = locale
+        .facilities
         .iter()
-        .filter(|r| r.category == "topic")
+        .map(|f| (f.id.as_str(), f.description.as_str()))
         .collect();
 
-    let mut cats = categories.clone();
-    cats.sort_by(|a, b| a.name.cmp(&b.name));
-    let cat_rows: Vec<Vec<String>> = cats
-        .iter()
-        .map(|c| {
-            let summary = escape_cell(&c.description);
-            let summary = if summary.len() > 200 {
-                format!("{}…", &summary[..summary.char_indices().nth(200).map(|(i, _)| i).unwrap_or(summary.len())])
-            } else {
-                summary
-            };
-            vec![format!("**{}**", escape_cell(&c.name)), summary]
-        })
-        .collect();
-    let cat_table = if cat_rows.is_empty() {
-        "None.".to_string()
-    } else {
-        md_table(&["Category", "Summary"], &cat_rows)
+    // For each resource, walk facility tooltips to find any that mention the resource by name.
+    let producers_for = |resource_display: &str| -> Vec<String> {
+        let lower = resource_display.to_lowercase();
+        // Avoid matching very short or ambiguous resource names ("ice", "gas") — substring noise.
+        if lower.len() < 4 {
+            return Vec::new();
+        }
+        let mut hits: Vec<String> = Vec::new();
+        for (fid, fname) in &fac_name {
+            let desc = fac_desc.get(fid).copied().unwrap_or("");
+            if desc.to_lowercase().contains(&lower) {
+                hits.push(smart_title_case(fname));
+            }
+        }
+        hits.sort();
+        hits.dedup();
+        hits
     };
 
+    let mut entries: Vec<&ResourceStat> = sirenix
+        .resources
+        .iter()
+        .filter(|r| r.show_on_ui)
+        .collect();
+    entries.sort_by(|a, b| {
+        // Sort by resource_type so Energy / Human cluster separately, then alphabetic.
+        a.resource_type.cmp(&b.resource_type).then_with(|| {
+            res_name
+                .get(a.id.as_str())
+                .copied()
+                .unwrap_or(a.id.as_str())
+                .cmp(res_name.get(b.id.as_str()).copied().unwrap_or(b.id.as_str()))
+        })
+    });
+
+    let rows: Vec<Vec<String>> = entries
+        .iter()
+        .map(|r| {
+            let display = res_name.get(r.id.as_str()).copied().unwrap_or(r.id.as_str());
+            let price = if r.market_price_base > 0.0 {
+                format!("₡{}", fmt_amount(r.market_price_base))
+            } else {
+                "—".to_string()
+            };
+            let producers = producers_for(display);
+            let prod_cell = if producers.is_empty() {
+                "—".to_string()
+            } else {
+                producers.join("<br>")
+            };
+            let desc = res_desc
+                .get(r.id.as_str())
+                .map(|s| s.as_str())
+                .unwrap_or("");
+            vec![
+                format!("**{}**", escape_cell(display)),
+                r.resource_type.clone(),
+                price,
+                prod_cell,
+                escape_cell(desc),
+            ]
+        })
+        .collect();
+    let table = md_table(
+        &[
+            "Resource",
+            "Type",
+            "Base market price",
+            "Produced by",
+            "Description",
+        ],
+        &rows,
+    );
     format!(
-        "# Research\n\n\
-Solar Expanse's tech tree, organized into broad categories.\n\n\
-## Categories\n\n\
-{cat_table}\n\
-## Topics\n\n\
-The full tree contains {n} individual research topics across these categories.\n\n\
-## See also\n\n\
-- [Spacecraft](../spacecraft/) — Spacecraft research category\n\
-- [Launch Vehicles](../launch-vehicles/) — Launch Vehicles research category\n",
-        n = topics.len(),
+        "# Resources\n\n\
+Resources are produced by facilities, shipped between worlds in spacecraft\n\
+cargo holds, traded on the marketplace, and consumed in construction. Three\n\
+types exist:\n\n\
+- **Normal** — physical materials, the bulk of the economy.\n\
+- **Energy** — power; produced and consumed in real time, with limited storage in batteries.\n\
+- **Human** — colonists; produced over time by habitats and consumed by jobs.\n\n\
+{table}\n\
+## Reading the table\n\n\
+- **Base market price** is the starting clearing price on the marketplace; supply and demand move it from there.\n\
+- **Produced by** is inferred from facility tooltip text — if a facility's description mentions the resource by name, it's listed. The actual produce-rate isn't extractable from the static descriptors (it lives on dynamic facility subclasses); the in-game tooltip is the source of truth for rate numbers.\n"
     )
+}
+
+fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
+    let contract_name: BTreeMap<&str, &str> = locale
+        .contracts
+        .iter()
+        .map(|c| (c.id.as_str(), c.name.as_str()))
+        .collect();
+    let contract_premise: BTreeMap<&str, &str> = locale
+        .contracts
+        .iter()
+        .map(|c| (c.id.as_str(), c.description.as_str()))
+        .collect();
+    let sc_name: BTreeMap<&str, &str> = locale
+        .spacecraft
+        .iter()
+        .map(|s| (s.id.as_str(), s.name.as_str()))
+        .collect();
+    let lv_name: BTreeMap<&str, &str> = locale
+        .launch_vehicles
+        .iter()
+        .map(|s| (s.id.as_str(), s.name.as_str()))
+        .collect();
+    let fac_name: BTreeMap<&str, &str> = locale
+        .facilities
+        .iter()
+        .map(|f| (f.id.as_str(), f.name.as_str()))
+        .collect();
+    let resource_name: BTreeMap<&str, &str> = locale
+        .resources
+        .iter()
+        .map(|r| (r.id.as_str(), r.name.as_str()))
+        .collect();
+
+    // Skip non-player tutorial contracts (their wiki value is low).  Heuristic: anything
+    // whose name is empty in the locale, or whose id contains "_test".
+    let mut entries: Vec<&ContractStat> = sirenix
+        .contracts
+        .iter()
+        .filter(|c| {
+            contract_name.get(c.id.as_str()).map_or(false, |n| !n.is_empty())
+                && !c.id.contains("_test")
+        })
+        .collect();
+    // Display order: by id (groups by area: asteroid, mars, moon, outer, etc.)
+    entries.sort_by(|a, b| a.id.cmp(&b.id));
+
+    let rows: Vec<Vec<String>> = entries
+        .iter()
+        .map(|c| {
+            let display = contract_name.get(c.id.as_str()).copied().unwrap_or(c.id.as_str());
+            let premise = contract_premise.get(c.id.as_str()).copied().unwrap_or("");
+            let premise = if premise.len() > 240 {
+                let cut = premise
+                    .char_indices()
+                    .nth(240)
+                    .map(|(i, _)| i)
+                    .unwrap_or(premise.len());
+                format!("{}…", &premise[..cut])
+            } else {
+                premise.to_string()
+            };
+
+            let mut reward_bits: Vec<String> = Vec::new();
+            if c.money_reward > 0.0 {
+                reward_bits.push(format!("₡{}", fmt_amount(c.money_reward)));
+            }
+            for r in &c.resource_grants {
+                let label = resource_name
+                    .get(r.resource_id.as_str())
+                    .copied()
+                    .unwrap_or(r.resource_id.as_str());
+                reward_bits.push(format!("{} {}", fmt_amount(r.amount), label));
+            }
+            for f in &c.facility_grants {
+                let key = f.strip_prefix("build_").unwrap_or(f);
+                let pretty = smart_title_case(fac_name.get(key).copied().unwrap_or(key));
+                reward_bits.push(format!("Facility: {}", pretty));
+            }
+            for s in &c.spacecraft_grants {
+                let pretty = sc_name.get(s.as_str()).copied().unwrap_or(s.as_str());
+                reward_bits.push(format!("Spacecraft: {}", pretty));
+            }
+            for l in &c.launch_vehicle_grants {
+                let pretty = lv_name.get(l.as_str()).copied().unwrap_or(l.as_str());
+                reward_bits.push(format!("Launch Vehicle: {}", pretty));
+            }
+            for u in &c.unlock_rewards {
+                let pretty = contract_name.get(u.as_str()).copied().unwrap_or(u.as_str());
+                if pretty != *u {
+                    reward_bits.push(format!("Next: {}", pretty));
+                }
+            }
+            let rewards = if reward_bits.is_empty() {
+                "—".to_string()
+            } else {
+                reward_bits.join("<br>")
+            };
+
+            let flags = if c.is_final { "Final" } else { "" };
+
+            vec![
+                format!("**{}**", escape_cell(display)),
+                flags.into(),
+                rewards,
+                escape_cell(&premise),
+            ]
+        })
+        .collect();
+    let table = md_table(&["Contract", "Flag", "Rewards", "Premise"], &rows);
+    format!(
+        "# Contracts\n\n\
+Story and freelance contracts drive progression in Solar Expanse. Each\n\
+contract has a set of objectives — usually \"deliver X to body Y\" or \"build\n\
+facility Z\" — and pays out a fixed reward when complete. Many contracts\n\
+also unlock the *next* contract in a chain (Mars Phase 1 → Mars Phase 2 → …),\n\
+new spacecraft, or new launch vehicles.\n\n\
+{table}\n\
+## Reading the table\n\n\
+- **Flag**: *Final* marks the contract that ends a campaign.\n\
+- **Rewards**: cash, resources, and unlocks granted on completion. Reward objectives\n\
+  (\"deliver 100 t of metal\") aren't shown here — the premise text describes them.\n\
+- **Premise**: the in-game flavor text introducing the contract.\n"
+    )
+}
+
+/// Title-case a string if it's all uppercase (e.g., "HYDROPONIC FARM" → "Hydroponic Farm").
+/// Leaves mixed-case strings alone.
+fn smart_title_case(s: &str) -> String {
+    let alpha: String = s.chars().filter(|c| c.is_alphabetic()).collect();
+    if alpha.is_empty() || alpha.chars().any(|c| c.is_lowercase()) {
+        return s.to_string();
+    }
+    let lower = s.to_lowercase();
+    let mut out = String::with_capacity(lower.len());
+    let mut capitalize_next = true;
+    for c in lower.chars() {
+        if c.is_alphabetic() {
+            if capitalize_next {
+                for u in c.to_uppercase() {
+                    out.push(u);
+                }
+                capitalize_next = false;
+            } else {
+                out.push(c);
+            }
+        } else {
+            out.push(c);
+            capitalize_next = c.is_whitespace() || c == '/' || c == '-' || c == '(';
+        }
+    }
+    out
+}
+
+fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
+    let facility_name: BTreeMap<&str, &str> = locale
+        .facilities
+        .iter()
+        .map(|f| (f.id.as_str(), f.name.as_str()))
+        .collect();
+    let facility_desc: BTreeMap<&str, &str> = locale
+        .facilities
+        .iter()
+        .map(|f| (f.id.as_str(), f.description.as_str()))
+        .collect();
+    let resource_name: BTreeMap<&str, &str> = locale
+        .resources
+        .iter()
+        .map(|r| (r.id.as_str(), r.name.as_str()))
+        .collect();
+    let research_name: BTreeMap<&str, &str> = locale
+        .research
+        .iter()
+        .map(|r| (r.id.as_str(), r.name.as_str()))
+        .collect();
+
+    let mut ground: Vec<&FacilityStat> = Vec::new();
+    let mut orbital: Vec<&FacilityStat> = Vec::new();
+    for f in &sirenix.facilities {
+        if f.is_obsolete {
+            continue;
+        }
+        if f.descriptor == "Orbital" {
+            orbital.push(f);
+        } else {
+            ground.push(f);
+        }
+    }
+    let sorter = |a: &&FacilityStat, b: &&FacilityStat| {
+        a.facility_type.cmp(&b.facility_type).then(a.id.cmp(&b.id))
+    };
+    ground.sort_by(sorter);
+    orbital.sort_by(sorter);
+
+    let row_for = |f: &FacilityStat,
+                   facility_name: &BTreeMap<&str, &str>,
+                   research_name: &BTreeMap<&str, &str>,
+                   resource_name: &BTreeMap<&str, &str>|
+     -> Vec<String> {
+        let id_no_prefix = f.id.strip_prefix("build_").unwrap_or(&f.id);
+        let raw_display = facility_name.get(id_no_prefix).copied().unwrap_or(id_no_prefix);
+        let display = smart_title_case(raw_display);
+        let prereq = match &f.research_prereq {
+            Some(r) => research_name.get(r.as_str()).copied().unwrap_or(r.as_str()).to_string(),
+            None => "—".to_string(),
+        };
+        let workers = if f.workers_required > 0 {
+            f.workers_required.to_string()
+        } else {
+            "—".to_string()
+        };
+        let energy = if f.energy_consumption > 0.0 {
+            format!("{}", fmt_amount(f.energy_consumption))
+        } else {
+            "—".to_string()
+        };
+        let maint = if f.maintenance_per_day > 0.0 {
+            format!("₡{}", fmt_amount(f.maintenance_per_day))
+        } else {
+            "—".to_string()
+        };
+        let desc = facility_desc.get(id_no_prefix).copied().unwrap_or("");
+        vec![
+            format!("**{}**", escape_cell(&display)),
+            f.facility_type.clone(),
+            fmt_build_cost(&f.build_cost, resource_name),
+            workers,
+            energy,
+            maint,
+            prereq,
+            escape_cell(desc),
+        ]
+    };
+
+    let header = [
+        "Facility",
+        "Type",
+        "Build cost",
+        "Workers",
+        "Energy/day",
+        "Maintenance",
+        "Research prereq",
+        "Description",
+    ];
+
+    let ground_rows: Vec<Vec<String>> = ground
+        .iter()
+        .map(|f| row_for(f, &facility_name, &research_name, &resource_name))
+        .collect();
+    let orbital_rows: Vec<Vec<String>> = orbital
+        .iter()
+        .map(|f| row_for(f, &facility_name, &research_name, &resource_name))
+        .collect();
+
+    let ground_table = md_table(&header, &ground_rows);
+    let orbital_table = md_table(&header, &orbital_rows);
+
+    format!(
+        "# Facilities\n\n\
+Facilities are the buildings and modules you place on planets, moons, asteroids,\n\
+and in orbit. Each consumes power and workers, may require a research\n\
+prerequisite, and either produces, processes, or enables something — power\n\
+plants generate energy, refineries turn ore into refined metal, mines extract\n\
+raw resources, etc.\n\n\
+Facilities are split into two families:\n\n\
+- **Ground facilities** sit on a body's surface. They use local workers and\n\
+  may need atmospheric conditions to function.\n\
+- **Orbital modules** attach to a space station or shipyard in orbit. They\n\
+  don't need a habitable surface, but you have to build the station first.\n\n\
+## Ground facilities\n\n\
+{ground_table}\n\
+## Orbital modules\n\n\
+{orbital_table}\n\
+## Reading the table\n\n\
+- **Type** is the gameplay category — *Production*, *Mining*, *Storage*, *Power*, *Habitat*, etc. The Solar Expanse UI groups facilities by type when you open the build menu.\n\
+- **Workers** is the on-site population the facility needs to operate at full output. Most facilities throttle when understaffed.\n\
+- **Energy/day** is the running energy demand. Power facilities show this as `—`; everything else is a consumer.\n\
+- **Maintenance** is the per-day cash upkeep while the facility is active.\n\
+- **Research prereq** is the research that unlocks construction; `—` means it's available from the start (or the prereq lives outside the standard `lockByHelpNotUse` field, which a few specialist facilities use).\n\n\
+What this page does *not* show: per-facility produces / consumes rates and special-effect bonuses. Those are stored on dynamically-typed subclasses of each facility and aren't in the static descriptor data — the in-game tooltip is the source of truth for now.\n"
+    )
+}
+
+fn fmt_work_hours(h: f64) -> String {
+    if h <= 0.0 {
+        "—".into()
+    } else if h >= 1_000_000.0 {
+        format!("{:.1}M", h / 1_000_000.0)
+    } else if h >= 1_000.0 {
+        format!("{:.0}k", h / 1_000.0)
+    } else {
+        format!("{:.0}", h)
+    }
+}
+
+fn fmt_research_unlock(
+    r: &ResearchStat,
+    facility_name: &BTreeMap<&str, &str>,
+    spacecraft_name: &BTreeMap<&str, &str>,
+    lv_name: &BTreeMap<&str, &str>,
+) -> String {
+    match r.action.as_str() {
+        "UnlockFacility" => {
+            let target = r.unlock_target.as_deref().unwrap_or("");
+            // Facility unlock targets are full ids like "build_outpost"; locale ids are bare ("outpost").
+            let key = target.strip_prefix("build_").unwrap_or(target);
+            let pretty = facility_name.get(key).copied().unwrap_or(key);
+            format!("Builds **{}**", smart_title_case(pretty))
+        }
+        "UnlockSpacecraftType" => {
+            let target = r.unlock_target.as_deref().unwrap_or("");
+            let pretty = spacecraft_name.get(target).copied().unwrap_or(target);
+            format!("Spacecraft: **{}**", pretty)
+        }
+        "UnlockVehicleType" => {
+            let target = r.unlock_target.as_deref().unwrap_or("");
+            let pretty = lv_name.get(target).copied().unwrap_or(target);
+            format!("Launch Vehicle: **{}**", pretty)
+        }
+        "UnlockBonus" => match &r.bonus_kind {
+            Some(b) => {
+                let comps = if r.bonus_components.is_empty() {
+                    "".to_string()
+                } else {
+                    format!(" on {}", r.bonus_components.join(", "))
+                };
+                format!("+{} {}{}", fmt_amount(r.bonus_amount), b, comps)
+            }
+            None => "Bonus".into(),
+        },
+        "UnlockUIElement" | "UnlockContract" | "None" => "—".into(),
+        other => other.into(),
+    }
+}
+
+fn pretty_branch(b: &str) -> &str {
+    match b {
+        "Engineering" => "Engineering",
+        "Biotech" => "Biotech",
+        "Physics" => "Physics",
+        other => other,
+    }
+}
+
+fn page_research(locale: &Locale, sirenix: &Sirenix) -> String {
+    let name_for = |id: &str| -> String {
+        for r in &locale.research {
+            if r.id == id {
+                return r.name.clone();
+            }
+        }
+        id.to_string()
+    };
+    let desc_for = |id: &str| -> String {
+        for r in &locale.research {
+            if r.id == id {
+                return r.description.clone();
+            }
+        }
+        String::new()
+    };
+
+    let facility_name: BTreeMap<&str, &str> = locale
+        .facilities
+        .iter()
+        .map(|f| (f.id.as_str(), f.name.as_str()))
+        .collect();
+    let spacecraft_name: BTreeMap<&str, &str> = locale
+        .spacecraft
+        .iter()
+        .map(|s| (s.id.as_str(), s.name.as_str()))
+        .collect();
+    let lv_name: BTreeMap<&str, &str> = locale
+        .launch_vehicles
+        .iter()
+        .map(|s| (s.id.as_str(), s.name.as_str()))
+        .collect();
+
+    // Every research node a player can interact with goes on the page.  `showInTree`
+    // is the game's in-tree-header flag, not a "should-this-be-public" flag.
+    let visible: Vec<&ResearchStat> = sirenix.research.iter().collect();
+
+    // Bucket by branch then subbranch
+    let mut by_branch: BTreeMap<&str, BTreeMap<&str, Vec<&ResearchStat>>> = BTreeMap::new();
+    for r in &visible {
+        by_branch
+            .entry(r.branch.as_str())
+            .or_default()
+            .entry(r.subbranch.as_str())
+            .or_default()
+            .push(*r);
+    }
+
+    let mut out = String::from(
+        "# Research\n\n\
+The tech tree drives progression. Every research node has a work-hours cost,\n\
+zero or more prerequisite research nodes, and unlocks something — a new\n\
+facility, spacecraft, launch vehicle, or a numeric bonus on existing\n\
+equipment. Research is grouped into three top-level branches (Engineering,\n\
+Physics, Biotech), each subdivided into focused sub-branches.\n\n",
+    );
+
+    for (branch, subs) in &by_branch {
+        out.push_str(&format!("## {}\n\n", pretty_branch(branch)));
+        for (sub, items) in subs {
+            if sub.is_empty() {
+                continue;
+            }
+            out.push_str(&format!("### {}\n\n", sub));
+            let mut items_sorted = items.clone();
+            items_sorted.sort_by(|a, b| {
+                a.work_hours
+                    .partial_cmp(&b.work_hours)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then(a.id.cmp(&b.id))
+            });
+            let rows: Vec<Vec<String>> = items_sorted
+                .iter()
+                .map(|r| {
+                    let display = name_for(&r.id);
+                    let prereqs = if r.prereqs.is_empty() {
+                        "—".to_string()
+                    } else {
+                        r.prereqs
+                            .iter()
+                            .map(|p| format!("{}", escape_cell(&name_for(p))))
+                            .collect::<Vec<_>>()
+                            .join("<br>")
+                    };
+                    vec![
+                        format!("**{}**", escape_cell(&display)),
+                        fmt_work_hours(r.work_hours),
+                        prereqs,
+                        fmt_research_unlock(r, &facility_name, &spacecraft_name, &lv_name),
+                        escape_cell(&desc_for(&r.id)),
+                    ]
+                })
+                .collect();
+            out.push_str(&md_table(
+                &["Research", "Cost (work hours)", "Prerequisites", "Unlocks", "Description"],
+                &rows,
+            ));
+            out.push('\n');
+        }
+    }
+
+    out.push_str(
+        "## Reading the table\n\n\
+- **Cost** is in work hours and is divided by your laboratories' research output to get the actual research time in days.\n\
+- **Prerequisites** must be completed before the node becomes available.\n\
+- **Unlocks** — *Builds X* means the node makes a new facility constructable; *Spacecraft / Launch Vehicle* means the node unlocks a new ship or lifter; numeric bonuses apply to listed components.\n\n\
+## See also\n\n\
+- [Spacecraft](../spacecraft/) — propulsion research feeds directly into these\n\
+- [Launch Vehicles](../launch-vehicles/)\n",
+    );
+    out
 }
 
 fn page_missions() -> String {
@@ -937,6 +1562,7 @@ the names, descriptions, and stat tables here match exactly what you see in-game
 | **[Celestial Bodies](celestial-bodies/)** | The Sun, planets, moons, asteroids, comets, and exoplanet systems. |\n\
 | [Spacecraft](spacecraft/) | Interplanetary craft — Iris, Selene, Stratos, Hermes, Centaur, Athena, Prometheus, Hephaistos, Ariane, Cronos, Nike, Sirius, Zeus. |\n\
 | [Launch Vehicles](launch-vehicles/) | Surface-to-orbit lifters — Albatross, Pelican, Magpie, Condor, Teratorn. |\n\
+| [Facilities](facilities/) | Ground buildings and orbital modules — power, mining, refining, habitats, life support, etc. |\n\
 | [Research](research/) | Tech tree — chemical, electric, nuclear, fusion propulsion, life support, materials, computing. |\n\
 | [Missions](missions/) | Mission planning — landings, flybys, gravity assists, asteroid pulling, cyclical routes. |\n\
 | [Contracts](contracts/) | Story and freelance contracts that drive progression. |\n\
@@ -1135,11 +1761,12 @@ fn main() -> Result<()> {
     write_file(&wiki_root, "celestial-bodies/comets.md", &page_comets(&ctx))?;
     write_file(&wiki_root, "celestial-bodies/exoplanets.md", &page_exoplanets(&ctx))?;
     write_file(&wiki_root, "spacecraft/README.md", &page_spacecraft(&locale, &sirenix))?;
-    write_file(&wiki_root, "launch-vehicles/README.md", &page_launch_vehicles(&locale))?;
+    write_file(&wiki_root, "launch-vehicles/README.md", &page_launch_vehicles(&locale, &sirenix))?;
+    write_file(&wiki_root, "facilities/README.md", &page_facilities(&locale, &sirenix))?;
     write_file(&wiki_root, "corporations/README.md", &page_corporations(&locale))?;
-    write_file(&wiki_root, "resources/README.md", &page_resources(&locale))?;
-    write_file(&wiki_root, "contracts/README.md", &page_contracts(&locale))?;
-    write_file(&wiki_root, "research/README.md", &page_research(&locale))?;
+    write_file(&wiki_root, "resources/README.md", &page_resources(&locale, &sirenix))?;
+    write_file(&wiki_root, "contracts/README.md", &page_contracts(&locale, &sirenix))?;
+    write_file(&wiki_root, "research/README.md", &page_research(&locale, &sirenix))?;
     write_file(&wiki_root, "missions/README.md", &page_missions())?;
     Ok(())
 }

@@ -87,6 +87,11 @@ namespace SolarExpanseWikiDumper
             "StartGameEpoch",
             "FacilityDefinition",
             "Facility",
+            // Facilities (FacilityBaseDescriptor subclasses):
+            "GroundFacilityDescriptor",
+            "SpaceModuleDescriptor",
+            // Engine / tank / cargo / crew modules attached to spacecraft hulls:
+            "SpaceComponent",
         };
 
         public static string Dump(AllScriptableObjectManager manager)

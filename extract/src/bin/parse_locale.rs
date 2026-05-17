@@ -27,6 +27,7 @@ struct ResourceEntry {
 #[derive(Serialize)]
 struct Facility {
     id: String,
+    name: String,
     description: String,
 }
 
@@ -195,14 +196,34 @@ fn resources(keys: &BTreeMap<String, String>) -> Vec<ResourceEntry> {
 }
 
 fn facilities(keys: &BTreeMap<String, String>) -> Vec<Facility> {
-    keys.iter()
-        .filter_map(|(k, v)| {
-            k.strip_prefix("ToolTip_build_").map(|id| Facility {
-                id: id.to_string(),
-                description: v.clone(),
-            })
-        })
-        .collect()
+    // Two key shapes exist for facility text:
+    //   build_<id>             → short display name (e.g. "OUTPOST")
+    //   build_<id>_Description → long blurb
+    //   ToolTip_build_<id>     → tooltip text (fallback when no _Description exists)
+    let mut out: Vec<Facility> = Vec::new();
+    for (k, v) in keys {
+        if k.starts_with("ToolTip_") || k.ends_with("_Description") || k.ends_with("_fluff") {
+            continue;
+        }
+        let id = match k.strip_prefix("build_") {
+            Some(rest) => rest.to_string(),
+            None => continue,
+        };
+        if v.is_empty() {
+            continue;
+        }
+        let desc = keys
+            .get(&format!("build_{id}_Description"))
+            .or_else(|| keys.get(&format!("ToolTip_build_{id}")))
+            .cloned()
+            .unwrap_or_default();
+        out.push(Facility {
+            id,
+            name: v.clone(),
+            description: desc,
+        });
+    }
+    out
 }
 
 fn habitability_scales(keys: &BTreeMap<String, String>) -> BTreeMap<String, Vec<String>> {

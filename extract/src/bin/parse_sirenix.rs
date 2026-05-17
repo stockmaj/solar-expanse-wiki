@@ -42,10 +42,83 @@ struct LaunchVehicle {
     maintenance_cost_per_day: f64,
 }
 
+#[derive(Serialize, Debug, Default, PartialEq)]
+struct Research {
+    id: String,
+    work_hours: f64,
+    branch: String,           // researchType.name (Engineering / Physics / Biotech)
+    subbranch: String,        // researchSubType.name with SubBranch_ stripped
+    prereqs: Vec<String>,     // ids of required research
+    action: String,           // UnlockFacility / UnlockSpacecraftType / UnlockVehicleType / UnlockBonus / None
+    unlock_target: Option<String>,    // for non-bonus actions: the build_xxx / spacecraft_xxx / lv_xxx id
+    bonus_kind: Option<String>,       // for UnlockBonus: e.g. "ComponentExhaustV"
+    bonus_amount: f64,
+    bonus_components: Vec<String>,    // e.g. ["eng_chem"]
+    show_in_tree: bool,
+}
+
+#[derive(Serialize, Debug, Default, PartialEq)]
+struct Facility {
+    id: String,
+    descriptor: String,        // "Ground" or "Orbital"
+    placement: String,         // possiblePlacement enum
+    facility_type: String,     // "Production", "Mining", etc.
+    build_cost: Vec<ResourceCost>,
+    maintenance_per_day: f64,
+    workers_required: i64,
+    energy_consumption: f64,
+    research_prereq: Option<String>,  // research id that locks this facility
+    is_obsolete: bool,
+    can_be_scrapped: bool,
+    can_be_turned_off: bool,
+}
+
+#[derive(Serialize, Debug, Default, PartialEq)]
+struct SpaceComponent {
+    id: String,
+    category: String,       // Engine / Tank / Cargo / Crew / PowerSupply
+    thrust: f64,
+    exhaust_v: f64,
+    mass: f64,
+    power: f64,
+    fuel_capacity: f64,
+    cargo_capacity: f64,
+    life_support_max: f64,
+    fuel_type: Option<String>,
+    is_locked: bool,
+}
+
+#[derive(Serialize, Debug, Default, PartialEq)]
+struct Resource {
+    id: String,
+    resource_type: String,    // Normal / Energy / Human
+    market_price_base: f64,
+    show_on_ui: bool,
+    can_be_left_on_object: bool,
+}
+
+#[derive(Serialize, Debug, Default, PartialEq)]
+struct Contract {
+    id: String,
+    is_locked: bool,
+    is_final: bool,
+    money_reward: f64,                    // sum of Money-type rewards
+    unlock_rewards: Vec<String>,          // ids of contracts / research / SC / LV unlocked on completion
+    facility_grants: Vec<String>,         // facility ids granted on completion
+    spacecraft_grants: Vec<String>,
+    launch_vehicle_grants: Vec<String>,
+    resource_grants: Vec<ResourceCost>,
+}
+
 #[derive(Serialize)]
 struct Sirenix {
     spacecraft: Vec<Spacecraft>,
     launch_vehicles: Vec<LaunchVehicle>,
+    research: Vec<Research>,
+    facilities: Vec<Facility>,
+    space_components: Vec<SpaceComponent>,
+    resources: Vec<Resource>,
+    contracts: Vec<Contract>,
 }
 
 fn parse_spacecraft(v: &Value) -> Option<Spacecraft> {
@@ -114,6 +187,275 @@ fn parse_launch_vehicle(v: &Value) -> Option<LaunchVehicle> {
         build_time_days: f(&["timeToBuildInDays"]),
         launch_cost: f(&["costLaunch"]),
         maintenance_cost_per_day: f(&["maintenanceCostPerDay"]),
+    })
+}
+
+fn parse_research(v: &Value) -> Option<Research> {
+    let id = v.get("id")?.as_str()?.to_string();
+    if !id.starts_with("research_") {
+        return None;
+    }
+
+    let branch = v
+        .pointer("/researchType/name")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
+    let subbranch = v
+        .pointer("/researchSubType/name")
+        .and_then(|x| x.as_str())
+        .map(|s| s.strip_prefix("SubBranch_").unwrap_or(s).to_string())
+        .unwrap_or_default();
+
+    let prereqs: Vec<String> = v
+        .get("requirementsResearch")
+        .and_then(|x| x.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|p| p.get("name").and_then(|n| n.as_str()).map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let action = v
+        .pointer("/unlockData/actionUnlock")
+        .and_then(|x| x.as_str())
+        .unwrap_or("None")
+        .to_string();
+    let parameter1 = v
+        .pointer("/unlockData/parameter1")
+        .and_then(|x| x.as_str())
+        .unwrap_or("");
+
+    let unlock_target = match action.as_str() {
+        "UnlockFacility" | "UnlockSpacecraftType" | "UnlockVehicleType" => {
+            if parameter1.is_empty() { None } else { Some(parameter1.to_string()) }
+        }
+        _ => None,
+    };
+
+    let bonus_kind = v
+        .pointer("/unlockData/bonus")
+        .and_then(|x| x.as_str())
+        .filter(|s| !s.is_empty() && *s != "None")
+        .map(|s| s.to_string());
+    let bonus_amount = v
+        .pointer("/unlockData/bonusParameter")
+        .and_then(|x| x.as_f64())
+        .unwrap_or(0.0);
+    let bonus_components: Vec<String> = v
+        .pointer("/unlockData/id_ComponentOrOther")
+        .and_then(|x| x.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|c| c.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let show_in_tree = v
+        .get("showInTree")
+        .and_then(|x| x.as_bool())
+        .unwrap_or(true);
+
+    Some(Research {
+        id,
+        work_hours: lookup_f64(v, &["workHourToComplete"]).unwrap_or(0.0),
+        branch,
+        subbranch,
+        prereqs,
+        action,
+        unlock_target,
+        bonus_kind,
+        bonus_amount,
+        bonus_components,
+        show_in_tree,
+    })
+}
+
+fn parse_facility(v: &Value, descriptor: &str) -> Option<Facility> {
+    let id = v.get("id")?.as_str()?.to_string();
+    if !id.starts_with("build_") {
+        return None;
+    }
+    let lower = id.to_ascii_lowercase();
+    if lower.contains("cheat") || lower.contains("test") {
+        return None;
+    }
+
+    let f = |path: &[&str]| -> f64 { lookup_f64(v, path).unwrap_or(0.0) };
+    let i = |path: &[&str]| -> i64 {
+        let mut cur = v;
+        for &k in path {
+            match cur.get(k) {
+                Some(x) => cur = x,
+                None => return 0,
+            }
+        }
+        cur.as_i64().unwrap_or(0)
+    };
+    let b = |path: &[&str]| -> bool { lookup_bool(v, path).unwrap_or(false) };
+
+    let placement = v
+        .get("possiblePlacement")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
+    let facility_type = v
+        .get("facilityType")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    // lockByHelpNotUse → research_xxx that unlocks this facility
+    let research_prereq = v
+        .pointer("/lockByHelpNotUse/name")
+        .and_then(|x| x.as_str())
+        .map(|s| s.to_string());
+
+    Some(Facility {
+        id,
+        descriptor: descriptor.to_string(),
+        placement,
+        facility_type,
+        build_cost: parse_build_cost(v.pointer("/price/listResources")),
+        maintenance_per_day: f(&["maintenanceCostPerDay"]),
+        workers_required: i(&["needWorkersToWork"]),
+        energy_consumption: f(&["energyConsumption"]),
+        research_prereq,
+        is_obsolete: b(&["isObsolete"]),
+        can_be_scrapped: b(&["canBeScrapped"]),
+        can_be_turned_off: b(&["canBeTurnedOff"]),
+    })
+}
+
+fn parse_space_component(v: &Value) -> Option<SpaceComponent> {
+    let id = v.get("id")?.as_str()?.to_string();
+    if id.is_empty() {
+        return None;
+    }
+    let lower = id.to_ascii_lowercase();
+    if lower.contains("cheat") || lower.contains("placeholder") {
+        return None;
+    }
+
+    let f = |path: &[&str]| -> f64 { lookup_f64(v, path).unwrap_or(0.0) };
+
+    let category = v
+        .get("category")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
+    let fuel_type = v
+        .pointer("/fuelType/name")
+        .and_then(|x| x.as_str())
+        .map(|s| s.strip_prefix("id_resource_").unwrap_or(s).to_string());
+
+    Some(SpaceComponent {
+        id,
+        category,
+        thrust: f(&["thrust"]),
+        exhaust_v: f(&["exhaustV"]),
+        mass: f(&["mass"]),
+        power: f(&["power"]),
+        fuel_capacity: f(&["fuelCapacity"]),
+        cargo_capacity: f(&["cargoCapacity"]),
+        life_support_max: f(&["lifeSupportMax"]),
+        fuel_type,
+        is_locked: lookup_bool(v, &["isLocked"]).unwrap_or(false),
+    })
+}
+
+fn parse_resource(v: &Value) -> Option<Resource> {
+    let raw_id = v.get("id")?.as_str()?;
+    if raw_id.is_empty() {
+        return None;
+    }
+    let id = raw_id.strip_prefix("id_resource_").unwrap_or(raw_id).to_string();
+    if id.contains("empty") || id.contains("cheat") {
+        return None;
+    }
+    Some(Resource {
+        id,
+        resource_type: v.get("resourceType").and_then(|x| x.as_str()).unwrap_or("Normal").to_string(),
+        market_price_base: lookup_f64(v, &["marketClearingPriceBase"]).unwrap_or(0.0),
+        show_on_ui: lookup_bool(v, &["showOnUI"]).unwrap_or(true),
+        can_be_left_on_object: lookup_bool(v, &["canBeLeftOnObject"]).unwrap_or(false),
+    })
+}
+
+fn parse_contract(v: &Value) -> Option<Contract> {
+    let id = v.get("id")?.as_str()?.to_string();
+    if !id.starts_with("contract_") {
+        return None;
+    }
+    let lower = id.to_ascii_lowercase();
+    if lower.contains("cheat") {
+        return None;
+    }
+
+    let mut money_reward = 0.0;
+    let mut unlock_rewards: Vec<String> = Vec::new();
+    let mut facility_grants: Vec<String> = Vec::new();
+    let mut spacecraft_grants: Vec<String> = Vec::new();
+    let mut launch_vehicle_grants: Vec<String> = Vec::new();
+    let mut resource_grants: Vec<ResourceCost> = Vec::new();
+
+    if let Some(rewards) = v.get("rewards").and_then(|x| x.as_array()) {
+        for r in rewards {
+            let kind = r.get("rewardType").and_then(|x| x.as_str()).unwrap_or("");
+            let amount = r.get("amount").and_then(|x| x.as_f64()).unwrap_or(0.0);
+            match kind {
+                "Money" => money_reward += amount,
+                "Resource" => {
+                    if let Some(rid) = r
+                        .pointer("/resourceDefinition/name")
+                        .and_then(|x| x.as_str())
+                    {
+                        resource_grants.push(ResourceCost {
+                            resource_id: rid.strip_prefix("id_resource_").unwrap_or(rid).to_string(),
+                            amount,
+                        });
+                    }
+                }
+                _ => {}
+            }
+            // Facility / spacecraft / LV grants come in separate fields on the reward struct
+            if let Some(f) = r.pointer("/facilityBaseDescriptor/name").and_then(|x| x.as_str()) {
+                if !f.is_empty() {
+                    facility_grants.push(f.to_string());
+                }
+            }
+            if let Some(sc) = r.pointer("/spaceCraftType/name").and_then(|x| x.as_str()) {
+                if !sc.is_empty() {
+                    spacecraft_grants.push(sc.to_string());
+                }
+            }
+            if let Some(lv) = r.pointer("/launchVehicleType/name").and_then(|x| x.as_str()) {
+                if !lv.is_empty() {
+                    launch_vehicle_grants.push(lv.to_string());
+                }
+            }
+            if let Some(target) = r
+                .pointer("/unlockData/parameter1")
+                .and_then(|x| x.as_str())
+                .filter(|s| !s.is_empty())
+            {
+                unlock_rewards.push(target.to_string());
+            }
+        }
+    }
+
+    Some(Contract {
+        id,
+        is_locked: lookup_bool(v, &["isLocked"]).unwrap_or(false),
+        is_final: lookup_bool(v, &["isFinalContract"]).unwrap_or(false),
+        money_reward,
+        unlock_rewards,
+        facility_grants,
+        spacecraft_grants,
+        launch_vehicle_grants,
+        resource_grants,
     })
 }
 
@@ -187,16 +529,81 @@ fn main() -> Result<()> {
         .unwrap_or_default();
     launch_vehicles.sort_by(|a, b| a.id.cmp(&b.id));
 
+    let mut research: Vec<Research> = raw
+        .get("ResearchDefinition")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(parse_research).collect())
+        .unwrap_or_default();
+    research.sort_by(|a, b| {
+        a.branch
+            .cmp(&b.branch)
+            .then(a.subbranch.cmp(&b.subbranch))
+            .then(a.id.cmp(&b.id))
+    });
+
+    let mut facilities: Vec<Facility> = Vec::new();
+    if let Some(arr) = raw.get("GroundFacilityDescriptor").and_then(|v| v.as_array()) {
+        for v in arr {
+            if let Some(f) = parse_facility(v, "Ground") {
+                facilities.push(f);
+            }
+        }
+    }
+    if let Some(arr) = raw.get("SpaceModuleDescriptor").and_then(|v| v.as_array()) {
+        for v in arr {
+            if let Some(f) = parse_facility(v, "Orbital") {
+                facilities.push(f);
+            }
+        }
+    }
+    facilities.sort_by(|a, b| a.id.cmp(&b.id));
+
+    let mut space_components: Vec<SpaceComponent> = raw
+        .get("SpaceComponent")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(parse_space_component).collect())
+        .unwrap_or_default();
+    space_components.sort_by(|a, b| {
+        a.category
+            .cmp(&b.category)
+            .then(a.mass.partial_cmp(&b.mass).unwrap_or(std::cmp::Ordering::Equal))
+            .then(a.id.cmp(&b.id))
+    });
+
+    let mut resources: Vec<Resource> = raw
+        .get("ResourceDefinition")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(parse_resource).collect())
+        .unwrap_or_default();
+    resources.sort_by(|a, b| a.id.cmp(&b.id));
+
+    let mut contracts: Vec<Contract> = raw
+        .get("ContractDefinition")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(parse_contract).collect())
+        .unwrap_or_default();
+    contracts.sort_by(|a, b| a.id.cmp(&b.id));
+
     let out = Sirenix {
         spacecraft,
         launch_vehicles,
+        research,
+        facilities,
+        space_components,
+        resources,
+        contracts,
     };
     serde_json::to_writer_pretty(fs::File::create(&output)?, &out)?;
     eprintln!(
-        "wrote {} ({} spacecraft, {} launch vehicles after filtering)",
+        "wrote {} ({} spacecraft, {} LVs, {} research, {} facilities, {} components, {} resources, {} contracts)",
         output.display(),
         out.spacecraft.len(),
-        out.launch_vehicles.len()
+        out.launch_vehicles.len(),
+        out.research.len(),
+        out.facilities.len(),
+        out.space_components.len(),
+        out.resources.len(),
+        out.contracts.len(),
     );
     Ok(())
 }
@@ -330,6 +737,60 @@ mod tests {
         assert!(parse_launch_vehicle(&serde_json::json!({"id": "id_Rocket_Cheat"})).is_none());
         assert!(parse_launch_vehicle(&serde_json::json!({"id": "id_LV_launch_spin_Fake"})).is_none());
         assert!(parse_launch_vehicle(&serde_json::json!({"id": "id_Rocket_RocketType5"})).is_none());
+    }
+
+    #[test]
+    fn parses_research_with_facility_unlock() {
+        let v = serde_json::json!({
+            "id": "research_agriculture_1",
+            "workHourToComplete": 1200000,
+            "researchType": {"name": "Biotech"},
+            "researchSubType": {"name": "SubBranch_Agriculture"},
+            "requirementsResearch": [{"name": "research_biotech_base"}],
+            "unlockData": {
+                "actionUnlock": "UnlockFacility",
+                "parameter1": "build_farm",
+                "bonus": "None",
+                "bonusParameter": 0,
+                "id_ComponentOrOther": []
+            },
+            "showInTree": false
+        });
+        let r = parse_research(&v).expect("should parse");
+        assert_eq!(r.id, "research_agriculture_1");
+        assert_eq!(r.work_hours, 1_200_000.0);
+        assert_eq!(r.branch, "Biotech");
+        assert_eq!(r.subbranch, "Agriculture");
+        assert_eq!(r.prereqs, vec!["research_biotech_base"]);
+        assert_eq!(r.action, "UnlockFacility");
+        assert_eq!(r.unlock_target.as_deref(), Some("build_farm"));
+        assert!(r.bonus_kind.is_none());
+        assert!(!r.show_in_tree);
+    }
+
+    #[test]
+    fn parses_research_with_bonus_unlock() {
+        let v = serde_json::json!({
+            "id": "research_chem_main2",
+            "workHourToComplete": 2160000,
+            "researchType": {"name": "Engineering"},
+            "researchSubType": {"name": "SubBranch_Chemical"},
+            "requirementsResearch": [{"name": "research_chem_main1"}],
+            "unlockData": {
+                "actionUnlock": "UnlockBonus",
+                "parameter1": "I",
+                "bonus": "ComponentExhaustV",
+                "bonusParameter": 5,
+                "id_ComponentOrOther": ["eng_chem"]
+            }
+        });
+        let r = parse_research(&v).expect("should parse");
+        assert_eq!(r.subbranch, "Chemical");
+        assert_eq!(r.action, "UnlockBonus");
+        assert_eq!(r.bonus_kind.as_deref(), Some("ComponentExhaustV"));
+        assert_eq!(r.bonus_amount, 5.0);
+        assert_eq!(r.bonus_components, vec!["eng_chem"]);
+        assert!(r.unlock_target.is_none());
     }
 
     #[test]
