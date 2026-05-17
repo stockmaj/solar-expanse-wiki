@@ -2001,5 +2001,28 @@
       ],
       "affects_all": false
     }
+  ],
+  "crew_transports": [
+    {
+      "id": "module_crew_compartment",
+      "name": "Module Crew Compartment",
+      "capacity": 5,
+      "mass": 5.0,
+      "is_locked": false
+    },
+    {
+      "id": "module_crew_medium",
+      "name": "Module Crew Medium",
+      "capacity": 20,
+      "mass": 15.0,
+      "is_locked": true
+    },
+    {
+      "id": "module_crew_large",
+      "name": "Module Crew Large",
+      "capacity": 100,
+      "mass": 60.0,
+      "is_locked": true
+    }
   ]
 }

@@ -214,6 +214,19 @@ struct FacilityStat {
     /// Radiation, Magnetic field, …). Empty for non-terraforming facilities.
     #[serde(default)]
     habitability_deltas: Vec<(String, f64)>,
+    /// Resources this facility outputs per day. Pulled by `parse_sirenix` from
+    /// structured `refinerData.output`, `energyProductionData`, `resourcesToMine`,
+    /// and `byproducts` — never from description text. Drives the resources-page
+    /// Producers column; using structured data avoids the false matches the
+    /// substring heuristic produced (e.g., Exotic Alloy Production showing up as
+    /// a producer of its inputs).
+    #[serde(default)]
+    produces: Vec<ResourceCost>,
+    /// Resources this facility consumes per day. From structured `refinerData.input`
+    /// (or `energyProductionData.input` for power facilities). Drives the
+    /// resources-page Consumers column.
+    #[serde(default)]
+    consumes: Vec<ResourceCost>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -1939,38 +1952,59 @@ fn page_resources(locale: &Locale, sirenix: &Sirenix) -> String {
             (leak, v)
         })
         .collect();
-    // Map facility id → human name to surface where each resource is produced.
+    // Map facility id → human name to surface where each resource is produced
+    // or consumed.
     let fac_name: BTreeMap<&str, &str> = locale
         .facilities
         .iter()
         .map(|f| (f.id.as_str(), f.name.as_str()))
         .collect();
-    let fac_desc: BTreeMap<&str, &str> = locale
-        .facilities
-        .iter()
-        .map(|f| (f.id.as_str(), f.description.as_str()))
-        .collect();
 
-    // For each resource, walk facility tooltips to find any that mention the resource by name.
-    // Returns (facility_id, pretty_display) pairs so the caller can emit
-    // cross-page links into the facilities page.
-    let producers_for = |resource_display: &str| -> Vec<(String, String)> {
-        let lower = resource_display.to_lowercase();
-        // Avoid matching very short or ambiguous resource names ("ice", "gas") — substring noise.
-        if lower.len() < 4 {
-            return Vec::new();
-        }
-        let mut hits: Vec<(String, String)> = Vec::new();
-        for (fid, fname) in &fac_name {
-            let desc = fac_desc.get(fid).copied().unwrap_or("");
-            if desc.to_lowercase().contains(&lower) {
-                hits.push((fid.to_string(), smart_title_case(fname)));
-            }
-        }
-        hits.sort_by(|a, b| a.1.cmp(&b.1));
-        hits.dedup_by(|a, b| a.1 == b.1);
-        hits
+    // Resolve a sirenix FacilityStat id (which carries the `build_` prefix used
+    // throughout the dump) to the `(anchor_id, pretty_display)` pair the
+    // resources page should link with. The locale keys facilities without the
+    // prefix, and the facilities page anchors are built the same way, so we
+    // strip the prefix once here and reuse the result for both link sides.
+    let resolve_facility = |fid: &str| -> (String, String) {
+        let id_no_prefix = fid.strip_prefix("build_").unwrap_or(fid);
+        let display = fac_name
+            .get(id_no_prefix)
+            .copied()
+            .unwrap_or(id_no_prefix);
+        (id_no_prefix.to_string(), smart_title_case(display))
     };
+
+    // Look up facilities whose structured `produces` data lists `resource_id`.
+    // Walking `Facility.produces` (rather than tooltip substring matching) is
+    // the only way to avoid false positives like "Exotic Alloy Production" —
+    // whose description mentions metal and fissiles as *inputs* — being mis-
+    // labelled as a producer of those resources.
+    // Returns (anchor_id, pretty_display) pairs so the caller can emit
+    // cross-page links into the facilities page.
+    let producers_for_resource =
+        |resource_id: &str, facilities: &[FacilityStat]| -> Vec<(String, String)> {
+            let mut hits: Vec<(String, String)> = facilities
+                .iter()
+                .filter(|f| f.produces.iter().any(|rc| rc.resource_id == resource_id))
+                .map(|f| resolve_facility(&f.id))
+                .collect();
+            hits.sort_by(|a, b| a.1.cmp(&b.1));
+            hits.dedup_by(|a, b| a.1 == b.1);
+            hits
+        };
+
+    // Mirror of `producers_for_resource` for the structured `consumes` field.
+    let consumers_for_resource =
+        |resource_id: &str, facilities: &[FacilityStat]| -> Vec<(String, String)> {
+            let mut hits: Vec<(String, String)> = facilities
+                .iter()
+                .filter(|f| f.consumes.iter().any(|rc| rc.resource_id == resource_id))
+                .map(|f| resolve_facility(&f.id))
+                .collect();
+            hits.sort_by(|a, b| a.1.cmp(&b.1));
+            hits.dedup_by(|a, b| a.1 == b.1);
+            hits
+        };
 
     let mut entries: Vec<&ResourceStat> = sirenix
         .resources
@@ -1997,11 +2031,23 @@ fn page_resources(locale: &Locale, sirenix: &Sirenix) -> String {
             } else {
                 "—".to_string()
             };
-            let producers = producers_for(display);
+            let producers = producers_for_resource(&r.id, &sirenix.facilities);
             let prod_cell = if producers.is_empty() {
                 "—".to_string()
             } else {
                 producers
+                    .iter()
+                    .map(|(fid, name)| {
+                        link_cross_page("facilities", "facility", fid, &escape_cell(name))
+                    })
+                    .collect::<Vec<_>>()
+                    .join("<br>")
+            };
+            let consumers = consumers_for_resource(&r.id, &sirenix.facilities);
+            let cons_cell = if consumers.is_empty() {
+                "—".to_string()
+            } else {
+                consumers
                     .iter()
                     .map(|(fid, name)| {
                         link_cross_page("facilities", "facility", fid, &escape_cell(name))
@@ -2015,11 +2061,20 @@ fn page_resources(locale: &Locale, sirenix: &Sirenix) -> String {
                 .unwrap_or("");
             // Inline anchor so other pages (facilities, research) can deep-link to this row.
             let anchor = anchor_tag("resource", &r.id);
+            // Icon path mirrors `fmt_build_cost`: filename is the resource id
+            // (already stripped of the `id_resource_` prefix by parse_sirenix /
+            // parse_locale). The icons live under /docs/images/resources/.
+            let icon = format!(
+                "<img src=\"../images/resources/{id}.png\" width=\"16\" alt=\"{label}\"/>",
+                id = r.id,
+                label = escape_cell(display),
+            );
             vec![
-                format!("{anchor}**{}**", escape_cell(display)),
+                format!("{anchor}{icon}&nbsp;**{}**", escape_cell(display)),
                 r.resource_type.clone(),
                 price,
                 prod_cell,
+                cons_cell,
                 escape_cell(desc),
             ]
         })
@@ -2030,13 +2085,15 @@ fn page_resources(locale: &Locale, sirenix: &Sirenix) -> String {
             "Type",
             "License (Earth)",
             "Producers",
+            "Consumers",
             "Description",
         ],
         &[
             None,
             Some("Normal (physical), Energy (real-time power), or Human (colonists)"),
             Some("Earth licensing fee per tonne extracted — the static, meaningful price (market clearing price floats around this value as supply and demand move)"),
-            None,
+            Some("Facilities whose structured production data lists this resource as an output"),
+            Some("Facilities whose structured production data lists this resource as an input"),
             None,
         ],
         &rows,
@@ -2052,7 +2109,7 @@ types exist:\n\n\
 {table}\n\
 ## Reading the table\n\n\
 - **Base market price** is the starting clearing price on the marketplace; supply and demand move it from there.\n\
-- **Produced by** is inferred from facility tooltip text — if a facility's description mentions the resource by name, it's listed. The actual produce-rate isn't extractable from the static descriptors (it lives on dynamic facility subclasses); the in-game tooltip is the source of truth for rate numbers.\n"
+- **Producers** and **Consumers** are pulled from each facility's structured production data (`refinerData`, `energyProductionData`, `resourcesToMine`, `byproducts`) — not from tooltip text — so refineries don't get mis-credited as producing their inputs. Per-day rates aren't extractable from the static descriptors; the in-game tooltip remains the source of truth for rate numbers.\n"
     )
 }
 
@@ -3127,7 +3184,7 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
         // "Water Ice Extractor" (same for metalmine / metalmine_big etc.).
         // Append "(Large)" so the player can tell the two rows apart.
         if id_no_prefix.ends_with("_big") || id_no_prefix.ends_with("-big") {
-            display.push_str(" (Large)");
+            display.push_str(" (Advanced)");
         }
         // Prefer the reverse-lookup (which research unlocks this facility?) over
         // the facility's own `lockByHelpNotUse` field — the former is set for
@@ -4365,9 +4422,16 @@ mod tests {
     fn resources_page_links_producers_to_facility_anchors() {
         // Energy is produced by Geothermal Power — the producers cell should
         // render a markdown link to the facility's anchor on the facilities page.
+        // Source of truth is the structured `produces` field, not tooltip text.
         let locale = nav_fixture_locale();
+        let mut geo = facility_stat("geothermal", "Power");
+        geo.produces = vec![ResourceCost {
+            resource_id: "energy".into(),
+            amount: 400.0,
+        }];
         let sirenix = Sirenix {
             resources: vec![make_resource_stat("energy", "Energy")],
+            facilities: vec![geo],
             ..Default::default()
         };
         let page = page_resources(&locale, &sirenix);
@@ -4390,6 +4454,108 @@ mod tests {
         assert!(
             page.contains("<a id=\"resource-energy\"></a>"),
             "resource row should carry an inline anchor tag:\n{page}"
+        );
+    }
+
+    /// Locale fixture for the resources-page Producers/Consumers/icon tests.
+    /// Adds an `alloy` resource entry plus a polymer-production facility so
+    /// the structured-data lookups have something to find.
+    fn resources_fixture_locale() -> Locale {
+        let mut locale = nav_fixture_locale();
+        locale.resources.push(ResourceEntry {
+            id: "alloy".into(),
+            name: "Alloy".into(),
+        });
+        locale.resources.push(ResourceEntry {
+            id: "alloy_Description".into(),
+            name: "Standard structural alloy.".into(),
+        });
+        locale.facilities.push(Facility {
+            id: "polymerproduction".into(),
+            name: "Polymers Factory".into(),
+            description: "Manufactures polymers from carbon and alloy stock.".into(),
+        });
+        locale
+    }
+
+    #[test]
+    fn resource_row_includes_icon_image_tag() {
+        // Each resource cell should lead with the resource icon (mirrors the
+        // icon + name pattern used by `fmt_build_cost`).
+        let locale = resources_fixture_locale();
+        let sirenix = Sirenix {
+            resources: vec![make_resource_stat("alloy", "Normal")],
+            ..Default::default()
+        };
+        let page = page_resources(&locale, &sirenix);
+        assert!(
+            page.contains("<img src=\"../images/resources/alloy.png\""),
+            "Alloy row should render the resource icon image:\n{page}"
+        );
+    }
+
+    #[test]
+    fn resource_row_consumers_column_lists_consumer_facilities() {
+        // A facility whose structured `consumes` includes a resource id must
+        // show up in that resource's Consumers cell.
+        let locale = resources_fixture_locale();
+        let mut polymers = facility_stat("polymerproduction", "Production");
+        polymers.consumes = vec![ResourceCost {
+            resource_id: "alloy".into(),
+            amount: 0.1,
+        }];
+        let sirenix = Sirenix {
+            resources: vec![make_resource_stat("alloy", "Normal")],
+            facilities: vec![polymers],
+            ..Default::default()
+        };
+        let page = page_resources(&locale, &sirenix);
+        let alloy_row = page
+            .lines()
+            .find(|l| l.contains("resource-alloy"))
+            .expect("Alloy row present:\n");
+        assert!(
+            alloy_row.contains("Polymers Factory"),
+            "Alloy row's Consumers cell should list Polymers Factory:\n{alloy_row}"
+        );
+        assert!(
+            alloy_row.contains("../facilities/#facility-polymerproduction"),
+            "Consumer entry should link to the facility's anchor on the facilities page:\n{alloy_row}"
+        );
+    }
+
+    #[test]
+    fn resource_row_consumers_column_renders_dash_when_no_consumer() {
+        // A resource consumed by no facility shows a dash in the Consumers cell.
+        let locale = resources_fixture_locale();
+        let sirenix = Sirenix {
+            resources: vec![make_resource_stat("alloy", "Normal")],
+            facilities: vec![],
+            ..Default::default()
+        };
+        let page = page_resources(&locale, &sirenix);
+        // The page must declare a Consumers header (so we can validate column ordering).
+        assert!(
+            page.contains("Consumers"),
+            "page should expose a Consumers column header:\n{page}"
+        );
+        let alloy_row = page
+            .lines()
+            .find(|l| l.contains("resource-alloy"))
+            .expect("Alloy row present:\n");
+        // Resource | Type | License | Producers | Consumers | Description
+        let cells: Vec<&str> = alloy_row.split('|').collect();
+        // Pipe-split rows have leading + trailing empty cells: ["", " Resource ", ..., ""].
+        // With six data columns we expect 8 entries.
+        assert_eq!(
+            cells.len(),
+            8,
+            "row should have six columns (Resource, Type, License, Producers, Consumers, Description):\n{alloy_row}"
+        );
+        let consumers_cell = cells[5].trim();
+        assert_eq!(
+            consumers_cell, "—",
+            "Consumers cell should render an em-dash when nothing consumes the resource:\n{alloy_row}"
         );
     }
 
@@ -5001,6 +5167,8 @@ mod tests {
             role: None,
             role_magnitude: 0.0,
             habitability_deltas: vec![],
+            produces: vec![],
+            consumes: vec![],
         }
     }
 

@@ -1,7 +1,7 @@
 // Node-only unit tests for calculator.js — additive-stacking math.
 // Run with `node docs/assets/js/calculator.test.js` from anywhere.
 
-const { applyReductions, workerTotal, powerNetTotal, addSaved, removeSaved, iconFile, fmtAbbrev } = require('./calculator.js');
+const { applyReductions, workerTotal, powerNetTotal, addSaved, removeSaved, iconFile, fmtAbbrev, crewTransportMass } = require('./calculator.js');
 
 let passed = 0;
 let failed = 0;
@@ -309,6 +309,20 @@ eq(fmtAbbrev(60000), '60k', 'fmtAbbrev: 60000 → 60k');
 eq(fmtAbbrev(200000), '200k', 'fmtAbbrev: 200000 → 200k');
 eq(fmtAbbrev(1500000), '1.5M', 'fmtAbbrev: 1.5M');
 eq(fmtAbbrev(3000000000), '3B', 'fmtAbbrev: billions');
+
+// ----- Crew transport -----------------------------------------------------
+
+const compartment = { id: 'module_crew_compartment', capacity: 5, mass: 5 };
+const medium      = { id: 'module_crew_medium', capacity: 20, mass: 15 };
+const large       = { id: 'module_crew_large', capacity: 100, mass: 60 };
+
+eq(crewTransportMass(0, compartment),  { capsules: 0, mass: 0 }, 'crew: 0 humans → 0 capsules');
+eq(crewTransportMass(5, compartment),  { capsules: 1, mass: 10 }, 'crew: 5 humans fill 1 compartment = 5T + 5T = 10');
+eq(crewTransportMass(35, compartment), { capsules: 7, mass: 70 }, 'crew: 35 humans = 7 compartments = 35T + 35T = 70');
+eq(crewTransportMass(12, compartment), { capsules: 3, mass: 27 }, 'crew: 12 humans → 3 caps (15T) + 12 (12T) = 27 (partial last)');
+eq(crewTransportMass(35, medium),      { capsules: 2, mass: 65 }, 'crew: 35 humans in mediums → 2 caps (30T) + 35T = 65');
+eq(crewTransportMass(150, large),      { capsules: 2, mass: 270 }, 'crew: 150 humans in larges → 2 (120T) + 150T = 270');
+eq(crewTransportMass(5, null),         { capsules: 0, mass: 0 }, 'crew: no transport selected → 0');
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed === 0 ? 0 : 1);

@@ -13,6 +13,16 @@ struct Sirenix {
     research: Vec<ResearchStat>,
     #[serde(default)]
     resources: Vec<ResourceStat>,
+    #[serde(default)]
+    crew_transports: Vec<CrewTransportStat>,
+}
+
+#[derive(Deserialize, Clone)]
+struct CrewTransportStat {
+    id: String,
+    capacity: i64,
+    mass: f64,
+    is_locked: bool,
 }
 
 #[derive(Deserialize, Clone)]
@@ -77,6 +87,18 @@ struct CalculatorData {
     facilities: Vec<CalcFacility>,
     resources: Vec<CalcResource>,
     reductions: Vec<CalcReduction>,
+    crew_transports: Vec<CalcCrewTransport>,
+}
+
+#[derive(Serialize, Debug, PartialEq)]
+struct CalcCrewTransport {
+    id: String,
+    name: String,
+    /// Humans per loaded module.
+    capacity: i64,
+    /// Dry mass per module, in tons. Each carried human adds 1 t on top.
+    mass: f64,
+    is_locked: bool,
 }
 
 #[derive(Serialize, Debug, PartialEq)]
@@ -263,11 +285,44 @@ fn build_calculator_data(sirenix: &Sirenix, locale: &Locale) -> CalculatorData {
         });
     }
 
+    let crew_transports: Vec<CalcCrewTransport> = sirenix
+        .crew_transports
+        .iter()
+        .map(|c| CalcCrewTransport {
+            id: c.id.clone(),
+            name: humanize_id(&c.id),
+            capacity: c.capacity,
+            mass: c.mass,
+            is_locked: c.is_locked,
+        })
+        .collect();
+
     CalculatorData {
         facilities,
         resources,
         reductions,
+        crew_transports,
     }
+}
+
+/// snake_case id → Title Case display name (e.g. `module_crew_compartment`
+/// → `Module Crew Compartment`).
+fn humanize_id(id: &str) -> String {
+    let cleaned = id.replace('_', " ");
+    let mut out = String::with_capacity(cleaned.len());
+    let mut cap = true;
+    for c in cleaned.chars() {
+        if c.is_whitespace() {
+            out.push(c);
+            cap = true;
+        } else if cap && c.is_alphabetic() {
+            for u in c.to_uppercase() { out.push(u); }
+            cap = false;
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 fn main() -> Result<()> {
@@ -709,6 +764,28 @@ mod tests {
         let data = build_calculator_data(&sirenix, &locale);
         let names: Vec<&str> = data.facilities.iter().map(|f| f.name.as_str()).collect();
         assert_eq!(names, vec!["Carbon Mine", "Carbon Mine (Advanced)"]);
+    }
+
+    #[test]
+    fn crew_transports_pass_through_with_humanized_name() {
+        let sirenix: Sirenix = from_json(serde_json::json!({
+            "crew_transports": [
+                { "id": "module_crew_compartment", "capacity": 5, "mass": 5.0, "is_locked": false },
+                { "id": "module_crew_large", "capacity": 100, "mass": 60.0, "is_locked": true }
+            ]
+        }));
+        let locale = locale_with(vec![], vec![], vec![]);
+
+        let data = build_calculator_data(&sirenix, &locale);
+
+        assert_eq!(data.crew_transports.len(), 2);
+        assert_eq!(data.crew_transports[0].id, "module_crew_compartment");
+        assert_eq!(data.crew_transports[0].name, "Module Crew Compartment");
+        assert_eq!(data.crew_transports[0].capacity, 5);
+        assert_eq!(data.crew_transports[0].mass, 5.0);
+        assert!(!data.crew_transports[0].is_locked);
+        assert_eq!(data.crew_transports[1].name, "Module Crew Large");
+        assert!(data.crew_transports[1].is_locked);
     }
 
     #[test]

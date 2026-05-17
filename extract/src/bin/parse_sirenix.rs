@@ -243,6 +243,18 @@ struct Epoch {
     possible_player_companies: Vec<String>,
 }
 
+/// Spacecraft module whose only job is to ferry humans up.
+/// Drawn from `SpaceModuleDescriptor` entries with `specialAbilityFacilityNew == "CrewTransport"`.
+#[derive(Serialize, Debug, Default, PartialEq)]
+struct CrewTransport {
+    id: String,
+    /// Humans the module can carry. From `specialAbilityParameter`.
+    capacity: i64,
+    /// Dry mass in tons. From `mass`.
+    mass: f64,
+    is_locked: bool,
+}
+
 #[derive(Serialize)]
 struct Sirenix {
     spacecraft: Vec<Spacecraft>,
@@ -250,6 +262,7 @@ struct Sirenix {
     research: Vec<Research>,
     facilities: Vec<Facility>,
     space_components: Vec<SpaceComponent>,
+    crew_transports: Vec<CrewTransport>,
     resources: Vec<Resource>,
     contracts: Vec<Contract>,
     scenario_starts: Vec<ScenarioStart>,
@@ -703,6 +716,21 @@ fn parse_space_component(v: &Value) -> Option<SpaceComponent> {
         fuel_type,
         is_locked: lookup_bool(v, &["isLocked"]).unwrap_or(false),
     })
+}
+
+fn parse_crew_transport(v: &Value) -> Option<CrewTransport> {
+    let ability = v.get("specialAbilityFacilityNew").and_then(|x| x.as_str()).unwrap_or("");
+    if ability != "CrewTransport" {
+        return None;
+    }
+    let id = v.get("id")?.as_str()?.to_string();
+    if id.is_empty() {
+        return None;
+    }
+    let capacity = v.get("specialAbilityParameter").and_then(|x| x.as_i64()).unwrap_or(0);
+    let mass = lookup_f64(v, &["mass"]).unwrap_or(0.0);
+    let is_locked = lookup_bool(v, &["isLocked"]).unwrap_or(false);
+    Some(CrewTransport { id, capacity, mass, is_locked })
 }
 
 fn parse_resource(v: &Value) -> Option<Resource> {
@@ -1203,6 +1231,13 @@ fn main() -> Result<()> {
             .then(a.id.cmp(&b.id))
     });
 
+    let mut crew_transports: Vec<CrewTransport> = raw
+        .get("SpaceModuleDescriptor")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(parse_crew_transport).collect())
+        .unwrap_or_default();
+    crew_transports.sort_by(|a, b| a.capacity.cmp(&b.capacity).then(a.id.cmp(&b.id)));
+
     let mut resources: Vec<Resource> = raw
         .get("ResourceDefinition")
         .and_then(|v| v.as_array())
@@ -1276,6 +1311,7 @@ fn main() -> Result<()> {
         research,
         facilities,
         space_components,
+        crew_transports,
         resources,
         contracts,
         scenario_starts,
@@ -1283,13 +1319,14 @@ fn main() -> Result<()> {
     };
     serde_json::to_writer_pretty(fs::File::create(&output)?, &out)?;
     eprintln!(
-        "wrote {} ({} spacecraft, {} LVs, {} research, {} facilities, {} components, {} resources, {} contracts, {} scenarios, {} epochs)",
+        "wrote {} ({} spacecraft, {} LVs, {} research, {} facilities, {} components, {} crew transports, {} resources, {} contracts, {} scenarios, {} epochs)",
         output.display(),
         out.spacecraft.len(),
         out.launch_vehicles.len(),
         out.research.len(),
         out.facilities.len(),
         out.space_components.len(),
+        out.crew_transports.len(),
         out.resources.len(),
         out.contracts.len(),
         out.scenario_starts.len(),
@@ -1301,6 +1338,49 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_crew_compartment_module() {
+        let v = serde_json::json!({
+            "$name": "module_crew_compartment",
+            "id": "module_crew_compartment",
+            "specialAbilityFacilityNew": "CrewTransport",
+            "specialAbilityParameter": 5,
+            "mass": 5,
+            "isLocked": false,
+        });
+        let ct = parse_crew_transport(&v).expect("should parse");
+        assert_eq!(ct.id, "module_crew_compartment");
+        assert_eq!(ct.capacity, 5);
+        assert_eq!(ct.mass, 5.0);
+        assert!(!ct.is_locked);
+    }
+
+    #[test]
+    fn rejects_non_crew_transport_modules() {
+        let v = serde_json::json!({
+            "id": "module_habitat",
+            "specialAbilityFacilityNew": "CrewCapacity",
+            "specialAbilityParameter": 100,
+            "mass": 20,
+        });
+        assert!(parse_crew_transport(&v).is_none());
+    }
+
+    #[test]
+    fn parses_locked_crew_large() {
+        let v = serde_json::json!({
+            "id": "module_crew_large",
+            "specialAbilityFacilityNew": "CrewTransport",
+            "specialAbilityParameter": 100,
+            "mass": 60,
+            "isLocked": true,
+        });
+        let ct = parse_crew_transport(&v).expect("should parse");
+        assert_eq!(ct.capacity, 100);
+        assert_eq!(ct.mass, 60.0);
+        assert!(ct.is_locked);
+    }
 
     fn iris_fixture() -> Value {
         serde_json::json!({

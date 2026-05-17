@@ -111,6 +111,15 @@
     return saved.filter(function (s) { return s.name !== name; });
   }
 
+  // Crew transport: ceil(humans / capacity) modules, each module's dry mass
+  // plus 1 t per human (humans = "human" resource, 1 t per unit).
+  function crewTransportMass(humans, transport) {
+    if (!transport || humans <= 0) return { capsules: 0, mass: 0 };
+    var capsules = Math.ceil(humans / transport.capacity);
+    var mass = capsules * transport.mass + humans;
+    return { capsules: capsules, mass: mass };
+  }
+
   // Net power need = consumption − (production × PowerProduction bonus).
   // Positive → deficit, negative → surplus.
   function powerNetTotal(placed, checkedReductions) {
@@ -138,14 +147,15 @@
   function loadState() {
     try {
       var raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return { placed: {}, checked: {} };
+      if (!raw) return { placed: {}, checked: {}, crewTransport: null };
       var s = JSON.parse(raw);
       return {
         placed: (s && s.placed) || {},
         checked: (s && s.checked) || {},
+        crewTransport: (s && s.crewTransport) || null,
       };
     } catch (e) {
-      return { placed: {}, checked: {} };
+      return { placed: {}, checked: {}, crewTransport: null };
     }
   }
 
@@ -721,6 +731,7 @@
     removeSaved: removeSaved,
     iconFile: iconFile,
     fmtAbbrev: fmtAbbrev,
+    crewTransportMass: crewTransportMass,
   };
 
   if (typeof module !== 'undefined' && module.exports) {
