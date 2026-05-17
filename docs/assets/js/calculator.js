@@ -364,7 +364,7 @@
         '<div class="calc-facility-cat-name">' + escapeHtml(cat) + '</div>' +
         '<ul>' +
         visible.map(function (f) {
-          return '<li class="calc-facility-item" draggable="true" data-id="' + escapeHtml(f.id) + '" title="Click or drag to add">' +
+          return '<li class="calc-facility-item" draggable="true" data-id="' + escapeHtml(f.id) + '" data-tip="Click or drag to add">' +
             escapeHtml(f.name) +
             '</li>';
         }).join('') +
@@ -434,7 +434,7 @@
       var pipsHtml = (r.fac.build_cost || []).map(function (bc) {
         var amount = reduced[bc.resource] || 0;
         var resName = (ctx.resById[bc.resource] && ctx.resById[bc.resource].name) || bc.resource;
-        return '<span class="calc-pip" title="' + escapeHtml(resName + ': ' + amount.toLocaleString()) + '">' +
+        return '<span class="calc-pip" data-tip="' + escapeHtml(resName + ': ' + amount.toLocaleString()) + '">' +
           '<span class="calc-pip-num">' + fmtAbbrev(amount) + '</span>' +
           '<img class="calc-pip-icon" src="' + escapeHtml(iconUrl(bc.resource)) + '" alt="">' +
           '</span>';
@@ -444,10 +444,10 @@
         '<span class="calc-placed-cost">' + pipsHtml + '</span>' +
         '<span class="calc-placed-counter">' +
           '<button type="button" class="calc-dec" data-id="' + escapeHtml(r.id) + '">−</button>' +
-          '<span class="calc-count" data-id="' + escapeHtml(r.id) + '" title="Click to edit">' + r.count + '</span>' +
+          '<span class="calc-count" data-id="' + escapeHtml(r.id) + '" data-tip="Click to edit">' + r.count + '</span>' +
           '<button type="button" class="calc-inc" data-id="' + escapeHtml(r.id) + '">+</button>' +
         '</span>' +
-        '<button type="button" class="calc-remove" data-id="' + escapeHtml(r.id) + '" title="Remove">×</button>' +
+        '<button type="button" class="calc-remove" data-id="' + escapeHtml(r.id) + '" data-tip="Remove">×</button>' +
         '</li>';
     }).join('') + '</ul>';
   }
@@ -530,9 +530,9 @@
     if (!ctx.saved.length) return '';
     return ctx.saved.map(function (s) {
       return '<span class="calc-saved-item" data-name="' + escapeHtml(s.name) + '">' +
-        '<button type="button" class="calc-saved-load" data-name="' + escapeHtml(s.name) + '" title="Load">' +
+        '<button type="button" class="calc-saved-load" data-name="' + escapeHtml(s.name) + '" data-tip="Load">' +
         escapeHtml(s.name) + '</button>' +
-        '<button type="button" class="calc-saved-delete" data-name="' + escapeHtml(s.name) + '" title="Delete">×</button>' +
+        '<button type="button" class="calc-saved-delete" data-name="' + escapeHtml(s.name) + '" data-tip="Delete">×</button>' +
       '</span>';
     }).join('');
   }

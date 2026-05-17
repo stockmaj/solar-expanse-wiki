@@ -571,6 +571,33 @@ main hr {
   vertical-align: middle;
   margin-right: 6px;
 }
+
+/* Fast custom tooltips — 100ms vs the browser's ~500ms for native title=. */
+#calc-root [data-tip] {
+  position: relative;
+}
+#calc-root [data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--code-bg);
+  color: var(--fg);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 3px 6px;
+  font-size: 12px;
+  line-height: 1.3;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  z-index: 10;
+  transition: opacity 0s 0.1s;
+}
+#calc-root [data-tip]:hover::after {
+  opacity: 1;
+}
 #calc-root .calc-placed-row:last-child {
   border-bottom: 0;
 }
