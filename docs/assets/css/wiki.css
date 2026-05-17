@@ -675,6 +675,9 @@ main hr {
 #calc-root .calc-totals thead:first-child .calc-section {
   padding-top: 0;
 }
+#calc-root .calc-totals .calc-total-row td {
+  border-top: 2px solid var(--rule);
+}
 
 /* Fast custom tooltips — single floating element on <body> (positioned by JS).
    Lives outside the calc panes' overflow:auto so it isn't clipped. 100ms

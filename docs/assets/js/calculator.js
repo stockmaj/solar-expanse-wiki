@@ -112,7 +112,12 @@
   }
 
   // Crew transport: ceil(humans / capacity) modules, each module's dry mass
-  // plus 1 t per human (humans = "human" resource, 1 t per unit).
+  // plus 1 t per human.
+  //
+  // The +1 t/human term is observed for Module Crew Compartment (5-seat,
+  // 5 t empty → 10 t loaded with 5 crew). The dump doesn't carry a per-human
+  // mass field, so we extrapolate to Medium / Large. If the in-game launch
+  // UI shows a different loaded mass for those once unlocked, update here.
   function crewTransportMass(humans, transport) {
     if (!transport || humans <= 0) return { capsules: 0, mass: 0 };
     var capsules = Math.ceil(humans / transport.capacity);
@@ -750,10 +755,10 @@
 
     var html = '<table class="calc-totals">';
     if (cargoRows.length) {
+      var totalRow = '<tr class="calc-total-row"><td><strong>Total tons</strong></td>' +
+        '<td class="calc-num"><strong>' + grand.toLocaleString() + '</strong></td></tr>';
       html += '<thead><tr><th colspan="2" class="calc-section">Cargo (to ship)</th></tr></thead>' +
-        '<tbody>' + cargoRows.map(rowHtml).join('') + '</tbody>' +
-        '<tfoot><tr><td><strong>Total tons</strong></td>' +
-        '<td class="calc-num"><strong>' + grand.toLocaleString() + '</strong></td></tr></tfoot>';
+        '<tbody>' + cargoRows.map(rowHtml).join('') + totalRow + '</tbody>';
     }
     if (operationalRows.length) {
       html += '<thead><tr><th colspan="2" class="calc-section">Operational (on-site)</th></tr></thead>' +
