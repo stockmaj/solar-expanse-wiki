@@ -70,8 +70,8 @@ Kepler's third law (`T_years = a^(3/2)`) and
 | **Venus** | Planet | 0.723 | 0.62 yr | 584 days (~19.2 months) |
 | **EX0-99 Extinctor** | Asteroid | 0.732 | 0.63 yr | 612 days (~20.1 months) |
 | **99942 Apophis** | Asteroid | 0.923 | 0.89 yr | 7.8 years |
-| **3753 Cruithne** | Asteroid | 0.998 | 1.00 yr | 294.0 years |
-| **469219 Kamoʻoalewa** | Asteroid | 1.001 | 1.00 yr | 710.8 years |
+| **3753 Cruithne** | Asteroid | 0.998 | 1.00 yr | <span title="This body's orbital period is nearly Earth's, so the synodic-period formula produces an extreme value. See the Practical reading bullet below.">294.0 years *(near-resonance — see note below)*</span> |
+| **469219 Kamoʻoalewa** | Asteroid | 1.001 | 1.00 yr | <span title="This body's orbital period is nearly Earth's, so the synodic-period formula produces an extreme value. See the Practical reading bullet below.">710.8 years *(near-resonance — see note below)*</span> |
 | **101955 Bennu** | Asteroid | 1.126 | 1.20 yr | 6.1 years |
 | **25143 Itokawa** | Asteroid | 1.324 | 1.52 yr | 2.9 years |
 | **Mars** | Planet | 1.524 | 1.88 yr | 2.1 years |
@@ -139,6 +139,7 @@ watched their cargo manifest waiting for one of these.
 outer planets move slowly relative to Earth, so Earth laps them almost
 yearly.  The Hohmann transfer itself takes years.
 - Asteroid-belt bodies sit between Mars and Jupiter — windows ~14–16 months.
+- **Near-resonance bodies** (Cruithne at 0.998 AU, Kamoʻoalewa at 1.001 AU) share Earth's orbital period almost exactly, so `1/T_earth − 1/T_body` is tiny and the synodic-period formula produces multi-century intervals. The number is mathematically correct but practically meaningless — these bodies are effectively co-orbital, so any month is a launch month and the in-game planner handles phasing directly.
 
 Moons aren't here — launching from Earth to the Moon (or Phobos, Europa, etc.)
 doesn't have a useful synodic period; you wait for your spacecraft to be

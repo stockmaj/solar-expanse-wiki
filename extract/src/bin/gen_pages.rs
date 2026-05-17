@@ -622,10 +622,26 @@ fn exoplanet_table(ctx: &WikiCtx, ids: &[&str]) -> String {
         .iter()
         .map(|id| {
             let display = ctx.display(id);
-            vec![format!("**{display}**")]
+            let body = ctx.body(id);
+            let mass = body.and_then(|b| b.mass_1e24_kg);
+            let radius = body.and_then(|b| b.radius_km);
+            let a = body.and_then(|b| b.semi_major_axis_au);
+            let e = body.and_then(|b| b.eccentricity);
+            let i = body.and_then(|b| b.inclination_deg);
+            vec![
+                format!("**{display}**"),
+                fmt_mass(mass),
+                fmt_radius(radius),
+                fmt_au(a),
+                fmt_opt(e, 4),
+                fmt_opt(i, 2),
+            ]
         })
         .collect();
-    md_table(&["Planet"], &rows)
+    md_table(
+        &["Planet", "Mass (×10²⁴ kg)", "Radius (km)", "Semi-major axis (AU)", "Eccentricity", "Inclination (°)"],
+        &rows,
+    )
 }
 
 fn page_exoplanets(ctx: &WikiCtx) -> String {
@@ -635,6 +651,7 @@ fn page_exoplanets(ctx: &WikiCtx) -> String {
         "# Exoplanet Systems\n\n\
 Distant star systems reachable only through interstellar travel via a generation\n\
 ship constructed in the late game.\n\n\
+_Semi-major axis here is measured around the host star, not the Sun._\n\n\
 ## TRAPPIST-1\n\n\
 A red dwarf star with seven terrestrial planets, several within its habitable zone.\n\n\
 {trappist}\n\
@@ -707,10 +724,21 @@ fn page_launch_windows(ctx: &WikiCtx) -> String {
         .iter()
         .map(|(display, a, t_years, syn, _, body_type)| {
             let synodic_days = syn * 365.25;
-            let synodic_label = if *syn < 2.0 {
+            let base_label = if *syn < 2.0 {
                 format!("{:.0} days (~{:.1} months)", synodic_days, syn * 12.0)
             } else {
                 format!("{:.1} years", syn)
+            };
+            // Bodies in near-1:1 resonance with Earth (semi-major axis very
+            // close to 1 AU) yield synodic periods of centuries — the math
+            // is right but the number reads as a bug.  Flag those rows.
+            let synodic_label = if *syn > 50.0 {
+                format!(
+                    "<span title=\"This body's orbital period is nearly Earth's, so the synodic-period formula produces an extreme value. See the Practical reading bullet below.\">{} *(near-resonance — see note below)*</span>",
+                    base_label
+                )
+            } else {
+                base_label
             };
             vec![
                 format!("**{}**", display),
@@ -815,7 +843,8 @@ Kepler's third law (`T_years = a^(3/2)`) and\n\
 - **Earth → Jupiter and beyond** are short intervals (~13 months) because the\n\
   outer planets move slowly relative to Earth, so Earth laps them almost\n\
   yearly.  The Hohmann transfer itself takes years.\n\
-- Asteroid-belt bodies sit between Mars and Jupiter — windows ~14–16 months.\n\n\
+- Asteroid-belt bodies sit between Mars and Jupiter — windows ~14–16 months.\n\
+- **Near-resonance bodies** (Cruithne at 0.998 AU, Kamoʻoalewa at 1.001 AU) share Earth's orbital period almost exactly, so `1/T_earth − 1/T_body` is tiny and the synodic-period formula produces multi-century intervals. The number is mathematically correct but practically meaningless — these bodies are effectively co-orbital, so any month is a launch month and the in-game planner handles phasing directly.\n\n\
 Moons aren't here — launching from Earth to the Moon (or Phobos, Europa, etc.)\n\
 doesn't have a useful synodic period; you wait for your spacecraft to be\n\
 ready and the in-game flight planner handles phasing.\n\n\
@@ -909,11 +938,14 @@ fn page_celestial_index() -> String {
     let count_table = md_table(&["Type", "Count", "Notes"], &rows);
     format!(
         "# Celestial Bodies\n\n\
-All natural objects in Solar Expanse — from the Sun and the nine planets, through\n\
+All natural objects in Solar Expanse — from the nine planets, through\n\
 moons and asteroid belts, out to comets and the Trappist-1 and Kepler-90\n\
 exoplanet systems reachable in the late game.\n\n\
 {count_table}\n\
 ## Orbital data\n\n\
+Orbital elements below are anchored at the **2020-01-01 campaign-start epoch**\n\
+the game ships — the same epoch the in-game flight planner uses for its\n\
+initial body positions.\n\n\
 | Field | Meaning | Unit |\n\
 | --- | --- | --- |\n\
 | Mass | Body mass | 10²⁴ kg |\n\
@@ -2707,8 +2739,10 @@ the names, descriptions, and stat tables here match exactly what you see in-game
 | [Resources](resources/) | The 20+ resource types — water, metals, fissiles, He-3, supplies, exotic alloys. |\n\
 | [Corporations](corporations/) | Playable starting factions — SoleX, NASA, ESA, CNSA, Roscosmos. |\n\n\
 ## How to use this wiki\n\n\
-Every page is plain Markdown that renders directly on GitHub — no static-site\n\
-generator, no theme, no JS. Browse by clicking section links above.\n\n\
+Every page is plain Markdown. Jekyll renders the site on GitHub Pages, with a\n\
+custom layout, a sortable-table snippet, and three small browser-side modules\n\
+that power the launch-window, gravity-assist, and corporation-comparison\n\
+calculators. Browse by clicking section links above.\n\n\
 ## Contributing\n\n\
 Almost every page is generated from the game's own files; direct edits get\n\
 overwritten when the pipeline reruns. Fixes belong in the [generator code](https://github.com/stockmaj/solar-expanse-wiki/tree/main/extract).\n\
@@ -3120,6 +3154,166 @@ mod tests {
         assert!(
             !row.contains("× crew compartment"),
             "raw lowercased module target leaked: {row}"
+        );
+    }
+
+    // ---------- Page-polish fixes ----------
+
+    /// Build a launch-windows fixture context with Earth, Mars, and Cruithne.
+    /// Cruithne's semi-major axis (0.998 AU) is the textbook near-resonance
+    /// case where the synodic-period formula blows up to a ~294-year interval.
+    fn launch_windows_fixture() -> (Locale, Stats) {
+        let locale = Locale {
+            celestial_bodies: vec![
+                CelestialBody { id: "Earth".into(), name: "Earth".into() },
+                CelestialBody { id: "Mars".into(), name: "Mars".into() },
+                CelestialBody { id: "Cruithne".into(), name: "Cruithne".into() },
+            ],
+            spacecraft: vec![],
+            launch_vehicles: vec![],
+            research: vec![],
+            corporations: vec![],
+            contracts: vec![],
+            resources: vec![],
+            facilities: vec![],
+            habitability_scales: BTreeMap::new(),
+            cargo: vec![],
+        };
+        let make = |name: &str, a: f64| Body {
+            name: name.into(),
+            parent: None,
+            mass_1e24_kg: None,
+            radius_km: None,
+            semi_major_axis_au: Some(a),
+            eccentricity: Some(0.0),
+            inclination_deg: Some(0.0),
+            perihelion_au: None,
+            longitude_deg: Some(0.0),
+            omega_lc_deg: None,
+            omega_uc_deg: None,
+            body_type: None,
+            orbit_data_source: Some("SolarBody".into()),
+        };
+        let stats = Stats {
+            bodies: vec![
+                make("Earth", 1.0),
+                make("Mars", 1.524),
+                make("Cruithne", 0.998),
+            ],
+        };
+        (locale, stats)
+    }
+
+    #[test]
+    fn launch_windows_flags_near_resonance_bodies() {
+        let (locale, stats) = launch_windows_fixture();
+        let ctx = WikiCtx::build(&locale, &stats);
+        let page = page_launch_windows(&ctx);
+        let cruithne_row = page
+            .lines()
+            .find(|l| l.contains("**Cruithne**"))
+            .expect("Cruithne row present in launch-windows table");
+        assert!(
+            cruithne_row.contains("(near-resonance"),
+            "Cruithne row should carry the near-resonance marker: {cruithne_row}"
+        );
+        let mars_row = page
+            .lines()
+            .find(|l| l.contains("**Mars**"))
+            .expect("Mars row present");
+        assert!(
+            !mars_row.contains("near-resonance"),
+            "Mars row should not be flagged: {mars_row}"
+        );
+        // The Practical reading bullet must explain the artifact.
+        assert!(
+            page.contains("near-resonance"),
+            "Practical reading should reference the near-resonance artifact"
+        );
+    }
+
+    #[test]
+    fn exoplanet_row_renders_five_columns_for_populated_body() {
+        let locale = Locale {
+            celestial_bodies: vec![
+                CelestialBody { id: "Trappist-1b".into(), name: "Trappist-1b".into() },
+            ],
+            spacecraft: vec![],
+            launch_vehicles: vec![],
+            research: vec![],
+            corporations: vec![],
+            contracts: vec![],
+            resources: vec![],
+            facilities: vec![],
+            habitability_scales: BTreeMap::new(),
+            cargo: vec![],
+        };
+        let stats = Stats {
+            bodies: vec![Body {
+                name: "Trappist-1b".into(),
+                parent: None,
+                mass_1e24_kg: Some(1.37),
+                radius_km: Some(6900.0),
+                semi_major_axis_au: Some(0.0115),
+                eccentricity: Some(0.006),
+                inclination_deg: Some(89.7),
+                perihelion_au: None,
+                longitude_deg: None,
+                omega_lc_deg: None,
+                omega_uc_deg: None,
+                body_type: None,
+                orbit_data_source: Some("SolarBody".into()),
+            }],
+        };
+        let ctx = WikiCtx::build(&locale, &stats);
+        let page = page_exoplanets(&ctx);
+        let row = page
+            .lines()
+            .find(|l| l.contains("**Trappist-1b**"))
+            .expect("Trappist-1b row present");
+        // Six cells = name + Mass + Radius + a + e + i ⇒ seven pipes.
+        let pipe_count = row.chars().filter(|c| *c == '|').count();
+        assert_eq!(
+            pipe_count, 7,
+            "exoplanet row should have 6 cells (7 pipes): {row}"
+        );
+        assert!(row.contains("1.37"), "mass missing from row: {row}");
+        assert!(row.contains("0.0115"), "semi-major axis missing: {row}");
+        // Page should explain that exoplanet `a` is around the host star.
+        assert!(
+            page.contains("host star"),
+            "page should note exoplanet a is around the host star, not the Sun"
+        );
+    }
+
+    #[test]
+    fn corporations_page_pulls_traits_from_locale_struct() {
+        let locale = Locale {
+            celestial_bodies: vec![],
+            spacecraft: vec![],
+            launch_vehicles: vec![],
+            research: vec![],
+            corporations: vec![Corporation {
+                id: "sentinel_corp".into(),
+                name: "Sentinel Industries".into(),
+                description: "Watches the inner system.".into(),
+                traits: "● Sentinel trait line".into(),
+            }],
+            contracts: vec![],
+            resources: vec![],
+            facilities: vec![],
+            habitability_scales: BTreeMap::new(),
+            cargo: vec![],
+        };
+        let sirenix = Sirenix::default();
+        let page = page_corporations(&locale, &sirenix);
+        assert!(
+            page.contains("● Sentinel trait line"),
+            "page should render the locale's traits string verbatim:\n{page}"
+        );
+        assert!(
+            page.contains("Sentinel Industries"),
+            "page should render the corp name from locale:\n{page}"
         );
     }
 }
