@@ -92,6 +92,18 @@ struct Sirenix {
     contracts: Vec<ContractStat>,
     #[serde(default)]
     scenario_starts: Vec<ScenarioStartStat>,
+    #[serde(default)]
+    epochs: Vec<EpochStat>,
+}
+
+#[derive(Deserialize, Clone, Default)]
+struct EpochStat {
+    id: String,
+    start_date_string: String,
+    #[allow(dead_code)]
+    is_locked: bool,
+    #[serde(default)]
+    possible_player_companies: Vec<String>,
 }
 
 #[derive(Deserialize, Clone, Default)]
@@ -135,6 +147,14 @@ struct ContractStat {
     spacecraft_grants: Vec<String>,
     launch_vehicle_grants: Vec<String>,
     resource_grants: Vec<ResourceCost>,
+    /// In-game date when the contract first becomes offerable. Format is
+    /// `MM/DD/YYYY` from the dump; rendered as just `YYYY` on the table.
+    #[serde(default)]
+    date_start_active: Option<String>,
+    /// Years the contract stays offerable before it disappears. `0` means
+    /// "never expires" → rendered as "—".
+    #[serde(default)]
+    years_to_expire: f64,
 }
 
 #[derive(Deserialize, Clone)]
@@ -1404,6 +1424,75 @@ fn scenario_display_name(scenario_id: &str) -> String {
     }
 }
 
+/// Map a `StartGameEpoch_*` id to the human-facing name shown on the New
+/// Game customization screen.  No locale entry exists for these in the
+/// shipped strings; the names mirror the in-game UI labels.
+fn epoch_display_name(epoch_id: &str) -> &'static str {
+    match epoch_id {
+        "StartGameEpoch_Prelude" => "Prelude",
+        "StartGameEpoch_EarlyExploration" => "Early Exploration",
+        "StartGameEpoch_Colonization" => "Colonization Era",
+        "StartGameEpoch_TheExpansion" => "The Expansion",
+        "StartGameEpoch_RaceBeyond" => "Race Beyond",
+        _ => "Unknown",
+    }
+}
+
+/// Pull the four-digit year out of an epoch's `startDateString`, which is
+/// formatted as `DD.MM.YYYY HH:MM:SS` in the Sirenix dump (note: dots, not
+/// slashes — different from the contract `dateStartActive` format).
+fn extract_epoch_year(s: &str) -> Option<String> {
+    // Two acceptable input shapes from the dump: `01.01.2100 00:00:00` and
+    // a bare `01.01.2100`. The first token (date) splits on '.' into
+    // [day, month, year].
+    let date = s.split_whitespace().next()?;
+    let parts: Vec<&str> = date.split('.').collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    let year = parts[2];
+    if year.len() == 4 && year.chars().all(|c| c.is_ascii_digit()) {
+        Some(year.to_string())
+    } else {
+        None
+    }
+}
+
+/// Render the "Opens" column for a contract row.  Input is the raw
+/// `dateStartActive` string from the dump (`MM/DD/YYYY`); we return just
+/// the year, or "—" if missing/empty/malformed.
+fn format_contract_opens(date_start_active: Option<&str>) -> String {
+    let s = match date_start_active {
+        Some(s) if !s.is_empty() => s,
+        _ => return "—".to_string(),
+    };
+    let parts: Vec<&str> = s.split('/').collect();
+    if parts.len() != 3 {
+        return "—".to_string();
+    }
+    let year = parts[2];
+    if year.len() == 4 && year.chars().all(|c| c.is_ascii_digit()) {
+        year.to_string()
+    } else {
+        "—".to_string()
+    }
+}
+
+/// Render the "Expires in" column.  `0` (or any non-positive) means the
+/// contract never expires; we show "—" in that case.  Anything positive
+/// rounds to the nearest year and appends " yr".
+fn format_contract_expires(years_to_expire: f64) -> String {
+    if !years_to_expire.is_finite() || years_to_expire <= 0.0 {
+        return "—".to_string();
+    }
+    let rounded = years_to_expire.round() as i64;
+    if rounded <= 0 {
+        "—".to_string()
+    } else {
+        format!("{} yr", rounded)
+    }
+}
+
 fn page_corporations(locale: &Locale, sirenix: &Sirenix) -> String {
     // Build research id → display name lookup from locale (e.g.
     // "research_nukeprop_2" → "Solid-core nuclear-thermal engines").
@@ -1421,8 +1510,61 @@ pre-built save where every corporation starts with its own completed\n\
 research, funding, and fleet. Difficulty further scales starting money\n\
 and ongoing costs.\n\n\
 _Prelude and Early-Exploration scenarios are procedural and not listed\n\
-here — they have no pre-built save data._\n\n",
+in the comparison table — they have no pre-built save data, but they\n\
+do appear in the epoch timeline below._\n\n",
     );
+
+    // ── Epoch / Timeline ──────────────────────────────────────────────────
+    // Renders the five `StartGameEpoch` entries from the Sirenix dump as a
+    // small lookup table: human-facing epoch name, in-game start year, and
+    // the corp roster the player may choose at that epoch. Corp lists are
+    // alphabetised so the column reads consistently across rows.
+    if !sirenix.epochs.is_empty() {
+        out.push_str("## Epoch / Timeline\n\n");
+        out.push_str(
+            "Solar Expanse ships five start epochs, each with its own in-game\n\
+start year and roster of playable corporations. The Prelude and Early\n\
+Exploration epochs are procedural (no pre-built save); the later three\n\
+ship the comparison saves below.\n\n",
+        );
+        let epoch_rows: Vec<Vec<String>> = sirenix
+            .epochs
+            .iter()
+            .map(|e| {
+                let name = epoch_display_name(&e.id);
+                let year = extract_epoch_year(&e.start_date_string)
+                    .unwrap_or_else(|| "—".to_string());
+                let mut corps = e.possible_player_companies.clone();
+                corps.sort();
+                corps.dedup();
+                let corp_cell = if corps.is_empty() {
+                    "—".to_string()
+                } else {
+                    corps.join(", ")
+                };
+                let notes = match e.id.as_str() {
+                    "StartGameEpoch_Prelude" => "Procedural; no pre-built save",
+                    "StartGameEpoch_EarlyExploration" => "Procedural; no pre-built save",
+                    "StartGameEpoch_Colonization" => "Locked behind story progression",
+                    "StartGameEpoch_TheExpansion" => "Locked behind story progression",
+                    "StartGameEpoch_RaceBeyond" => "Locked behind story progression",
+                    _ => "",
+                };
+                vec![
+                    format!("**{}**", name),
+                    year,
+                    escape_cell(&corp_cell),
+                    notes.to_string(),
+                ]
+            })
+            .collect();
+        let epoch_table = md_table(
+            &["Epoch", "Start year", "Playable corporations", "Notes"],
+            &epoch_rows,
+        );
+        out.push_str(&epoch_table);
+        out.push_str("\n");
+    }
 
     // Difficulty also modifies upkeep and supply usage, which the
     // comparison table doesn't surface — keep that as a one-line note so
@@ -2186,11 +2328,15 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
             };
 
             let order_cell = depth.get(c.id.as_str()).copied().unwrap_or(0).to_string();
+            let opens_cell = format_contract_opens(c.date_start_active.as_deref());
+            let expires_cell = format_contract_expires(c.years_to_expire);
 
             vec![
                 order_cell,
                 name_cell,
                 prereq_cell,
+                opens_cell,
+                expires_cell,
                 requirements,
                 rewards,
                 escape_cell(&premise),
@@ -2198,11 +2344,13 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
         })
         .collect();
     let table = md_table_with_tips(
-        &["Order", "Contract", "Prereq", "Requirements", "Rewards", "Premise"],
+        &["Order", "Contract", "Prereq", "Opens", "Expires in", "Requirements", "Rewards", "Premise"],
         &[
             Some("Dependency depth: 0 = no prereq, N = unlocked after an Order N-1 contract"),
             None,
             Some("Contracts that must complete before this one is offered"),
+            Some("In-game year the contract first becomes offerable"),
+            Some("Years the contract stays offerable before it disappears (— = never expires)"),
             Some("Objectives that must be completed to claim the rewards"),
             Some("Cash, resources, unlocks, and follow-up contracts granted on completion"),
             None,
@@ -2947,6 +3095,8 @@ mod tests {
             spacecraft_grants: vec![],
             launch_vehicle_grants: vec![],
             resource_grants: vec![],
+            date_start_active: None,
+            years_to_expire: 0.0,
         }
     }
 
@@ -3120,6 +3270,128 @@ mod tests {
         assert!(
             !row.contains("× crew compartment"),
             "raw lowercased module target leaked: {row}"
+        );
+    }
+
+    #[test]
+    fn contract_row_shows_opens_year_from_date_start_active() {
+        let locale = contracts_fixture_locale();
+        let mut c = make_contract("contract_tutorial_moonlanding", vec![], vec![]);
+        c.date_start_active = Some("01/01/2050".into());
+        c.years_to_expire = 5.0;
+        let sirenix = Sirenix {
+            contracts: vec![c],
+            ..Default::default()
+        };
+        let page = page_contracts(&locale, &sirenix);
+        let row = page
+            .lines()
+            .find(|l| l.contains("Lunar Landing"))
+            .expect("Lunar Landing row present");
+        assert!(
+            row.contains("2050"),
+            "Opens column should render year 2050: {row}"
+        );
+        assert!(
+            row.contains("5 yr"),
+            "Expires column should render '5 yr': {row}"
+        );
+    }
+
+    #[test]
+    fn contract_row_renders_dash_for_zero_expiry_and_missing_date() {
+        let locale = contracts_fixture_locale();
+        let mut c = make_contract("contract_tutorial_moonlanding", vec![], vec![]);
+        c.date_start_active = None;
+        c.years_to_expire = 0.0;
+        let sirenix = Sirenix {
+            contracts: vec![c],
+            ..Default::default()
+        };
+        let page = page_contracts(&locale, &sirenix);
+        let row = page
+            .lines()
+            .find(|l| l.contains("Lunar Landing"))
+            .expect("Lunar Landing row present");
+        // The row must include the Opens and Expires cells; both should be "—"
+        // when nothing is known.  The cell separator count tells us they're
+        // present at all.
+        let cell_count = row.matches(" | ").count();
+        assert!(
+            cell_count >= 7,
+            "expected Opens + Expires columns present, got row: {row}"
+        );
+        // Look for "—" appearing at least twice in this row (Opens + Expires).
+        let dash_count = row.matches('—').count();
+        assert!(
+            dash_count >= 2,
+            "expected '—' in Opens and Expires columns, got row: {row}"
+        );
+    }
+
+    #[test]
+    fn corporations_page_includes_epoch_timeline_section() {
+        let locale = Locale {
+            celestial_bodies: vec![],
+            spacecraft: vec![],
+            launch_vehicles: vec![],
+            research: vec![],
+            corporations: vec![],
+            contracts: vec![],
+            resources: vec![],
+            facilities: vec![],
+            habitability_scales: BTreeMap::new(),
+            cargo: vec![],
+        };
+        let sirenix = Sirenix {
+            epochs: vec![
+                EpochStat {
+                    id: "StartGameEpoch_Prelude".into(),
+                    start_date_string: "01.01.1959 00:00:00".into(),
+                    is_locked: false,
+                    possible_player_companies: vec!["NASA".into()],
+                },
+                EpochStat {
+                    id: "StartGameEpoch_EarlyExploration".into(),
+                    start_date_string: "01.01.2000 00:00:00".into(),
+                    is_locked: false,
+                    possible_player_companies: vec!["NASA".into(), "ESA".into()],
+                },
+                EpochStat {
+                    id: "StartGameEpoch_Colonization".into(),
+                    start_date_string: "01.01.2100 00:00:00".into(),
+                    is_locked: true,
+                    possible_player_companies: vec!["NASA".into()],
+                },
+                EpochStat {
+                    id: "StartGameEpoch_TheExpansion".into(),
+                    start_date_string: "01.01.2200 00:00:00".into(),
+                    is_locked: true,
+                    possible_player_companies: vec!["NASA".into()],
+                },
+                EpochStat {
+                    id: "StartGameEpoch_RaceBeyond".into(),
+                    start_date_string: "01.01.2300 00:00:00".into(),
+                    is_locked: true,
+                    possible_player_companies: vec!["NASA".into()],
+                },
+            ],
+            ..Default::default()
+        };
+        let page = page_corporations(&locale, &sirenix);
+        // A timeline section exists with each epoch's display name.
+        assert!(page.contains("Prelude"), "missing Prelude:\n{page}");
+        assert!(page.contains("Early Exploration"), "missing Early Exploration:\n{page}");
+        assert!(page.contains("Colonization Era"), "missing Colonization Era:\n{page}");
+        assert!(page.contains("The Expansion"), "missing The Expansion:\n{page}");
+        assert!(page.contains("Race Beyond"), "missing Race Beyond:\n{page}");
+        // Year column should render plain four-digit years (parsed from DD.MM.YYYY).
+        assert!(page.contains("1959"), "missing year 1959:\n{page}");
+        assert!(page.contains("2100"), "missing year 2100:\n{page}");
+        // Internal id must NOT leak into player-facing output.
+        assert!(
+            !page.contains("StartGameEpoch_"),
+            "internal epoch id leaked into page:\n{page}"
         );
     }
 }
