@@ -50,7 +50,7 @@ lift them to space.
 
 | Spacecraft | <span title="Dry mass in tonnes">Mass (t)</span> | <span title="Cargo capacity in tonnes">Cargo (t)</span> | <span title="Fuel capacity in tonnes">Fuel (t)</span> | <span title="Default engine thrust">Thrust</span> | <span title="Effective exhaust velocity — chemical ~3-5 km/s, nuclear ~8-15, fusion 20+">Exhaust V</span> | <span title="Survives the trip and can fly again (Yes / Partial / No)">Reusable</span> | <span title="Where the spacecraft is assembled — Orbit means built in an orbital shipyard; Surface means built on a planet">Built at</span> | <span title="Resources required to construct">Build cost</span> | <span title="Build time in days">Time (d)</span> | Description |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| <a id="spacecraft-spacecraft-capsule"></a>**Orbital Payload Container** | 0 | 999999 | 0 | — | — | Yes | Surface | — | 0 | Container for cargo deployed to orbit. |
+| <a id="spacecraft-spacecraft-capsule"></a>**Orbital Payload Container** | 0 | 800 | 0 | — | — | Yes | — | — | — | Container for cargo deployed to orbit. |
 
 
 ## Reading the table

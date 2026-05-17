@@ -110,6 +110,34 @@ struct ContractObjective {
     target: Option<String>,       // facility id, resource id, etc.
 }
 
+/// Per-corporation starting state for a single pre-built save scenario
+/// (StartGameColonization / StartGameExpansion / StartGameRaceBeyond).
+/// The values are read out of `StartGameData[].companyDataSave[]` — these
+/// are the canonical pre-rolled saves shipped with the game.
+#[derive(Serialize, Debug, Default, PartialEq)]
+struct CorpStart {
+    /// e.g. "NASA", "Solex", "Roscosmos". Matches CompanyDefinition.id.
+    company_id: String,
+    /// Pioneer (normal) starting money. Apply DifficultyConfig multipliers
+    /// (1.25x Explorer, 1.0x Pioneer, 0.75x Veteran) for the other tiers.
+    starting_money: f64,
+    /// Ids of research already completed when the scenario starts.
+    /// References `ResearchDefinition.id` (e.g. "research_chem_main1").
+    completed_research: Vec<String>,
+    /// Count of launch vehicles in the company's starting fleet.
+    starting_launch_vehicles: i64,
+    /// Count of spacecraft in the company's starting fleet.
+    starting_spacecraft: i64,
+}
+
+/// One pre-built save scenario, listing every playable corp's starting state.
+/// `scenario_id` matches the `$name` field in StartGameData entries.
+#[derive(Serialize, Debug, Default, PartialEq)]
+struct ScenarioStart {
+    scenario_id: String, // e.g. "StartGameColonization", "StartGameExpansion", "StartGameRaceBeyond"
+    corp_starts: Vec<CorpStart>,
+}
+
 #[derive(Serialize, Debug, Default, PartialEq)]
 struct Contract {
     id: String,
@@ -133,6 +161,7 @@ struct Sirenix {
     space_components: Vec<SpaceComponent>,
     resources: Vec<Resource>,
     contracts: Vec<Contract>,
+    scenario_starts: Vec<ScenarioStart>,
 }
 
 fn parse_spacecraft(v: &Value) -> Option<Spacecraft> {
@@ -539,6 +568,169 @@ fn parse_contract(v: &Value) -> Option<Contract> {
     })
 }
 
+/// Parse a single `StartGameData` entry from the Sirenix dump into a
+/// `ScenarioStart` (per-corp starting research / funding / fleet counts).
+///
+/// The data lives inside `serializationData.SerializationNodes`, which is
+/// a flat node stream emitted by Sirenix's serializer. We walk the stream
+/// to find the `companyDataSave` array and, for each company, extract:
+///   * `companyID.id`               → corp name
+///   * `researchDataToSave.completeResearch[].id` → completed research ids
+///   * `launchVehicles[]` / `spacecrafts[]` array counts → starting fleet
+///   * `money`                      → starting funding (Pioneer/Normal base)
+///
+/// Returns `None` if the entry has no populated `companyDataSave` (the
+/// Kepler/Trapist/PerfectSystem placeholders, and the empty SceneJSON).
+fn parse_scenario_start(entry: &Value) -> Option<ScenarioStart> {
+    let scenario_id = entry.get("$name").and_then(|v| v.as_str())?.to_string();
+    // Skip non-scenario / placeholder entries. Pre-built saves are
+    // exactly the three real epoch scenarios; everything else is a
+    // test/dev artifact or an empty placeholder.
+    let scenario_kind = match scenario_id.as_str() {
+        "StartGameColonization" | "StartGameExpansion" | "StartGameRaceBeyond" => scenario_id.clone(),
+        _ => return None,
+    };
+
+    let nodes = entry.pointer("/serializationData/SerializationNodes")?.as_array()?;
+
+    // Find the `companyDataSave` field, then the inner StartOfArray
+    // whose `Data` carries the company count.
+    let mut i = 0usize;
+    while i < nodes.len() {
+        if name_of(&nodes[i]) == "companyDataSave" && entry_of(&nodes[i]) == "StartOfNode" {
+            break;
+        }
+        i += 1;
+    }
+    if i >= nodes.len() {
+        return None;
+    }
+    // Next non-empty node should be StartOfArray with count.
+    let mut j = i + 1;
+    while j < nodes.len() && entry_of(&nodes[j]) != "StartOfArray" {
+        j += 1;
+    }
+    if j >= nodes.len() {
+        return None;
+    }
+    let n_companies: usize = data_of(&nodes[j]).parse().unwrap_or(0);
+    let mut idx = j + 1;
+    let mut corp_starts: Vec<CorpStart> = Vec::new();
+    for _ in 0..n_companies {
+        // Skip ahead to next StartOfNode at depth 0 inside the array.
+        while idx < nodes.len() && entry_of(&nodes[idx]) != "StartOfNode" {
+            idx += 1;
+        }
+        if idx >= nodes.len() {
+            break;
+        }
+        let (corp, next) = walk_company(nodes, idx);
+        if let Some(c) = corp {
+            corp_starts.push(c);
+        }
+        idx = next;
+    }
+
+    // Filter out WorldGovernment (the AI faction, not a playable corp).
+    corp_starts.retain(|c| c.company_id != "WorldGovernment");
+    corp_starts.sort_by(|a, b| a.company_id.cmp(&b.company_id));
+
+    Some(ScenarioStart {
+        scenario_id: scenario_kind,
+        corp_starts,
+    })
+}
+
+fn name_of(n: &Value) -> &str {
+    n.get("Name").and_then(|v| v.as_str()).unwrap_or("")
+}
+fn entry_of(n: &Value) -> &str {
+    n.get("Entry").and_then(|v| v.as_str()).unwrap_or("")
+}
+fn data_of(n: &Value) -> &str {
+    n.get("Data").and_then(|v| v.as_str()).unwrap_or("")
+}
+
+/// Walk one `Game.CompanyDataSave` node (starting at `nodes[start]` which
+/// must be a `StartOfNode`). Returns the parsed `CorpStart` and the index
+/// just past the matching `EndOfNode`.
+fn walk_company(nodes: &[Value], start: usize) -> (Option<CorpStart>, usize) {
+    let mut depth: i32 = 0;
+    let mut j = start;
+    let mut company = CorpStart::default();
+    let mut got_company_id = false;
+    let mut in_complete_research = false;
+    let mut cr_depth: i32 = -1;
+    // Track depth at which each named sub-array opened, so we can grab its
+    // StartOfArray count without confusing it with nested arrays.
+    while j < nodes.len() {
+        let n = &nodes[j];
+        let e = entry_of(n);
+        let nm = name_of(n);
+
+        // The very first 'id' string (companyID.id) — captured before any other.
+        if e == "String" && nm == "id" && !got_company_id {
+            company.company_id = data_of(n).to_string();
+            got_company_id = true;
+        }
+        // Each named list opens with StartOfNode whose next StartOfArray
+        // carries the count. We just read it directly.
+        if e == "StartOfNode" {
+            if nm == "launchVehicles" {
+                if let Some(next) = nodes.get(j + 1) {
+                    if entry_of(next) == "StartOfArray" {
+                        company.starting_launch_vehicles =
+                            data_of(next).parse().unwrap_or(0);
+                    }
+                }
+            } else if nm == "spacecrafts" {
+                if let Some(next) = nodes.get(j + 1) {
+                    if entry_of(next) == "StartOfArray" {
+                        company.starting_spacecraft = data_of(next).parse().unwrap_or(0);
+                    }
+                }
+            } else if nm == "completeResearch" {
+                in_complete_research = true;
+                cr_depth = depth;
+            }
+        }
+        if in_complete_research && e == "String" && nm == "id" {
+            // Each completed-research entry is a tiny node with just `id`.
+            // We already captured the company id earlier, so any subsequent
+            // 'id' string inside the completeResearch region is research.
+            company.completed_research.push(data_of(n).to_string());
+        }
+        if e == "FloatingPoint" && nm == "money" {
+            if let Ok(v) = data_of(n).parse::<f64>() {
+                company.starting_money = v;
+            }
+        }
+
+        // Update depth and detect closing of completeResearch and the
+        // overall company node.
+        if e == "StartOfNode" || e == "StartOfArray" {
+            depth += 1;
+        } else if e == "EndOfNode" || e == "EndOfArray" {
+            depth -= 1;
+            if in_complete_research && depth == cr_depth {
+                in_complete_research = false;
+            }
+            if depth == 0 {
+                j += 1;
+                return (
+                    if got_company_id { Some(company) } else { None },
+                    j,
+                );
+            }
+        }
+        j += 1;
+    }
+    (
+        if got_company_id { Some(company) } else { None },
+        j,
+    )
+}
+
 fn parse_build_cost(list: Option<&Value>) -> Vec<ResourceCost> {
     let arr = match list.and_then(|v| v.as_array()) {
         Some(a) => a,
@@ -664,6 +856,25 @@ fn main() -> Result<()> {
         .unwrap_or_default();
     contracts.sort_by(|a, b| a.id.cmp(&b.id));
 
+    // Pre-built starting saves (Colonization / Expansion / RaceBeyond).
+    // Each StartGameData entry encodes one full pre-rolled save scene; we
+    // pluck out just the per-company starting research / money / fleet.
+    let mut scenario_starts: Vec<ScenarioStart> = raw
+        .get("StartGameData")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(parse_scenario_start).collect())
+        .unwrap_or_default();
+    // Order scenarios by in-game timeline (Colonization → Expansion → RaceBeyond).
+    let timeline = |s: &ScenarioStart| -> u8 {
+        match s.scenario_id.as_str() {
+            "StartGameColonization" => 0,
+            "StartGameExpansion" => 1,
+            "StartGameRaceBeyond" => 2,
+            _ => 99,
+        }
+    };
+    scenario_starts.sort_by_key(timeline);
+
     let out = Sirenix {
         spacecraft,
         launch_vehicles,
@@ -672,10 +883,11 @@ fn main() -> Result<()> {
         space_components,
         resources,
         contracts,
+        scenario_starts,
     };
     serde_json::to_writer_pretty(fs::File::create(&output)?, &out)?;
     eprintln!(
-        "wrote {} ({} spacecraft, {} LVs, {} research, {} facilities, {} components, {} resources, {} contracts)",
+        "wrote {} ({} spacecraft, {} LVs, {} research, {} facilities, {} components, {} resources, {} contracts, {} scenarios)",
         output.display(),
         out.spacecraft.len(),
         out.launch_vehicles.len(),
@@ -684,6 +896,7 @@ fn main() -> Result<()> {
         out.space_components.len(),
         out.resources.len(),
         out.contracts.len(),
+        out.scenario_starts.len(),
     );
     Ok(())
 }
@@ -905,6 +1118,93 @@ mod tests {
         assert_eq!(r.bonus_amount, 5.0);
         assert_eq!(r.bonus_components, vec!["eng_chem"]);
         assert!(r.unlock_target.is_none());
+    }
+
+    fn scenario_fixture() -> Value {
+        // A trimmed StartGameData entry that mirrors the real dump's
+        // companyDataSave region: two companies (NASA and WorldGovernment),
+        // with NASA having two completed researches and a single starting
+        // launch vehicle / two starting spacecraft.
+        // The serialization node stream is a flat list of name/entry/data
+        // triples — same as `serializationData.SerializationNodes` in the
+        // real dump.
+        serde_json::json!({
+            "$name": "StartGameColonization",
+            "id": "StartGameExpansion",
+            "serializationData": {
+                "SerializationNodes": [
+                    { "Name": "companyDataSave", "Entry": "StartOfNode", "Data": "0|List`1[CompanyDataSave]" },
+                    { "Name": "", "Entry": "StartOfArray", "Data": "2" },
+                    { "Name": "", "Entry": "StartOfNode", "Data": "1|CompanyDataSave" },
+                    { "Name": "companyID", "Entry": "StartOfNode", "Data": "2|CompanyIDSave" },
+                    { "Name": "id", "Entry": "String", "Data": "NASA" },
+                    { "Name": "", "Entry": "EndOfNode", "Data": "" },
+                    { "Name": "launchVehicles", "Entry": "StartOfNode", "Data": "3|List`1" },
+                    { "Name": "", "Entry": "StartOfArray", "Data": "1" },
+                    { "Name": "", "Entry": "EndOfArray", "Data": "" },
+                    { "Name": "", "Entry": "EndOfNode", "Data": "" },
+                    { "Name": "spacecrafts", "Entry": "StartOfNode", "Data": "4|List`1" },
+                    { "Name": "", "Entry": "StartOfArray", "Data": "2" },
+                    { "Name": "", "Entry": "EndOfArray", "Data": "" },
+                    { "Name": "", "Entry": "EndOfNode", "Data": "" },
+                    { "Name": "researchDataToSave", "Entry": "StartOfNode", "Data": "5|ResearchDataToSave" },
+                    { "Name": "completeResearch", "Entry": "StartOfNode", "Data": "6|List`1" },
+                    { "Name": "", "Entry": "StartOfArray", "Data": "2" },
+                    { "Name": "", "Entry": "StartOfNode", "Data": "7|ResearchDefinitionSave" },
+                    { "Name": "id", "Entry": "String", "Data": "research_chem_main1" },
+                    { "Name": "", "Entry": "EndOfNode", "Data": "" },
+                    { "Name": "", "Entry": "StartOfNode", "Data": "8|ResearchDefinitionSave" },
+                    { "Name": "id", "Entry": "String", "Data": "research_lv_main1" },
+                    { "Name": "", "Entry": "EndOfNode", "Data": "" },
+                    { "Name": "", "Entry": "EndOfArray", "Data": "" },
+                    { "Name": "", "Entry": "EndOfNode", "Data": "" },
+                    { "Name": "", "Entry": "EndOfNode", "Data": "" },
+                    { "Name": "money", "Entry": "FloatingPoint", "Data": "35900000" },
+                    { "Name": "", "Entry": "EndOfNode", "Data": "" },
+                    { "Name": "", "Entry": "StartOfNode", "Data": "9|CompanyDataSave" },
+                    { "Name": "companyID", "Entry": "StartOfNode", "Data": "10|CompanyIDSave" },
+                    { "Name": "id", "Entry": "String", "Data": "WorldGovernment" },
+                    { "Name": "", "Entry": "EndOfNode", "Data": "" },
+                    { "Name": "money", "Entry": "FloatingPoint", "Data": "500000000" },
+                    { "Name": "", "Entry": "EndOfNode", "Data": "" },
+                    { "Name": "", "Entry": "EndOfArray", "Data": "" },
+                    { "Name": "", "Entry": "EndOfNode", "Data": "" }
+                ]
+            }
+        })
+    }
+
+    #[test]
+    fn parses_scenario_start_for_colonization() {
+        let s = parse_scenario_start(&scenario_fixture()).expect("colonization should parse");
+        assert_eq!(s.scenario_id, "StartGameColonization");
+        // WorldGovernment must be filtered out — only NASA remains.
+        assert_eq!(s.corp_starts.len(), 1);
+        let nasa = &s.corp_starts[0];
+        assert_eq!(nasa.company_id, "NASA");
+        assert_eq!(nasa.starting_money, 35_900_000.0);
+        assert_eq!(nasa.starting_launch_vehicles, 1);
+        assert_eq!(nasa.starting_spacecraft, 2);
+        assert_eq!(
+            nasa.completed_research,
+            vec!["research_chem_main1".to_string(), "research_lv_main1".to_string()]
+        );
+    }
+
+    #[test]
+    fn skips_placeholder_and_test_scenarios() {
+        // Kepler/Trapist/PerfectSystem placeholders have $name like
+        // "StartGameKepler"; only the three real epoch scenarios should parse.
+        let placeholder = serde_json::json!({
+            "$name": "StartGameKepler",
+            "serializationData": { "SerializationNodes": [] }
+        });
+        assert!(parse_scenario_start(&placeholder).is_none());
+        let test = serde_json::json!({
+            "$name": "testStartGAme",
+            "serializationData": { "SerializationNodes": [] }
+        });
+        assert!(parse_scenario_start(&test).is_none());
     }
 
     #[test]

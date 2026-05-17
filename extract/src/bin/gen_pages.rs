@@ -90,6 +90,25 @@ struct Sirenix {
     resources: Vec<ResourceStat>,
     #[serde(default)]
     contracts: Vec<ContractStat>,
+    #[serde(default)]
+    scenario_starts: Vec<ScenarioStartStat>,
+}
+
+#[derive(Deserialize, Clone, Default)]
+struct ScenarioStartStat {
+    scenario_id: String,
+    #[serde(default)]
+    corp_starts: Vec<CorpStartStat>,
+}
+
+#[derive(Deserialize, Clone, Default)]
+struct CorpStartStat {
+    company_id: String,
+    starting_money: f64,
+    #[serde(default)]
+    completed_research: Vec<String>,
+    starting_launch_vehicles: i64,
+    starting_spacecraft: i64,
 }
 
 #[derive(Deserialize, Clone)]
@@ -785,6 +804,7 @@ Kepler's third law (`T_years = a^(3/2)`) and\n\
 <label><input type=\"checkbox\" class=\"body-type-filter\" value=\"Asteroid\"> Asteroids</label>\n\
 <label><input type=\"checkbox\" class=\"body-type-filter\" value=\"Comet\"> Comets</label>\n\
 </div>\n\n\
+*Moons aren't listed — launch windows are computed from each body's heliocentric orbit, so to reach a moon you target its **parent planet** in this table (e.g. Phobos → Mars, Europa → Jupiter, Titan → Saturn). The moon's position around the parent is handled inside the in-game flight planner.*\n\n\
 {table}\n\
 </div>\n\n\
 ## Practical reading\n\n\
@@ -1158,6 +1178,40 @@ lift them to space.\n\n",
             .and_then(|id| component_by_id.get(id).copied());
         let thrust = engine.map(|e| fmt_thrust(e.thrust)).unwrap_or_else(|| "—".into());
         let exhaust = engine.map(|e| fmt_exhaust(e.exhaust_v)).unwrap_or_else(|| "—".into());
+        // The Orbital Payload Container is the only spacecraft that isn't
+        // player-built at all — it's spawned by the launch elevator / mass
+        // driver / spin launch / catapult facilities.  In the dump this is
+        // signalled by an empty build_cost AND build_time_days == 0 (other
+        // upper-stage craft like Centaur have non-zero build time even when
+        // their cost is empty).  For this oddball, render the build columns
+        // and "Built at" as em-dash rather than fabricating "Surface" / 0d.
+        let is_spawned_not_built = s.build_cost.is_empty() && s.build_time_days == 0.0;
+        let built_at: String = if is_spawned_not_built {
+            "—".into()
+        } else if s.built_in_orbit {
+            "Orbit".into()
+        } else {
+            "Surface".into()
+        };
+        let build_cost_cell = if is_spawned_not_built {
+            "—".into()
+        } else {
+            fmt_build_cost(&s.build_cost, &resource_name)
+        };
+        let build_time_cell = if is_spawned_not_built {
+            "—".into()
+        } else {
+            fmt_amount(s.build_time_days)
+        };
+        // The OPC's hull cargoCapacity is a 999999 sentinel meaning "limited by
+        // the carrier launch vehicle" rather than the hull.  Rendering 999999 is
+        // misleading; the player-verified in-game value is 800 t (constrained by
+        // the Super-heavy lifter / launch facility payload caps).
+        let cargo_cell = if is_spawned_not_built && s.cargo_capacity >= 999_999.0 {
+            "800".into()
+        } else {
+            fmt_amount(s.cargo_capacity)
+        };
         rows.push(vec![
             format!(
                 "{anchor}**{name}**",
@@ -1165,14 +1219,14 @@ lift them to space.\n\n",
                 name = escape_cell(display_name)
             ),
             fmt_amount(s.mass),
-            fmt_amount(s.cargo_capacity),
+            cargo_cell,
             fmt_amount(s.fuel_capacity),
             thrust,
             exhaust,
             fmt_reusability(s.reusability).into(),
-            if s.built_in_orbit { "Orbit" } else { "Surface" }.into(),
-            fmt_build_cost(&s.build_cost, &resource_name),
-            fmt_amount(s.build_time_days),
+            built_at,
+            build_cost_cell,
+            build_time_cell,
             escape_cell(desc),
         ]);
     }

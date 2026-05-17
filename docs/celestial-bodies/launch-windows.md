@@ -62,6 +62,8 @@ Kepler's third law (`T_years = a^(3/2)`) and
 <label><input type="checkbox" class="body-type-filter" value="Comet"> Comets</label>
 </div>
 
+*Moons aren't listed — launch windows are computed from each body's heliocentric orbit, so to reach a moon you target its **parent planet** in this table (e.g. Phobos → Mars, Europa → Jupiter, Titan → Saturn). The moon's position around the parent is handled inside the in-game flight planner.*
+
 | Body | <span title="Planet, Asteroid, or Comet — used by the filter checkboxes above">Type</span> | <span title="Average distance from the Sun in astronomical units (1 AU = Earth's distance)">Semi-major axis (AU)</span> | <span title="Time for one orbit around the Sun, derived from a via Kepler's third law">Orbital period</span> | <span title="Interval between consecutive Hohmann-style launch opportunities from Earth — the synodic period">Earth ↔ body window</span> |
 | --- | --- | --- | --- | --- |
 | **Mercury** | Planet | 0.387 | 0.24 yr | 116 days (~3.8 months) |
