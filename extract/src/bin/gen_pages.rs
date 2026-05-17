@@ -695,12 +695,13 @@ Kepler's third law (`T_years = a^(3/2)`) and `synodic = 1 / |1/T_inner −\n\
 1/T_outer|`.\n\n\
 {table}\n\
 ## Practical reading\n\n\
+- **Earth → Mercury** opens most often — ~116 days, less than every 4 months.\n\
+- **Earth → Venus** ~19 months.\n\
 - **Earth → Mars** opens roughly every 26 months — every mid-game player has\n\
   watched their cargo manifest waiting for one of these.\n\
-- **Earth → Venus** is the most frequent, ~19 months.\n\
-- **Earth → Jupiter and beyond** are short windows on long intervals\n\
-  (Jupiter ~13 months, but the long Hohmann transfer time means missions are\n\
-  flying for years).\n\
+- **Earth → Jupiter and beyond** are short intervals (~13 months) because the\n\
+  outer planets move slowly relative to Earth, so Earth laps them almost\n\
+  yearly.  The Hohmann transfer itself takes years.\n\
 - **Earth → asteroid belt** (Ceres, Vesta, Pallas) sits between Mars and\n\
   Jupiter — windows ~14–16 months.\n\n\
 Moons aren't in this table — launching from Earth to the Moon (or Phobos,\n\
@@ -1353,6 +1354,19 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
         .map(|r| (r.id.as_str(), r.name.as_str()))
         .collect();
 
+    // Reverse lookup: contract_id → list of contracts that unlock it via their
+    // rewards.  Contracts don't carry an explicit prerequisite field; the
+    // dependency lives on the *source* contract as a reward, e.g.
+    //   Mars Phase 1.rewards += UnlockContract(parameter1 = "contract_mars_marspreptwo")
+    let mut unlocked_by: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for c in &sirenix.contracts {
+        for u in &c.unlock_rewards {
+            if u.starts_with("contract_") {
+                unlocked_by.entry(u.as_str()).or_default().push(c.id.as_str());
+            }
+        }
+    }
+
     // Skip non-player tutorial contracts (their wiki value is low).  Heuristic: anything
     // whose name is empty in the locale, or whose id contains "_test".
     let mut entries: Vec<&ContractStat> = sirenix
@@ -1455,28 +1469,52 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
                 reward_bits.join("<br>")
             };
 
-            let display = if c.is_final {
+            let anchor = anchor_tag("contract", &c.id);
+            let name_body = if c.is_final {
                 format!("**{}** *(final)*", escape_cell(display))
             } else {
                 format!("**{}**", escape_cell(display))
             };
+            let name_cell = format!("{anchor}{name_body}");
+
+            // Prereq column — which contracts must complete before this one
+            // is offered.  Built from the reverse-rewards lookup.
+            let prereq_cell = match unlocked_by.get(c.id.as_str()) {
+                None => "—".to_string(),
+                Some(srcs) => srcs
+                    .iter()
+                    .map(|src| {
+                        let pretty = contract_name.get(src).copied().unwrap_or(src);
+                        link_same_page("contract", src, &escape_cell(pretty))
+                    })
+                    .collect::<Vec<_>>()
+                    .join("<br>"),
+            };
 
             vec![
-                display,
+                name_cell,
+                prereq_cell,
                 requirements,
                 rewards,
                 escape_cell(&premise),
             ]
         })
         .collect();
-    let table = md_table(
-        &["Contract", "Requirements", "Rewards", "Premise"],
+    let table = md_table_with_tips(
+        &["Contract", "Prereq", "Requirements", "Rewards", "Premise"],
+        &[
+            None,
+            Some("Contracts that must complete before this one is offered"),
+            Some("Objectives that must be completed to claim the rewards"),
+            Some("Cash, resources, unlocks, and follow-up contracts granted on completion"),
+            None,
+        ],
         &rows,
     );
     format!(
         "# Contracts\n\n\
-Story and freelance contracts are the **funding missions** that drive\n\
-progression in Solar Expanse. Each contract is a set of objectives — usually\n\
+Contracts drive progression in Solar Expanse — they're the game's source of\n\
+funding alongside resource sales. Each contract is a set of objectives — usually\n\
 \"build facility X on body Y\" or \"deliver Z to a destination\" — that pay\n\
 out cash, resources, or unlocks when complete. Many contracts also unlock\n\
 the next link in a chain (Mars Phase 1 → Mars Phase 2 → …), a new spacecraft,\n\
@@ -1903,8 +1941,8 @@ Physics, Biotech), each subdivided into focused sub-branches.\n\n",
 }
 
 fn page_missions(locale: &Locale, sirenix: &Sirenix) -> String {
-    // Missions in this wiki = the in-game contract list (your "funding missions").
-    // Reuse the contracts page's table generator and prepend a planning-flow primer.
+    // The Missions page combines the planning-flow primer with the in-game
+    // contracts list (the game's word for what drives progression).
     let contracts_table = page_contracts(locale, sirenix);
     // Strip the "# Contracts\n\n…\n\n" preamble — we want just the table + reading notes.
     let table_only = contracts_table
@@ -1915,13 +1953,16 @@ fn page_missions(locale: &Locale, sirenix: &Sirenix) -> String {
 
     format!(
         "# Missions\n\n\
-A *mission* in Solar Expanse is one of two things, both shown here.\n\n\
-1. **Funding missions** (the game's *Contracts* — listed in the table below): a fixed set of\n\
-   objectives that pay out cash, resources, or unlocks when complete. These\n\
-   are the primary income source in single-player.\n\
-2. **Flight missions**: an individual scheduled trip you plan in Plan Mission\n\
-   (Earth → Mars on day N). Flight missions are runtime state, not static\n\
-   data — see the **planning flow** section below.\n\n\
+This page covers two related concepts, both of which the game calls\n\
+\"missions\" depending on context.\n\n\
+1. **Contracts** — the in-game *Contracts* tab, listed below.  A contract is\n\
+   a fixed set of objectives that pays out cash, resources, or unlocks when\n\
+   complete.  Contracts are the primary source of progression and funding\n\
+   in single-player.\n\
+2. **Flight missions** — an individual scheduled trip you plan in Plan\n\
+   Mission (Earth → Mars on day N).  Flight missions are runtime state,\n\
+   not static data — see the **planning flow** section below for how to\n\
+   set one up.\n\n\
 ## Planning flow\n\n\
 Plan Mission walks you through five steps:\n\n\
 1. **Destination** — pick the target body (and landing type if applicable).\n\

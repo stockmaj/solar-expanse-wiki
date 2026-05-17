@@ -27,12 +27,13 @@ Kepler's third law (`T_years = a^(3/2)`) and `synodic = 1 / |1/T_inner −
 
 ## Practical reading
 
+- **Earth → Mercury** opens most often — ~116 days, less than every 4 months.
+- **Earth → Venus** ~19 months.
 - **Earth → Mars** opens roughly every 26 months — every mid-game player has
 watched their cargo manifest waiting for one of these.
-- **Earth → Venus** is the most frequent, ~19 months.
-- **Earth → Jupiter and beyond** are short windows on long intervals
-(Jupiter ~13 months, but the long Hohmann transfer time means missions are
-flying for years).
+- **Earth → Jupiter and beyond** are short intervals (~13 months) because the
+outer planets move slowly relative to Earth, so Earth laps them almost
+yearly.  The Hohmann transfer itself takes years.
 - **Earth → asteroid belt** (Ceres, Vesta, Pallas) sits between Mars and
 Jupiter — windows ~14–16 months.
 
