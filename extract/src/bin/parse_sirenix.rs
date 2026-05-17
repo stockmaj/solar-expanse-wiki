@@ -168,6 +168,13 @@ struct CorpStart {
     starting_launch_vehicles: i64,
     /// Count of spacecraft in the company's starting fleet.
     starting_spacecraft: i64,
+    /// Facilities the company owns at scenario load, as `(build_* id, count)`
+    /// pairs sorted by id.  Walked from `objectInfoDatas[].productionItems[]`
+    /// — each Facility node carries an `idProductionItemType` String — and
+    /// attributed to the corp via the enclosing ObjectInfoData's
+    /// `companyId.id`.  Duplicates collapse to a single entry with its count.
+    #[serde(default)]
+    starting_facilities: Vec<(String, u32)>,
 }
 
 /// One pre-built save scenario, listing every playable corp's starting state.
@@ -992,6 +999,18 @@ fn parse_scenario_start(
         idx = next;
     }
 
+    // Walk the same SerializationNodes again to collect per-corp starting
+    // facilities. `objectInfoDatas[]` is a peer of `companyDataSave`; each
+    // ObjectInfoData carries `companyId.id` (owning corp) and a
+    // `productionItems[]` list of Facility nodes (each with an
+    // `idProductionItemType` String).
+    let facilities_by_corp = collect_starting_facilities(nodes);
+    for corp in corp_starts.iter_mut() {
+        if let Some(list) = facilities_by_corp.get(&corp.company_id) {
+            corp.starting_facilities = list.clone();
+        }
+    }
+
     // Filter out WorldGovernment (the AI faction, not a playable corp).
     corp_starts.retain(|c| c.company_id != "WorldGovernment");
     corp_starts.sort_by(|a, b| a.company_id.cmp(&b.company_id));
@@ -1000,6 +1019,122 @@ fn parse_scenario_start(
         scenario_id: epoch_id,
         corp_starts,
     })
+}
+
+/// Walk a flat SerializationNodes array and build a per-corp facility list.
+/// Each Facility node lives inside some ObjectInfoData scope; the owning
+/// corp is the `companyId.id` of that enclosing ObjectInfoData.
+///
+/// Strategy: track depth, remember the most-recent ObjectInfoData's
+/// `companyId.id`, then capture every `idProductionItemType` String we see
+/// inside that scope.  When we exit the ObjectInfoData, drop the corp until
+/// we enter the next one.
+///
+/// Returns `corp_id → Vec<(facility_id, count)>` sorted by facility id, so
+/// downstream consumers get a deterministic order.
+fn collect_starting_facilities(nodes: &[Value]) -> std::collections::HashMap<String, Vec<(String, u32)>> {
+    use std::collections::HashMap;
+    // `obj_stack` records, for each nested ObjectInfoData node currently
+    // open, the depth at which it opened plus the corp id (None until we've
+    // captured the companyId.id String).  Real dumps don't nest
+    // ObjectInfoData entries, but tracking a stack keeps the logic robust
+    // against the serializer's quirks.
+    let mut depth: i32 = 0;
+    let mut obj_stack: Vec<(i32, Option<String>)> = Vec::new();
+    // Tracks whether the current `companyId` sub-node belongs to the
+    // currently-open ObjectInfoData (vs. some other companyId field nested
+    // deeper).  `inside_company_id_field` is true between
+    // `companyId StartOfNode` and the matching EndOfNode within the
+    // topmost ObjectInfoData scope.
+    let mut company_id_open_at: Option<i32> = None;
+    let mut counts: HashMap<String, HashMap<String, u32>> = HashMap::new();
+
+    for n in nodes {
+        let e = entry_of(n);
+        let nm = name_of(n);
+        // Match `ObjectInfoData` exactly — not `ObjectInfoData+ObjectInfoDataIDSave`
+        // (a nested type that appears inside RowResourcesData) and not the
+        // various List`1 wrappers carrying ObjectInfoData as a generic arg.
+        let data = data_of(n);
+        let after_pipe = data.find('|').map(|i| &data[i + 1..]).unwrap_or(data);
+        let is_object_info_data = e == "StartOfNode"
+            && nm.is_empty() // outer ObjectInfoData entries are array items (Name="")
+            && (after_pipe.starts_with("ObjectInfoData,")
+                || after_pipe.starts_with("Game.ObjectInfoDataScripts.ObjectInfoData,"));
+
+        // Mark entry into ObjectInfoData BEFORE updating depth so the
+        // stored depth is the level the node sits at.
+        if is_object_info_data {
+            obj_stack.push((depth, None));
+        }
+        // Mark entry into a `companyId` sub-node — only at the top of the
+        // currently-open ObjectInfoData (depth == obj_open_depth + 1).
+        if let Some(&(obj_depth, ref corp)) = obj_stack.last() {
+            if corp.is_none()
+                && e == "StartOfNode"
+                && nm == "companyId"
+                && depth == obj_depth + 1
+            {
+                company_id_open_at = Some(depth);
+            }
+        }
+        // Capture the `id` String inside the open companyId sub-node.
+        if let Some(_cid_depth) = company_id_open_at {
+            if e == "String" && nm == "id" {
+                if let Some(top) = obj_stack.last_mut() {
+                    if top.1.is_none() {
+                        top.1 = Some(data_of(n).to_string());
+                    }
+                }
+            }
+        }
+        // Capture every idProductionItemType String while we're inside an
+        // ObjectInfoData scope.  `idProductionItemType` is a Facility-only
+        // field, so we can grab it without scoping to `productionItems` /
+        // `listFacility`.  Filter to `build_*` ids — that's the facility
+        // namespace (vs. spacecraft/launch-vehicle production items).
+        if e == "String" && nm == "idProductionItemType" {
+            if let Some(&(_, Some(ref corp))) = obj_stack.last() {
+                let id = data_of(n).to_string();
+                if id.starts_with("build_") {
+                    *counts
+                        .entry(corp.clone())
+                        .or_default()
+                        .entry(id)
+                        .or_insert(0) += 1;
+                }
+            }
+        }
+
+        // Depth bookkeeping (after field captures, before close handling).
+        if e == "StartOfNode" || e == "StartOfArray" {
+            depth += 1;
+        } else if e == "EndOfNode" || e == "EndOfArray" {
+            // Close companyId sub-node when we return to its open depth.
+            if let Some(cid_depth) = company_id_open_at {
+                if depth == cid_depth {
+                    company_id_open_at = None;
+                }
+            }
+            depth -= 1;
+            // Close the top ObjectInfoData when we return to (or below) its
+            // open depth — i.e., when the matching EndOfNode for the
+            // ObjectInfoData itself fires.
+            if let Some(&(obj_depth, _)) = obj_stack.last() {
+                if depth == obj_depth {
+                    obj_stack.pop();
+                }
+            }
+        }
+    }
+
+    let mut out: HashMap<String, Vec<(String, u32)>> = HashMap::new();
+    for (corp, map) in counts {
+        let mut v: Vec<(String, u32)> = map.into_iter().collect();
+        v.sort_by(|a, b| a.0.cmp(&b.0));
+        out.insert(corp, v);
+    }
+    out
 }
 
 fn name_of(n: &Value) -> &str {
@@ -1650,6 +1785,112 @@ mod tests {
         assert_eq!(
             routing.get("StartGameRaceBeyond").map(|s| s.as_str()),
             Some("StartGameEpoch_RaceBeyond")
+        );
+    }
+
+    /// Fixture that mirrors the real dump's `objectInfoDatas` region:
+    /// a peer of `companyDataSave` inside `serializationData.SerializationNodes`.
+    /// Each `ObjectInfoData` has a `companyId.id` (the owning corp) and a
+    /// `productionItems` list containing `Game.ObjectInfoDataScripts.Facility`
+    /// nodes — each with an `idProductionItemType` String (`build_*`).
+    ///
+    /// This fixture gives NASA two Noble Gas Mines and one Metal Mine, plus
+    /// a single Main Building (universal). WorldGovernment is included once
+    /// to confirm we drop its facilities.
+    fn facilities_fixture() -> Value {
+        // Build the SerializationNodes array as JSON text to avoid blowing the
+        // `serde_json::json!` macro recursion limit.
+        let node = |name: &str, entry: &str, data: &str| {
+            serde_json::json!({"Name": name, "Entry": entry, "Data": data})
+        };
+        let nodes: Vec<Value> = vec![
+            // ---- companyDataSave first (matches dump ordering) -----
+            node("companyDataSave", "StartOfNode", "0|List`1[CompanyDataSave]"),
+            node("", "StartOfArray", "1"),
+            node("", "StartOfNode", "1|CompanyDataSave"),
+            node("companyID", "StartOfNode", "2|CompanyIDSave"),
+            node("id", "String", "NASA"),
+            node("", "EndOfNode", ""),
+            node("money", "FloatingPoint", "10000000"),
+            node("", "EndOfNode", ""),
+            node("", "EndOfArray", ""),
+            node("", "EndOfNode", ""),
+            // ---- objectInfoDatas: 2 ObjectInfoData entries --------
+            node("objectInfoDatas", "StartOfNode", "100|List`1[ObjectInfoData]"),
+            node("", "StartOfArray", "2"),
+            // ObjectInfoData #1 — NASA, four facilities
+            node("", "StartOfNode", "101|Game.ObjectInfoDataScripts.ObjectInfoData, Assembly-CSharp"),
+            node("id", "Integer", "529"),
+            node("companyId", "StartOfNode", "102|CompanyIDSave"),
+            node("id", "String", "NASA"),
+            node("", "EndOfNode", ""),
+            node("productionItems", "StartOfNode", "103|List`1[ProductionItem]"),
+            node("", "StartOfArray", "4"),
+            node("", "StartOfNode", "104|Facility"),
+            node("build", "Boolean", "true"),
+            node("idProductionItemType", "String", "build_noblegasmine"),
+            node("", "EndOfNode", ""),
+            node("", "StartOfNode", "105|Facility"),
+            node("build", "Boolean", "true"),
+            node("idProductionItemType", "String", "build_noblegasmine"),
+            node("", "EndOfNode", ""),
+            node("", "StartOfNode", "106|Facility"),
+            node("build", "Boolean", "true"),
+            node("idProductionItemType", "String", "build_metalmine"),
+            node("", "EndOfNode", ""),
+            node("", "StartOfNode", "107|Facility"),
+            node("build", "Boolean", "true"),
+            node("idProductionItemType", "String", "build_main"),
+            node("", "EndOfNode", ""),
+            node("", "EndOfArray", ""),
+            node("", "EndOfNode", ""),
+            node("", "EndOfNode", ""),
+            // ObjectInfoData #2 — WorldGovernment, one facility (must be dropped)
+            node("", "StartOfNode", "201|Game.ObjectInfoDataScripts.ObjectInfoData, Assembly-CSharp"),
+            node("id", "Integer", "530"),
+            node("companyId", "StartOfNode", "202|CompanyIDSave"),
+            node("id", "String", "WorldGovernment"),
+            node("", "EndOfNode", ""),
+            node("productionItems", "StartOfNode", "203|List`1[ProductionItem]"),
+            node("", "StartOfArray", "1"),
+            node("", "StartOfNode", "204|Facility"),
+            node("idProductionItemType", "String", "build_hq"),
+            node("", "EndOfNode", ""),
+            node("", "EndOfArray", ""),
+            node("", "EndOfNode", ""),
+            node("", "EndOfNode", ""),
+            node("", "EndOfArray", ""),
+            node("", "EndOfNode", ""),
+        ];
+        serde_json::json!({
+            "$name": "StartGameColonization",
+            "id": "StartGameColonization",
+            "serializationData": {
+                "SerializationNodes": nodes,
+            }
+        })
+    }
+
+    #[test]
+    fn parses_starting_facilities_with_counts() {
+        // NASA owns: 2x noble gas mine, 1x metal mine, 1x main building.
+        // WorldGovernment is filtered out (we drop the corp entirely), so its
+        // build_hq must NOT appear under NASA.
+        let mut routing = std::collections::HashMap::new();
+        routing.insert("StartGameColonization".to_string(), "StartGameEpoch_Colonization".to_string());
+        let s = parse_scenario_start(&facilities_fixture(), &routing)
+            .expect("colonization should parse");
+        assert_eq!(s.corp_starts.len(), 1, "WorldGovernment must be filtered out");
+        let nasa = &s.corp_starts[0];
+        assert_eq!(nasa.company_id, "NASA");
+        // Counts are aggregated per facility id, sorted by id for determinism.
+        assert_eq!(
+            nasa.starting_facilities,
+            vec![
+                ("build_main".to_string(), 1),
+                ("build_metalmine".to_string(), 1),
+                ("build_noblegasmine".to_string(), 2),
+            ]
         );
     }
 

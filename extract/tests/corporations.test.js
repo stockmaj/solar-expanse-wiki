@@ -312,3 +312,152 @@ test('CORP_DATA.scenarios is ordered Early → Expansion → Colonization → Ra
 test('default-selected scenario on page load is Early Exploration', () => {
   assert.equal(C.DEFAULT_SCENARIO_ID, 'StartGameEpoch_EarlyExploration');
 });
+
+// ---- Starting facilities section ---------------------------------------
+
+// Fixture mirroring the CORP_DATA shape with per-corp starting_facilities,
+// each a `{name, count}` object resolved/title-cased by the Rust generator.
+// Only mining/extraction/refinery rows differ between corps — universals
+// like "HQ" and "Main Building" appear on every corp and are filtered out
+// by buildComparison.
+const FACILITIES_FIXTURE = {
+  scenarios: [
+    {
+      id: 'StartGameEpoch_TheExpansion',
+      name: 'The Expansion',
+      corps: [
+        { name: 'SoleX', starting_money: 27_200_000, lv_count: 0, sc_count: 0, research: [],
+          starting_facilities: [
+            { name: 'HQ',              count: 1 },
+            { name: 'Main Building',   count: 1 },
+            { name: 'Metal Mine',      count: 2 },
+            { name: 'Noble Gas Mine',  count: 1 },
+          ] },
+        { name: 'NASA',  starting_money: 30_100_000, lv_count: 0, sc_count: 0, research: [],
+          starting_facilities: [
+            { name: 'HQ',              count: 1 },
+            { name: 'Main Building',   count: 1 },
+            { name: 'Noble Gas Mine',  count: 1 },
+            { name: 'Uranium Mine',    count: 1 },
+          ] },
+        { name: 'ESA',   starting_money: 25_700_000, lv_count: 0, sc_count: 0, research: [],
+          starting_facilities: [
+            { name: 'HQ',              count: 1 },
+            { name: 'Main Building',   count: 1 },
+            { name: 'Noble Gas Mine',  count: 3 },
+          ] },
+      ],
+    },
+  ],
+  difficulties: [
+    { name: 'Pioneer', money_multiplier: 1.0 },
+  ],
+};
+
+test('buildComparison: surfaces facilityRows with per-corp counts', () => {
+  const cmp = C.buildComparison(FACILITIES_FIXTURE, 'StartGameEpoch_TheExpansion', 'Pioneer');
+  assert.ok(Array.isArray(cmp.facilityRows),
+    'buildComparison() must include a facilityRows array, got ' + JSON.stringify(cmp));
+  // Each row is `{name, counts: [n…]}` with one count per corp column.
+  cmp.facilityRows.forEach((r) => {
+    assert.ok(typeof r.name === 'string' && r.name.length > 0,
+      'facility row missing name: ' + JSON.stringify(r));
+    assert.ok(Array.isArray(r.counts) && r.counts.length === cmp.corpNames.length,
+      'facility row counts must match corpNames length: ' + JSON.stringify(r));
+  });
+  // Rows are alphabetical by facility name.
+  const names = cmp.facilityRows.map((r) => r.name);
+  const sorted = names.slice().sort();
+  assert.deepEqual(names, sorted, 'facility rows must be alphabetical, got ' + names);
+});
+
+test('buildComparison: drops universal facilities (HQ, Main Building)', () => {
+  const cmp = C.buildComparison(FACILITIES_FIXTURE, 'StartGameEpoch_TheExpansion', 'Pioneer');
+  const names = cmp.facilityRows.map((r) => r.name);
+  // HQ and Main Building are universal — every corp has one — so they
+  // carry no comparison signal and must be filtered out of the matrix.
+  assert.ok(!names.includes('HQ'), 'HQ should be filtered out, got ' + names);
+  assert.ok(!names.includes('Main Building'),
+    'Main Building should be filtered out, got ' + names);
+});
+
+test('buildComparison: facility counts line up with corpNames order', () => {
+  const cmp = C.buildComparison(FACILITIES_FIXTURE, 'StartGameEpoch_TheExpansion', 'Pioneer');
+  assert.deepEqual(cmp.corpNames, ['SoleX', 'NASA', 'ESA']);
+  // Noble Gas Mine: SoleX=1, NASA=1, ESA=3.
+  const noble = cmp.facilityRows.find((r) => r.name === 'Noble Gas Mine');
+  assert.ok(noble, 'Noble Gas Mine row missing');
+  assert.deepEqual(noble.counts, [1, 1, 3]);
+  // Metal Mine: SoleX=2, NASA=0 (none), ESA=0 (none).
+  const metal = cmp.facilityRows.find((r) => r.name === 'Metal Mine');
+  assert.ok(metal, 'Metal Mine row missing');
+  assert.deepEqual(metal.counts, [2, 0, 0]);
+  // Uranium Mine: only NASA owns one.
+  const uran = cmp.facilityRows.find((r) => r.name === 'Uranium Mine');
+  assert.ok(uran, 'Uranium Mine row missing');
+  assert.deepEqual(uran.counts, [0, 1, 0]);
+});
+
+test('renderTableMarkup: emits a "Starting facilities" section in the LEFT table', () => {
+  const cmp = C.buildComparison(FACILITIES_FIXTURE, 'StartGameEpoch_TheExpansion', 'Pioneer');
+  const html = C.renderTableMarkup(cmp);
+  // Carve out the left table.
+  const leftMatch = html.match(/<table class="corp-comparison-left"[\s\S]*?<\/table>/);
+  assert.ok(leftMatch, 'left table not found in render output');
+  const left = leftMatch[0];
+  // The "Starting facilities" header sits in the left table, AFTER the
+  // pre-built spacecraft row.
+  const facHeader = left.indexOf('Starting facilities');
+  const scRow     = left.indexOf('Pre-built spacecraft');
+  assert.ok(facHeader > scRow && scRow !== -1,
+    'Starting facilities section must follow Pre-built spacecraft in the left table, got ' +
+    JSON.stringify({ facHeader, scRow }));
+  // Each surviving facility name appears as a row label.
+  ['Metal Mine', 'Noble Gas Mine', 'Uranium Mine'].forEach((n) => {
+    assert.ok(left.indexOf(n) !== -1, 'left table missing facility row "' + n + '"');
+  });
+  // Counts render as plain integers; zero counts render as "—".
+  // Metal Mine row should carry a 2 and two em-dashes.
+  const metalRowMatch = left.match(/<tr>[^<]*<td[^>]*>Metal Mine[\s\S]*?<\/tr>/);
+  assert.ok(metalRowMatch, 'Metal Mine row not found in left table');
+  const metalRow = metalRowMatch[0];
+  assert.ok(metalRow.includes('>2<'),
+    'Metal Mine SoleX cell should show count 2, got ' + metalRow);
+  // Count of em-dashes equals number of zero-count corps for this row (2).
+  const dashes = (metalRow.match(/—/g) || []).length;
+  assert.equal(dashes, 2,
+    'expected 2 em-dashes for zero-count cells, got ' + dashes + '\n' + metalRow);
+});
+
+test('renderTableMarkup: facility rows do NOT appear in the right table', () => {
+  const cmp = C.buildComparison(FACILITIES_FIXTURE, 'StartGameEpoch_TheExpansion', 'Pioneer');
+  const html = C.renderTableMarkup(cmp);
+  const rightMatch = html.match(/<table class="corp-comparison-right"[\s\S]*?<\/table>/);
+  assert.ok(rightMatch, 'right table not found');
+  const right = rightMatch[0];
+  // The right table is research-only; facility rows must stay on the left.
+  assert.equal(right.indexOf('Starting facilities'), -1,
+    'right table should not have a Starting facilities section');
+  ['Metal Mine', 'Noble Gas Mine', 'Uranium Mine'].forEach((n) => {
+    assert.equal(right.indexOf(n), -1,
+      'facility row "' + n + '" leaked into the right table');
+  });
+});
+
+test('renderTableMarkup: omits Starting facilities header when every corp has none', () => {
+  const cmp = C.buildComparison({
+    scenarios: [{
+      id: 'X', name: 'X',
+      corps: [
+        { name: 'A', starting_money: 0, lv_count: 0, sc_count: 0, research: [],
+          starting_facilities: [] },
+        { name: 'B', starting_money: 0, lv_count: 0, sc_count: 0, research: [],
+          starting_facilities: [] },
+      ],
+    }],
+    difficulties: [{ name: 'Pioneer', money_multiplier: 1.0 }],
+  }, 'X', 'Pioneer');
+  const html = C.renderTableMarkup(cmp);
+  assert.equal(html.indexOf('Starting facilities'), -1,
+    'Starting facilities section must not render when no corp has any');
+});

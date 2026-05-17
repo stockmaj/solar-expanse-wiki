@@ -121,6 +121,11 @@ struct CorpStartStat {
     completed_research: Vec<String>,
     starting_launch_vehicles: i64,
     starting_spacecraft: i64,
+    /// `(build_* id, count)` pairs of facilities the corp owns at scenario
+    /// load.  Sourced from `objectInfoDatas[].productionItems[]` in the
+    /// Sirenix dump; duplicates collapse to a single entry with their count.
+    #[serde(default)]
+    starting_facilities: Vec<(String, u32)>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -1801,6 +1806,15 @@ in this table. The names and corp rosters below are stable.*\n\n",
         .iter()
         .map(|r| (r.id.as_str(), r.subbranch.as_str()))
         .collect();
+    // Map facility id (locale keys it WITHOUT the `build_` prefix) → display
+    // name.  Display names from locale arrive UPPERCASE (e.g. "NOBLE GAS
+    // MINE"); smart_title_case turns them into "Noble Gas Mine" before they
+    // reach the JS layer.
+    let facility_name: BTreeMap<&str, &str> = locale
+        .facilities
+        .iter()
+        .map(|f| (f.id.as_str(), f.name.as_str()))
+        .collect();
     let mut scenarios_json: Vec<serde_json::Value> = Vec::new();
     for s in &sirenix.scenario_starts {
         let mut corps_json: Vec<serde_json::Value> = Vec::new();
@@ -1848,12 +1862,38 @@ in this table. The names and corp rosters below are stable.*\n\n",
                     "category": category,
                 }))
                 .collect();
+            // Resolve each `build_*` id to its display name via locale; fall
+            // back to the prefix-stripped raw id (smart-title-cased) when the
+            // locale has no entry.  `(id, count)` pairs arrive sorted by id;
+            // we re-sort by display name alphabetically so the JS layer can
+            // emit rows in user-friendly order.
+            let mut facility_entries: Vec<(String, u32)> = cs
+                .starting_facilities
+                .iter()
+                .map(|(fid, count)| {
+                    let id_no_prefix = fid.strip_prefix("build_").unwrap_or(fid.as_str());
+                    let raw_display = facility_name
+                        .get(id_no_prefix)
+                        .copied()
+                        .unwrap_or(id_no_prefix);
+                    (smart_title_case(raw_display), *count)
+                })
+                .collect();
+            facility_entries.sort_by(|a, b| a.0.cmp(&b.0));
+            let facilities_json: Vec<serde_json::Value> = facility_entries
+                .into_iter()
+                .map(|(name, count)| serde_json::json!({
+                    "name": name,
+                    "count": count,
+                }))
+                .collect();
             corps_json.push(serde_json::json!({
                 "name": c.name,
                 "starting_money": cs.starting_money,
                 "lv_count": cs.starting_launch_vehicles,
                 "sc_count": cs.starting_spacecraft,
                 "research": research_json,
+                "starting_facilities": facilities_json,
             }));
         }
         scenarios_json.push(serde_json::json!({
@@ -4592,6 +4632,7 @@ mod tests {
                 completed_research: vec!["research_chem_main1".into()],
                 starting_launch_vehicles: 0,
                 starting_spacecraft: 0,
+                ..Default::default()
             }],
         };
         let sirenix = Sirenix {
@@ -4658,6 +4699,7 @@ mod tests {
                     completed_research: vec!["research_chem_main1".into()],
                     starting_launch_vehicles: 0,
                     starting_spacecraft: 0,
+                    ..Default::default()
                 }],
             }],
             ..Default::default()
@@ -4688,6 +4730,7 @@ mod tests {
                         completed_research: vec!["research_chem_main1".into()],
                         starting_launch_vehicles: 0,
                         starting_spacecraft: 0,
+                        ..Default::default()
                     }],
                 },
                 ScenarioStartStat {
@@ -4703,6 +4746,7 @@ mod tests {
                         ],
                         starting_launch_vehicles: 2,
                         starting_spacecraft: 4,
+                        ..Default::default()
                     }],
                 },
             ],
@@ -4767,6 +4811,7 @@ mod tests {
                     ],
                     starting_launch_vehicles: 0,
                     starting_spacecraft: 0,
+                    ..Default::default()
                 }],
             }],
             ..Default::default()
@@ -4827,6 +4872,7 @@ mod tests {
                     completed_research: vec!["research_lv_main1".into()],
                     starting_launch_vehicles: 0,
                     starting_spacecraft: 0,
+                    ..Default::default()
                 }],
             }],
             ..Default::default()
@@ -4855,6 +4901,7 @@ mod tests {
                     completed_research: vec!["research_chem_main1".into()],
                     starting_launch_vehicles: 0,
                     starting_spacecraft: 0,
+                    ..Default::default()
                 }],
             }],
             ..Default::default()
@@ -4864,6 +4911,77 @@ mod tests {
             page.contains("\"category\":\"Other\""),
             "expected fallback 'Other' category in blob:\n{page}"
         );
+    }
+
+    #[test]
+    fn corporations_corp_data_includes_starting_facilities_with_names_and_counts() {
+        // Each corp in the CORP_DATA blob must carry a `starting_facilities`
+        // array of `{name, count}` objects — name resolved via locale.facilities,
+        // count copied from the parsed Sirenix value.  This is what
+        // corporations.js needs to render the "Starting facilities" section.
+        let mut locale = corp_compare_locale();
+        // Match the locale.json schema: facility ids are stored WITHOUT the
+        // `build_` prefix (the dump uses `build_noblegasmine`, locale uses
+        // `noblegasmine`).  gen_pages strips `build_` before lookup.
+        locale.facilities = vec![
+            Facility { id: "noblegasmine".into(), name: "NOBLE GAS MINE".into(),
+                description: String::new() },
+            Facility { id: "metalmine".into(), name: "METAL MINE".into(),
+                description: String::new() },
+        ];
+        let sirenix = Sirenix {
+            scenario_starts: vec![ScenarioStartStat {
+                scenario_id: "StartGameEpoch_TheExpansion".into(),
+                corp_starts: vec![CorpStartStat {
+                    company_id: "ESA".into(),
+                    starting_money: 25_700_000.0,
+                    completed_research: vec![],
+                    starting_launch_vehicles: 0,
+                    starting_spacecraft: 0,
+                    starting_facilities: vec![
+                        ("build_noblegasmine".into(), 3),
+                        ("build_metalmine".into(), 1),
+                    ],
+                }],
+            }],
+            ..Default::default()
+        };
+        let page = page_corporations(&locale, &sirenix);
+
+        // Parse the CORP_DATA blob and walk to ESA.starting_facilities.
+        let blob_pos = page.find("window.CORP_DATA = ").expect("CORP_DATA blob present");
+        let blob_tail = &page[blob_pos + "window.CORP_DATA = ".len()..];
+        let blob_end = blob_tail.find("};").expect("CORP_DATA blob ends with `};`");
+        let blob_json = format!("{}{}", &blob_tail[..blob_end], "}");
+        let parsed: serde_json::Value = serde_json::from_str(&blob_json)
+            .unwrap_or_else(|e| panic!("CORP_DATA JSON parse failed: {e}\n{blob_json}"));
+        let esa = &parsed["scenarios"][0]["corps"]
+            .as_array()
+            .expect("corps array")
+            .iter()
+            .find(|c| c["name"].as_str() == Some("ESA"))
+            .expect("ESA corp present")
+            .clone();
+        let facs = esa["starting_facilities"]
+            .as_array()
+            .expect("starting_facilities array");
+        // Two distinct facility kinds for ESA in this fixture.
+        assert_eq!(facs.len(), 2, "expected 2 starting-facility kinds, got {facs:?}");
+        // Find each by resolved name.  Display name comes from locale (uppercase),
+        // smart-title-cased by gen_pages → "Noble Gas Mine".
+        let by_name: std::collections::HashMap<&str, i64> = facs
+            .iter()
+            .map(|f| {
+                (
+                    f["name"].as_str().expect("name string"),
+                    f["count"].as_i64().expect("count int"),
+                )
+            })
+            .collect();
+        assert_eq!(by_name.get("Noble Gas Mine"), Some(&3),
+            "expected Noble Gas Mine ×3, got {by_name:?}");
+        assert_eq!(by_name.get("Metal Mine"), Some(&1),
+            "expected Metal Mine ×1, got {by_name:?}");
     }
 
     #[test]
