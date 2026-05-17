@@ -1608,10 +1608,14 @@ do appear in the epoch timeline below._\n\n",
     if !sirenix.epochs.is_empty() {
         out.push_str("## Epoch / Timeline\n\n");
         out.push_str(
-            "Solar Expanse ships five start epochs, each with its own in-game\n\
-start year and roster of playable corporations. The Prelude and Early\n\
-Exploration epochs are procedural (no pre-built save); the later three\n\
-ship the comparison saves below.\n\n",
+            "Solar Expanse ships five start epochs, each with its own roster of\n\
+playable corporations. Three of them — Colonization Era, The Expansion,\n\
+and Race Beyond — ship pre-built saves that drive the comparison table\n\
+above; the other two start procedurally.\n\n\
+*The shipped data files carry start-year values and lock flags that\n\
+don't match what the game UI currently shows (start years drift with\n\
+patches, and lock states change as you progress), so they're not in\n\
+this table. The names and corp rosters below are stable.*\n\n",
         );
         let epoch_rows: Vec<Vec<String>> = sirenix
             .epochs
@@ -1628,24 +1632,15 @@ ship the comparison saves below.\n\n",
                 } else {
                     corps.join(", ")
                 };
-                let notes = match e.id.as_str() {
-                    "StartGameEpoch_Prelude" => "Procedural; no pre-built save",
-                    "StartGameEpoch_EarlyExploration" => "Procedural; no pre-built save",
-                    "StartGameEpoch_Colonization" => "Locked behind story progression",
-                    "StartGameEpoch_TheExpansion" => "Locked behind story progression",
-                    "StartGameEpoch_RaceBeyond" => "Locked behind story progression",
-                    _ => "",
-                };
+                let _ = year; // shipped value unreliable; see prose above
                 vec![
                     format!("**{}**", name),
-                    year,
                     escape_cell(&corp_cell),
-                    notes.to_string(),
                 ]
             })
             .collect();
         let epoch_table = md_table(
-            &["Epoch", "Start year", "Playable corporations", "Notes"],
+            &["Epoch", "Playable corporations"],
             &epoch_rows,
         );
         out.push_str(&epoch_table);
@@ -1891,14 +1886,14 @@ fn page_resources(locale: &Locale, sirenix: &Sirenix) -> String {
         &[
             "Resource",
             "Type",
-            "Price",
+            "License (Earth)",
             "Producers",
             "Description",
         ],
         &[
             None,
             Some("Normal (physical), Energy (real-time power), or Human (colonists)"),
-            Some("Starting market clearing price; supply and demand move it from there"),
+            Some("Earth licensing fee per tonne extracted — the static, meaningful price (market clearing price floats around this value as supply and demand move)"),
             None,
             None,
         ],
@@ -3994,13 +3989,16 @@ mod tests {
         assert!(page.contains("Colonization Era"), "missing Colonization Era:\n{page}");
         assert!(page.contains("The Expansion"), "missing The Expansion:\n{page}");
         assert!(page.contains("Race Beyond"), "missing Race Beyond:\n{page}");
-        // Year column should render plain four-digit years (parsed from DD.MM.YYYY).
-        assert!(page.contains("1959"), "missing year 1959:\n{page}");
-        assert!(page.contains("2100"), "missing year 2100:\n{page}");
         // Internal id must NOT leak into player-facing output.
         assert!(
             !page.contains("StartGameEpoch_"),
             "internal epoch id leaked into page:\n{page}"
+        );
+        // Year column was dropped — shipped startDateString doesn't match
+        // the years displayed in the game UI, so we don't surface it.
+        assert!(
+            !page.contains("| Start year |"),
+            "Start year column should not render: data is unreliable"
         );
     }
 

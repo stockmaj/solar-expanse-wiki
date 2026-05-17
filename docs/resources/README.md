@@ -8,7 +8,7 @@ types exist:
 - **Energy** — power; produced and consumed in real time, with limited storage in batteries.
 - **Human** — colonists; produced over time by habitats and consumed by jobs.
 
-| Resource | <span title="Normal (physical), Energy (real-time power), or Human (colonists)">Type</span> | <span title="Starting market clearing price; supply and demand move it from there">Price</span> | Producers | Description |
+| Resource | <span title="Normal (physical), Energy (real-time power), or Human (colonists)">Type</span> | <span title="Earth licensing fee per tonne extracted — the static, meaningful price (market clearing price floats around this value as supply and demand move)">License (Earth)</span> | Producers | Description |
 | --- | --- | --- | --- | --- |
 | <a id="resource-energy"></a>**Energy** | Energy | 11.5 | [Geothermal Power](../facilities/#facility-power-geothermal) | The lifeblood of modern infrastructure. Must be generated or stored continuously to prevent system failure. |
 | <a id="resource-human"></a>**Humans** | Human | 200 | — | The driving force of expansion, they need supplies to be able to work. Their survival depends on stable life support and habitability. |

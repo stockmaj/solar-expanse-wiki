@@ -12,18 +12,23 @@ do appear in the epoch timeline below._
 
 ## Epoch / Timeline
 
-Solar Expanse ships five start epochs, each with its own in-game
-start year and roster of playable corporations. The Prelude and Early
-Exploration epochs are procedural (no pre-built save); the later three
-ship the comparison saves below.
+Solar Expanse ships five start epochs, each with its own roster of
+playable corporations. Three of them — Colonization Era, The Expansion,
+and Race Beyond — ship pre-built saves that drive the comparison table
+above; the other two start procedurally.
 
-| Epoch | Start year | Playable corporations | Notes |
-| --- | --- | --- | --- |
-| **Prelude** | 1960 | Solex | Procedural; no pre-built save |
-| **Early Exploration** | 2000 | CNSA, ESA, NASA, Roscosmos, Solex | Procedural; no pre-built save |
-| **Colonization Era** | 2100 | CNSA, ESA, NASA, Roscosmos, Solex | Locked behind story progression |
-| **The Expansion** | 2100 | CNSA, ESA, NASA, Roscosmos, Solex | Locked behind story progression |
-| **Race Beyond** | 2300 | CNSA, ESA, NASA, Roscosmos, Solex | Locked behind story progression |
+*The shipped data files carry start-year values and lock flags that
+don't match what the game UI currently shows (start years drift with
+patches, and lock states change as you progress), so they're not in
+this table. The names and corp rosters below are stable.*
+
+| Epoch | Playable corporations |
+| --- | --- |
+| **Prelude** | Solex |
+| **Early Exploration** | CNSA, ESA, NASA, Roscosmos, Solex |
+| **Colonization Era** | CNSA, ESA, NASA, Roscosmos, Solex |
+| **The Expansion** | CNSA, ESA, NASA, Roscosmos, Solex |
+| **Race Beyond** | CNSA, ESA, NASA, Roscosmos, Solex |
 
 Difficulty also scales ongoing upkeep (Explorer ×0.5, Pioneer ×1, Veteran ×1.5) and supply usage by the same factors — not reflected in the table below, which only shows starting state.
 
