@@ -63,3 +63,4 @@ Habitability can be improved through terraforming.
 - [Asteroids](asteroids.md) — main belt, NEOs, Trojans/Greeks, and others
 - [Comets](comets.md) — periodic comets
 - [Exoplanets](exoplanets.md) — Trappist-1 and Kepler-90 systems
+- [Launch Windows](launch-windows.md) — synodic periods for planning Earth → body missions

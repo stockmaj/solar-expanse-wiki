@@ -600,6 +600,93 @@ rivals the Solar System in planet count.\n\n\
     )
 }
 
+fn page_launch_windows(ctx: &WikiCtx) -> String {
+    // T_years = a^(3/2) for a body orbiting the Sun (Kepler's third law, AU + years).
+    // synodic = 1 / |1/T_inner − 1/T_outer|  →  the interval between consecutive
+    // identical configurations (Hohmann-style launch opportunities).
+    let earth = match ctx.body("Earth") {
+        Some(b) => b,
+        None => return "# Launch Windows\n\nEarth data not available.\n".into(),
+    };
+    let earth_a = match earth.semi_major_axis_au {
+        Some(a) if a > 0.0 => a,
+        _ => return "# Launch Windows\n\nEarth orbital data not available.\n".into(),
+    };
+    let earth_period_years = earth_a.powf(1.5);
+
+    let mut rows: Vec<Vec<String>> = Vec::new();
+    let mut targets: Vec<&str> = PLANETS.iter().filter(|p| **p != "Earth").copied().collect();
+    // Tack on the major asteroids and Pluto's neighborhood by leveraging the same body lookup —
+    // anything orbiting the Sun is in scope.  Keep the list short to stay readable.
+    targets.extend(["Ceres", "Vesta", "Pallas"].iter().copied());
+
+    for id in &targets {
+        let b = match ctx.body(id) {
+            Some(b) => b,
+            None => continue,
+        };
+        if !matches!(b.orbit_data_source.as_deref(), Some("SolarBody")) {
+            continue;
+        }
+        let a = match b.semi_major_axis_au {
+            Some(a) if a > 0.0 => a,
+            _ => continue,
+        };
+        let t_years = a.powf(1.5);
+        let inv = 1.0 / earth_period_years - 1.0 / t_years;
+        if inv.abs() < 1e-9 {
+            continue;
+        }
+        let synodic_years = 1.0 / inv.abs();
+        let synodic_days = synodic_years * 365.25;
+        let display = ctx.display(id);
+        let synodic_label = if synodic_years < 2.0 {
+            format!("{:.0} days (~{:.1} months)", synodic_days, synodic_years * 12.0)
+        } else {
+            format!("{:.1} years", synodic_years)
+        };
+        rows.push(vec![
+            format!("**{}**", display),
+            format!("{:.3}", a),
+            format!("{:.2} yr", t_years),
+            synodic_label,
+        ]);
+    }
+    let table = md_table(
+        &["Body", "Semi-major axis (AU)", "Orbital period", "Earth ↔ body window"],
+        &rows,
+    );
+
+    format!(
+        "# Launch Windows\n\n\
+The game doesn't store launch-window dates as static data — the porkchop\n\
+plot you see in Plan Mission is computed live from current planetary\n\
+positions. What *is* knowable in advance is the **synodic period**: how\n\
+often a given pair of bodies returns to the same relative geometry. After\n\
+each synodic period, the same Hohmann-style launch opportunity comes around\n\
+again.\n\n\
+Synodic periods below are computed from each body's semi-major axis using\n\
+Kepler's third law (`T_years = a^(3/2)`) and `synodic = 1 / |1/T_inner −\n\
+1/T_outer|`.\n\n\
+{table}\n\
+## Practical reading\n\n\
+- **Earth → Mars** opens roughly every 26 months — every mid-game player has\n\
+  watched their cargo manifest waiting for one of these.\n\
+- **Earth → Venus** is the most frequent, ~19 months.\n\
+- **Earth → Jupiter and beyond** are short windows on long intervals\n\
+  (Jupiter ~13 months, but the long Hohmann transfer time means missions are\n\
+  flying for years).\n\
+- **Earth → asteroid belt** (Ceres, Vesta, Pallas) sits between Mars and\n\
+  Jupiter — windows ~14–16 months.\n\n\
+Moons aren't in this table — launching from Earth to the Moon (or Phobos,\n\
+Europa, etc.) doesn't have a useful synodic period; you just wait for your\n\
+spacecraft to be ready and the in-game flight planner handles phasing.\n\n\
+## See also\n\n\
+- [Planets](planets.md)\n\
+- [Celestial Bodies overview](README.md)\n"
+    )
+}
+
 fn page_celestial_index() -> String {
     let counts = [
         ("Planets", PLANETS.len()),
@@ -674,7 +761,8 @@ Habitability can be improved through terraforming.\n\n\
 - [Moons](moons.md) — natural satellites of each planet\n\
 - [Asteroids](asteroids.md) — main belt, NEOs, Trojans/Greeks, and others\n\
 - [Comets](comets.md) — periodic comets\n\
-- [Exoplanets](exoplanets.md) — Trappist-1 and Kepler-90 systems\n"
+- [Exoplanets](exoplanets.md) — Trappist-1 and Kepler-90 systems\n\
+- [Launch Windows](launch-windows.md) — synodic periods for planning Earth → body missions\n"
     )
 }
 
@@ -721,6 +809,28 @@ fn fmt_reusability(r: f64) -> &'static str {
     }
 }
 
+fn fmt_thrust(kn: f64) -> String {
+    // SpaceComponent.thrust is stored in newtons.  Display as kN or MN for readability.
+    if kn <= 0.0 {
+        "—".into()
+    } else if kn >= 1_000_000.0 {
+        format!("{:.1} MN", kn / 1_000_000.0)
+    } else if kn >= 1_000.0 {
+        format!("{:.0} kN", kn / 1_000.0)
+    } else {
+        format!("{:.0} N", kn)
+    }
+}
+
+fn fmt_exhaust(v: f64) -> String {
+    // exhaustV is stored in km/s.
+    if v <= 0.0 {
+        "—".into()
+    } else {
+        format!("{:.1} km/s", v)
+    }
+}
+
 fn page_spacecraft(locale: &Locale, sirenix: &Sirenix) -> String {
     let id_to_name: BTreeMap<&str, &str> = locale
         .spacecraft
@@ -736,6 +846,11 @@ fn page_spacecraft(locale: &Locale, sirenix: &Sirenix) -> String {
         .resources
         .iter()
         .map(|r| (r.id.as_str(), r.name.as_str()))
+        .collect();
+    let component_by_id: BTreeMap<&str, &SpaceComponentStat> = sirenix
+        .space_components
+        .iter()
+        .map(|c| (c.id.as_str(), c))
         .collect();
 
     // Keep only entries that have a player-facing locale name AND a populated stat row.
@@ -772,6 +887,8 @@ lift them to space.\n\n",
                 "Mass (t)",
                 "Cargo (t)",
                 "Fuel (t)",
+                "Engine thrust",
+                "Exhaust V",
                 "Reusable",
                 "Built at",
                 "Build cost",
@@ -800,11 +917,19 @@ lift them to space.\n\n",
         }
         let display_name = id_to_name.get(s.id.as_str()).copied().unwrap_or(s.id.as_str());
         let desc = id_to_desc.get(s.id.as_str()).copied().unwrap_or("");
+        let engine = s
+            .engine_module
+            .as_deref()
+            .and_then(|id| component_by_id.get(id).copied());
+        let thrust = engine.map(|e| fmt_thrust(e.thrust)).unwrap_or_else(|| "—".into());
+        let exhaust = engine.map(|e| fmt_exhaust(e.exhaust_v)).unwrap_or_else(|| "—".into());
         rows.push(vec![
             format!("**{}**", escape_cell(display_name)),
             fmt_amount(s.mass),
             fmt_amount(s.cargo_capacity),
             fmt_amount(s.fuel_capacity),
+            thrust,
+            exhaust,
             fmt_reusability(s.reusability).into(),
             if s.built_in_orbit { "Orbit" } else { "Surface" }.into(),
             fmt_build_cost(&s.build_cost, &resource_name),
@@ -826,6 +951,8 @@ lift them to space.\n\n",
     out.push_str(
         "## Reading the table\n\n\
 - **Mass / Cargo / Fuel** are listed in tonnes; capacities are the spacecraft's hull limit before any module changes.\n\
+- **Engine thrust** is the force the spacecraft's default engine produces, in newtons (or kilo-/mega-newtons for readability). More thrust = shorter burns, higher acceleration, but the spacecraft can only carry so much fuel.\n\
+- **Exhaust V** is the engine's effective exhaust velocity in km/s, equivalent to specific impulse (multiply by ~102 to get ISP in seconds). Higher exhaust V = more Δv per kilogram of fuel = longer reach, but typically less thrust. Chemical engines sit around 3–5 km/s; nuclear thermal 8–15; fusion and ion drives 20+.\n\
 - **Build cost** is the resource cost of building the spacecraft itself (engine and tank modules are paid for separately when configured).\n\
 - **Built at** is where the craft is assembled: *Orbit* means it's built in an orbital shipyard and never lands; *Surface* means it's built on a planet's surface (some surface craft are full SSTOs, some are upper stages or ride a Launch Vehicle — see the description column).\n\n\
 ## See also\n\n\
@@ -1760,6 +1887,7 @@ fn main() -> Result<()> {
     write_file(&wiki_root, "celestial-bodies/asteroids.md", &page_asteroids(&ctx))?;
     write_file(&wiki_root, "celestial-bodies/comets.md", &page_comets(&ctx))?;
     write_file(&wiki_root, "celestial-bodies/exoplanets.md", &page_exoplanets(&ctx))?;
+    write_file(&wiki_root, "celestial-bodies/launch-windows.md", &page_launch_windows(&ctx))?;
     write_file(&wiki_root, "spacecraft/README.md", &page_spacecraft(&locale, &sirenix))?;
     write_file(&wiki_root, "launch-vehicles/README.md", &page_launch_vehicles(&locale, &sirenix))?;
     write_file(&wiki_root, "facilities/README.md", &page_facilities(&locale, &sirenix))?;
