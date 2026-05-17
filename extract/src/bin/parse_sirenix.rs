@@ -77,6 +77,22 @@ struct Facility {
     is_obsolete: bool,
     can_be_scrapped: bool,
     can_be_turned_off: bool,
+    /// Resources this facility outputs per day. Pulled from real structured
+    /// data, not description text. Sources, in priority order:
+    ///   * `facilityType == "Power"` with `energyProductionData.energyProduction > 0`
+    ///     → produces synthetic `energy` resource. (Power facilities have a
+    ///     bogus placeholder `refinerData` of metal→alloy that must be ignored.)
+    ///   * `resourcesToMine[]` → mining facilities; rate is unknown statically
+    ///     (depends on deposit), recorded as 0.
+    ///   * `refinerData.output[]` → refiners / production / fuel plants.
+    ///   * `byproducts[]` → side outputs (e.g. CO2 from carbon power plant).
+    produces: Vec<ResourceCost>,
+    /// Resources this facility consumes per day. Sources:
+    ///   * `facilityType == "Power"` → `energyProductionData.input[]` (e.g.
+    ///     uranium for nuclear, HEL3 for fusion). refinerData IS IGNORED for
+    ///     Power facilities (it carries a placeholder metal→alloy default).
+    ///   * Non-power → `refinerData.input[]`.
+    consumes: Vec<ResourceCost>,
 }
 
 #[derive(Serialize, Debug, Default, PartialEq)]
@@ -393,6 +409,102 @@ fn parse_facility(v: &Value, descriptor: &str) -> Option<Facility> {
         .and_then(|x| x.as_str())
         .map(|s| s.to_string());
 
+    // ── produces / consumes ────────────────────────────────────────────────
+    // The raw dump exposes resource I/O on several disjoint fields and the
+    // shapes are not interchangeable. In particular every power facility
+    // ships with a placeholder `refinerData` of `metal+volatile → alloy` —
+    // game runtime ignores it for Power-type facilities, and so must we, or
+    // every reactor would falsely advertise as an alloy refinery.
+    //
+    // Sources, in order of trust:
+    //   • Power → energyProductionData (produce synthetic `energy`, consume `input[]`)
+    //   • Mining → resourcesToMine[]   (rate unknown statically; recorded as 0)
+    //   • Other  → refinerData.input[] / refinerData.output[]
+    //   • Any     → byproducts[]       (side outputs like CO2 from carbon plant)
+    let mut produces: Vec<ResourceCost> = Vec::new();
+    let mut consumes: Vec<ResourceCost> = Vec::new();
+    let is_power = facility_type == "Power";
+
+    if is_power {
+        let prod = lookup_f64(v, &["energyProductionData", "energyProduction"]).unwrap_or(0.0);
+        if prod > 0.0 {
+            produces.push(ResourceCost {
+                resource_id: "energy".to_string(),
+                amount: prod,
+            });
+        }
+        for entry in v
+            .pointer("/energyProductionData/input")
+            .and_then(|x| x.as_array())
+            .into_iter()
+            .flatten()
+        {
+            if let Some(rc) = parse_resource_cost_io(entry) {
+                consumes.push(rc);
+            }
+        }
+    } else {
+        // resourcesToMine[] → simple list of `{name: "id_resource_xxx"}`.
+        for entry in v
+            .get("resourcesToMine")
+            .and_then(|x| x.as_array())
+            .into_iter()
+            .flatten()
+        {
+            if let Some(rid) = entry.get("name").and_then(|x| x.as_str()) {
+                produces.push(ResourceCost {
+                    resource_id: normalize_resource_id(rid),
+                    amount: 0.0, // mining rate isn't a static constant
+                });
+            }
+        }
+        // refinerData.{input,output} → standard `{resource:{name}, ratePerDay}`.
+        for entry in v
+            .pointer("/refinerData/output")
+            .and_then(|x| x.as_array())
+            .into_iter()
+            .flatten()
+        {
+            if let Some(rc) = parse_resource_cost_io(entry) {
+                produces.push(rc);
+            }
+        }
+        for entry in v
+            .pointer("/refinerData/input")
+            .and_then(|x| x.as_array())
+            .into_iter()
+            .flatten()
+        {
+            if let Some(rc) = parse_resource_cost_io(entry) {
+                consumes.push(rc);
+            }
+        }
+    }
+    // byproducts[] applies regardless of facility type — `{resource:{name}, rate}`.
+    for entry in v
+        .get("byproducts")
+        .and_then(|x| x.as_array())
+        .into_iter()
+        .flatten()
+    {
+        let rid = entry
+            .pointer("/resource/name")
+            .and_then(|x| x.as_str());
+        let amount = entry.get("rate").and_then(|x| x.as_f64()).unwrap_or(0.0);
+        if let Some(rid) = rid {
+            produces.push(ResourceCost {
+                resource_id: normalize_resource_id(rid),
+                amount,
+            });
+        }
+    }
+
+    // Stable sort & dedup so output is deterministic regardless of dump order.
+    produces.sort_by(|a, b| a.resource_id.cmp(&b.resource_id));
+    produces.dedup_by(|a, b| a.resource_id == b.resource_id);
+    consumes.sort_by(|a, b| a.resource_id.cmp(&b.resource_id));
+    consumes.dedup_by(|a, b| a.resource_id == b.resource_id);
+
     Some(Facility {
         id,
         descriptor: descriptor.to_string(),
@@ -406,7 +518,26 @@ fn parse_facility(v: &Value, descriptor: &str) -> Option<Facility> {
         is_obsolete: b(&["isObsolete"]),
         can_be_scrapped: b(&["canBeScrapped"]),
         can_be_turned_off: b(&["canBeTurnedOff"]),
+        produces,
+        consumes,
     })
+}
+
+/// Parse `{resource: {name: "id_resource_xxx"}, ratePerDay: 1.5}` → ResourceCost.
+fn parse_resource_cost_io(entry: &Value) -> Option<ResourceCost> {
+    let rid = entry.pointer("/resource/name").and_then(|x| x.as_str())?;
+    let amount = entry.get("ratePerDay").and_then(|x| x.as_f64()).unwrap_or(0.0);
+    Some(ResourceCost {
+        resource_id: normalize_resource_id(rid),
+        amount,
+    })
+}
+
+/// Strip `id_resource_` prefix and lowercase. The raw dump mixes case for
+/// hel3 (`id_resource_HEL3` in facility data, `id_resource_hel3` in
+/// ResourceDefinition); we normalize both to `hel3`.
+fn normalize_resource_id(raw: &str) -> String {
+    raw.strip_prefix("id_resource_").unwrap_or(raw).to_ascii_lowercase()
 }
 
 fn parse_space_component(v: &Value) -> Option<SpaceComponent> {
@@ -1205,6 +1336,113 @@ mod tests {
             "serializationData": { "SerializationNodes": [] }
         });
         assert!(parse_scenario_start(&test).is_none());
+    }
+
+    #[test]
+    fn facility_power_plant_produces_energy_from_energy_production_data() {
+        // Carbon power plant: real game data has facilityType=Power,
+        // energyProductionData.energyProduction=350, and inputs of volatile+oxygen.
+        // refinerData carries a placeholder metal→alloy default that MUST be ignored.
+        let v = serde_json::json!({
+            "id": "build_power_carbon",
+            "possiblePlacement": "Surface",
+            "facilityType": "Power",
+            "energyProductionData": {
+                "energyProduction": 350,
+                "input": [
+                    {"resource": {"name": "id_resource_volatile"}, "ratePerDay": 0.12},
+                    {"resource": {"name": "id_resource_oxygen"}, "ratePerDay": 0.32}
+                ]
+            },
+            "refinerData": {
+                "input": [{"resource": {"name": "id_resource_metal"}, "ratePerDay": 1.5}],
+                "output": [{"resource": {"name": "id_resource_alloy"}, "ratePerDay": 1.5}]
+            },
+            "byproducts": [{"resource": {"name": "id_resource_co2"}, "rate": 0.44, "state": "Gas"}]
+        });
+        let f = parse_facility(&v, "Ground").expect("parses");
+        let produced_ids: Vec<&str> = f.produces.iter().map(|c| c.resource_id.as_str()).collect();
+        assert!(produced_ids.contains(&"energy"), "expected energy in produces, got {:?}", produced_ids);
+        assert!(produced_ids.contains(&"co2"), "expected co2 byproduct, got {:?}", produced_ids);
+        assert!(!produced_ids.contains(&"alloy"), "must NOT inherit placeholder alloy from refinerData, got {:?}", produced_ids);
+        let consumed_ids: Vec<&str> = f.consumes.iter().map(|c| c.resource_id.as_str()).collect();
+        assert!(consumed_ids.contains(&"volatile"));
+        assert!(consumed_ids.contains(&"oxygen"));
+        assert!(!consumed_ids.contains(&"metal"), "must NOT inherit placeholder metal from refinerData, got {:?}", consumed_ids);
+    }
+
+    #[test]
+    fn facility_mine_produces_mined_resource() {
+        // Fissiles mine: resourcesToMine carries the produced id; refinerData empty.
+        let v = serde_json::json!({
+            "id": "build_uranmine",
+            "facilityType": "Mining",
+            "resourcesToMine": [{"name": "id_resource_uran"}],
+            "refinerData": {"input": [], "output": []},
+        });
+        let f = parse_facility(&v, "Ground").expect("parses");
+        let produced_ids: Vec<&str> = f.produces.iter().map(|c| c.resource_id.as_str()).collect();
+        assert_eq!(produced_ids, vec!["uran"]);
+        assert!(f.consumes.is_empty());
+    }
+
+    #[test]
+    fn facility_refiner_produces_output_consumes_input() {
+        // Fissile Extraction Facility (build_earthnuke): refinerData.output → uran.
+        let v = serde_json::json!({
+            "id": "build_earthnuke",
+            "facilityType": "Other",
+            "refinerData": {
+                "input": [],
+                "output": [{"resource": {"name": "id_resource_uran"}, "ratePerDay": 0.01}]
+            },
+        });
+        let f = parse_facility(&v, "Ground").expect("parses");
+        let produced_ids: Vec<&str> = f.produces.iter().map(|c| c.resource_id.as_str()).collect();
+        assert_eq!(produced_ids, vec!["uran"]);
+    }
+
+    #[test]
+    fn facility_exotic_alloy_consumes_fissiles_does_not_produce_them() {
+        // Exotic Alloy Production: refinerData.input has raremetal + uran,
+        // output is alloy. This is the bug — the old substring heuristic
+        // mistook this for a Fissiles/Rare Metals/Metals producer.
+        let v = serde_json::json!({
+            "id": "build_exoticalloy",
+            "facilityType": "Production",
+            "refinerData": {
+                "input": [
+                    {"resource": {"name": "id_resource_raremetal"}, "ratePerDay": 0.09},
+                    {"resource": {"name": "id_resource_uran"}, "ratePerDay": 0.01}
+                ],
+                "output": [{"resource": {"name": "id_resource_alloy"}, "ratePerDay": 0.08}]
+            }
+        });
+        let f = parse_facility(&v, "Ground").expect("parses");
+        let produced_ids: Vec<&str> = f.produces.iter().map(|c| c.resource_id.as_str()).collect();
+        assert_eq!(produced_ids, vec!["alloy"]);
+        assert!(!produced_ids.contains(&"uran"), "exotic alloy must not be a producer of fissiles");
+        assert!(!produced_ids.contains(&"raremetal"));
+        let consumed_ids: Vec<&str> = f.consumes.iter().map(|c| c.resource_id.as_str()).collect();
+        assert!(consumed_ids.contains(&"uran"));
+        assert!(consumed_ids.contains(&"raremetal"));
+    }
+
+    #[test]
+    fn facility_hel3_resource_id_lowercased() {
+        // Raw dump has id_resource_HEL3 (mixed case); we normalize to lowercase
+        // to match the resource ids emitted by `parse_resource`.
+        let v = serde_json::json!({
+            "id": "build_power_fusion",
+            "facilityType": "Power",
+            "energyProductionData": {
+                "energyProduction": 5000,
+                "input": [{"resource": {"name": "id_resource_HEL3"}, "ratePerDay": 0.42}]
+            }
+        });
+        let f = parse_facility(&v, "Ground").expect("parses");
+        let consumed_ids: Vec<&str> = f.consumes.iter().map(|c| c.resource_id.as_str()).collect();
+        assert!(consumed_ids.contains(&"hel3"), "got {:?}", consumed_ids);
     }
 
     #[test]

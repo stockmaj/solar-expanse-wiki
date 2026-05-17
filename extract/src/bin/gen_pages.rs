@@ -161,6 +161,15 @@ struct FacilityStat {
     can_be_scrapped: bool,
     #[allow(dead_code)]
     can_be_turned_off: bool,
+    /// Resources this facility outputs per day. Populated from real game data
+    /// (energyProductionData / resourcesToMine / refinerData.output / byproducts).
+    /// Used to build the Producers column on the resources page.
+    #[serde(default)]
+    produces: Vec<ResourceCost>,
+    /// Resources this facility consumes per day. Populated from
+    /// energyProductionData.input (power) or refinerData.input (others).
+    #[serde(default)]
+    consumes: Vec<ResourceCost>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -1552,6 +1561,60 @@ here — they have no pre-built save data._\n\n",
     out
 }
 
+/// Return the display names of every facility that **produces** `resource_id`.
+///
+/// Driven by the structured `produces` field that `parse_sirenix` populates
+/// from real game data (energyProductionData / resourcesToMine /
+/// refinerData.output / byproducts) — not by substring matching against
+/// description text, which mislabeled consumers as producers (e.g. Exotic
+/// Alloy Production showed up under Fissiles because "fissiles" appeared in
+/// its description).
+fn producers_for_resource(
+    resource_id: &str,
+    facilities: &[FacilityStat],
+    fac_name: &BTreeMap<String, String>,
+) -> Vec<String> {
+    let mut hits: Vec<String> = Vec::new();
+    for f in facilities {
+        if f.produces.iter().any(|c| c.resource_id == resource_id) {
+            hits.push(facility_display_name(&f.id, fac_name));
+        }
+    }
+    hits.sort();
+    hits.dedup();
+    hits
+}
+
+/// Return the display names of every facility that **consumes** `resource_id`.
+fn consumers_for_resource(
+    resource_id: &str,
+    facilities: &[FacilityStat],
+    fac_name: &BTreeMap<String, String>,
+) -> Vec<String> {
+    let mut hits: Vec<String> = Vec::new();
+    for f in facilities {
+        if f.consumes.iter().any(|c| c.resource_id == resource_id) {
+            hits.push(facility_display_name(&f.id, fac_name));
+        }
+    }
+    hits.sort();
+    hits.dedup();
+    hits
+}
+
+/// Look up a facility's display name. Sirenix facility ids carry a `build_`
+/// prefix that the locale strips — so try both shapes before falling back to
+/// the raw id.
+fn facility_display_name(fac_id: &str, fac_name: &BTreeMap<String, String>) -> String {
+    let stripped = fac_id.strip_prefix("build_").unwrap_or(fac_id);
+    let nm = fac_name
+        .get(fac_id)
+        .or_else(|| fac_name.get(stripped))
+        .map(|s| s.as_str())
+        .unwrap_or(stripped);
+    smart_title_case(nm)
+}
+
 fn page_resources(locale: &Locale, sirenix: &Sirenix) -> String {
     let res_name: BTreeMap<&str, &str> = locale
         .resources
@@ -1574,36 +1637,12 @@ fn page_resources(locale: &Locale, sirenix: &Sirenix) -> String {
             (leak, v)
         })
         .collect();
-    // Map facility id → human name to surface where each resource is produced.
-    let fac_name: BTreeMap<&str, &str> = locale
+    // facility id → human name, used to render producers/consumers cells.
+    let fac_name: BTreeMap<String, String> = locale
         .facilities
         .iter()
-        .map(|f| (f.id.as_str(), f.name.as_str()))
+        .map(|f| (f.id.clone(), f.name.clone()))
         .collect();
-    let fac_desc: BTreeMap<&str, &str> = locale
-        .facilities
-        .iter()
-        .map(|f| (f.id.as_str(), f.description.as_str()))
-        .collect();
-
-    // For each resource, walk facility tooltips to find any that mention the resource by name.
-    let producers_for = |resource_display: &str| -> Vec<String> {
-        let lower = resource_display.to_lowercase();
-        // Avoid matching very short or ambiguous resource names ("ice", "gas") — substring noise.
-        if lower.len() < 4 {
-            return Vec::new();
-        }
-        let mut hits: Vec<String> = Vec::new();
-        for (fid, fname) in &fac_name {
-            let desc = fac_desc.get(fid).copied().unwrap_or("");
-            if desc.to_lowercase().contains(&lower) {
-                hits.push(smart_title_case(fname));
-            }
-        }
-        hits.sort();
-        hits.dedup();
-        hits
-    };
 
     let mut entries: Vec<&ResourceStat> = sirenix
         .resources
@@ -1630,11 +1669,17 @@ fn page_resources(locale: &Locale, sirenix: &Sirenix) -> String {
             } else {
                 "—".to_string()
             };
-            let producers = producers_for(display);
+            let producers = producers_for_resource(&r.id, &sirenix.facilities, &fac_name);
             let prod_cell = if producers.is_empty() {
                 "—".to_string()
             } else {
                 producers.join("<br>")
+            };
+            let consumers = consumers_for_resource(&r.id, &sirenix.facilities, &fac_name);
+            let cons_cell = if consumers.is_empty() {
+                "—".to_string()
+            } else {
+                consumers.join("<br>")
             };
             let desc = res_desc
                 .get(r.id.as_str())
@@ -1645,6 +1690,7 @@ fn page_resources(locale: &Locale, sirenix: &Sirenix) -> String {
                 r.resource_type.clone(),
                 price,
                 prod_cell,
+                cons_cell,
                 escape_cell(desc),
             ]
         })
@@ -1655,13 +1701,15 @@ fn page_resources(locale: &Locale, sirenix: &Sirenix) -> String {
             "Type",
             "Price",
             "Producers",
+            "Consumers",
             "Description",
         ],
         &[
             None,
             Some("Normal (physical), Energy (real-time power), or Human (colonists)"),
             Some("Starting market clearing price; supply and demand move it from there"),
-            None,
+            Some("Facilities that output this resource (recipes / mines / power output / byproducts)"),
+            Some("Facilities that consume this resource as a recipe input"),
             None,
         ],
         &rows,
@@ -1677,7 +1725,7 @@ types exist:\n\n\
 {table}\n\
 ## Reading the table\n\n\
 - **Base market price** is the starting clearing price on the marketplace; supply and demand move it from there.\n\
-- **Produced by** is inferred from facility tooltip text — if a facility's description mentions the resource by name, it's listed. The actual produce-rate isn't extractable from the static descriptors (it lives on dynamic facility subclasses); the in-game tooltip is the source of truth for rate numbers.\n"
+- **Producers** / **Consumers** come from each facility's structured recipe data — power output, mine outputs, refiner inputs/outputs, and byproducts. Static per-day rates aren't shown (some live on dynamic subclasses); the in-game tooltip is the source of truth for rate numbers.\n"
     )
 }
 
@@ -2672,6 +2720,145 @@ mod tests {
         assert_eq!(ctx.body("Ceres").unwrap().name, "1 Ceres");
         // Comet: taxonomy id "Wild 2" → display "81P Wild " (trailing space) → trimmed match
         assert_eq!(ctx.body("Wild 2").unwrap().name, "81P Wild ");
+    }
+
+    // ---------- Audit fix #3: resource producers/consumers driven by real I/O data ----------
+
+    fn power_facility(id: &str) -> FacilityStat {
+        FacilityStat {
+            id: id.into(),
+            descriptor: "Ground".into(),
+            placement: "Surface".into(),
+            facility_type: "Power".into(),
+            build_cost: vec![],
+            maintenance_per_day: 0.0,
+            workers_required: 0,
+            energy_consumption: 0.0,
+            research_prereq: None,
+            is_obsolete: false,
+            can_be_scrapped: true,
+            can_be_turned_off: false,
+            produces: vec![ResourceCost { resource_id: "energy".into(), amount: 100.0 }],
+            consumes: vec![],
+        }
+    }
+
+    fn fixture_facilities_for_producer_lookup() -> (Vec<FacilityStat>, BTreeMap<String, String>) {
+        let facilities = vec![
+            power_facility("build_power_solar"),
+            power_facility("build_power_wind"),
+            power_facility("build_power_geothermal"),
+            power_facility("build_power_nuke"),
+            power_facility("build_power_fusion"),
+            power_facility("build_power_carbon"),
+            power_facility("build_power_hydrogen"),
+            FacilityStat {
+                id: "build_uranmine".into(),
+                descriptor: "Ground".into(),
+                placement: "Surface".into(),
+                facility_type: "Mining".into(),
+                build_cost: vec![], maintenance_per_day: 0.0, workers_required: 0,
+                energy_consumption: 0.0, research_prereq: None,
+                is_obsolete: false, can_be_scrapped: true, can_be_turned_off: false,
+                produces: vec![ResourceCost { resource_id: "uran".into(), amount: 0.0 }],
+                consumes: vec![],
+            },
+            FacilityStat {
+                id: "build_earthnuke".into(),
+                descriptor: "Ground".into(),
+                placement: "Surface".into(),
+                facility_type: "Other".into(),
+                build_cost: vec![], maintenance_per_day: 0.0, workers_required: 0,
+                energy_consumption: 0.0, research_prereq: None,
+                is_obsolete: false, can_be_scrapped: true, can_be_turned_off: false,
+                produces: vec![ResourceCost { resource_id: "uran".into(), amount: 0.01 }],
+                consumes: vec![],
+            },
+            // Exotic Alloy Production: CONSUMES fissiles + rare metals, PRODUCES alloy.
+            // The old substring heuristic mislabeled this as a producer of fissiles/metals.
+            FacilityStat {
+                id: "build_exoticalloy".into(),
+                descriptor: "Ground".into(),
+                placement: "Surface".into(),
+                facility_type: "Production".into(),
+                build_cost: vec![], maintenance_per_day: 0.0, workers_required: 0,
+                energy_consumption: 0.0, research_prereq: None,
+                is_obsolete: false, can_be_scrapped: true, can_be_turned_off: false,
+                produces: vec![ResourceCost { resource_id: "alloy".into(), amount: 0.08 }],
+                consumes: vec![
+                    ResourceCost { resource_id: "raremetal".into(), amount: 0.09 },
+                    ResourceCost { resource_id: "uran".into(), amount: 0.01 },
+                ],
+            },
+        ];
+        let mut names = BTreeMap::new();
+        names.insert("build_power_solar".to_string(), "Solar Array".to_string());
+        names.insert("build_power_wind".to_string(), "Wind Power".to_string());
+        names.insert("build_power_geothermal".to_string(), "Geothermal Power".to_string());
+        names.insert("build_power_nuke".to_string(), "Nuclear Reactor".to_string());
+        names.insert("build_power_fusion".to_string(), "Fusion Reactor".to_string());
+        names.insert("build_power_carbon".to_string(), "CARBON POWER PLANT".to_string());
+        names.insert("build_power_hydrogen".to_string(), "HYDROGEN POWER PLANT".to_string());
+        names.insert("build_uranmine".to_string(), "FISSILES MINE".to_string());
+        names.insert("build_earthnuke".to_string(), "FISSILE EXTRACTION FACILITY".to_string());
+        names.insert("build_exoticalloy".to_string(), "EXOTIC ALLOY PRODUCTION".to_string());
+        (facilities, names)
+    }
+
+    #[test]
+    fn producers_for_energy_lists_every_power_plant() {
+        let (facs, names) = fixture_facilities_for_producer_lookup();
+        let prods = producers_for_resource("energy", &facs, &names);
+        // Audit: every Power facility should be listed (we keep at least 5 distinct).
+        assert!(prods.len() >= 5, "expected >=5 energy producers, got {prods:?}");
+        for must in ["Solar Array", "Wind Power", "Geothermal Power", "Nuclear Reactor", "Fusion Reactor"] {
+            assert!(prods.iter().any(|p| p == must), "missing {must} in {prods:?}");
+        }
+    }
+
+    #[test]
+    fn producers_for_fissiles_does_not_include_exotic_alloy() {
+        let (facs, names) = fixture_facilities_for_producer_lookup();
+        let prods = producers_for_resource("uran", &facs, &names);
+        for p in &prods {
+            assert!(
+                !p.to_lowercase().contains("exotic alloy"),
+                "Exotic Alloy Production is a CONSUMER of fissiles, not a producer; got {prods:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn producers_for_fissiles_includes_mine_and_extraction_facility() {
+        let (facs, names) = fixture_facilities_for_producer_lookup();
+        let prods = producers_for_resource("uran", &facs, &names);
+        // Display goes through smart_title_case → "Fissiles Mine" / "Fissile Extraction Facility".
+        assert!(
+            prods.iter().any(|p| p.to_lowercase().contains("fissiles mine")),
+            "expected Fissiles Mine in {prods:?}"
+        );
+        assert!(
+            prods.iter().any(|p| p.to_lowercase().contains("fissile extraction facility")),
+            "expected Fissile Extraction Facility in {prods:?}"
+        );
+    }
+
+    #[test]
+    fn producers_for_unproduced_resource_is_empty() {
+        let (facs, names) = fixture_facilities_for_producer_lookup();
+        // Nothing in the fixture produces antimatter.
+        let prods = producers_for_resource("antimatter", &facs, &names);
+        assert!(prods.is_empty(), "expected no spurious producers, got {prods:?}");
+    }
+
+    #[test]
+    fn consumers_for_fissiles_includes_exotic_alloy() {
+        let (facs, names) = fixture_facilities_for_producer_lookup();
+        let cons = consumers_for_resource("uran", &facs, &names);
+        assert!(
+            cons.iter().any(|c| c.to_lowercase().contains("exotic alloy")),
+            "expected Exotic Alloy Production as Fissiles consumer, got {cons:?}"
+        );
     }
 }
 
