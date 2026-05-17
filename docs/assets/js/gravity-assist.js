@@ -223,41 +223,54 @@
   function bindDom() {
     var bodies = root.LAUNCH_WINDOW_ALL_BODIES;
     if (!bodies) return;
-    var fromSel = document.getElementById('ga-from');
-    var flybySel = document.getElementById('ga-flyby');
-    var toSel = document.getElementById('ga-to');
+    var fromInput = document.getElementById('ga-from');
+    var flybyInput = document.getElementById('ga-flyby');
+    var toInput = document.getElementById('ga-to');
     var dateInput = document.getElementById('ga-date');
+    var submitBtn = document.getElementById('ga-submit');
     var resultBox = document.getElementById('ga-result');
-    if (!fromSel || !flybySel || !toSel || !dateInput || !resultBox) return;
+    if (!fromInput || !flybyInput || !toInput || !dateInput || !submitBtn || !resultBox) return;
+
+    // Use the same shared datalist as the launch-window calculator
+    // (`calc-bodies`).  If the page only has the GA calculator, build a
+    // private alphabetical datalist as a fallback.
+    if (!document.getElementById('calc-bodies')) {
+      var dl = document.createElement('datalist');
+      dl.id = 'calc-bodies';
+      bodies.slice().sort(function (a, b) {
+        return a.name.localeCompare(b.name);
+      }).forEach(function (b) {
+        var o = document.createElement('option');
+        o.value = b.name;
+        dl.appendChild(o);
+      });
+      document.body.appendChild(dl);
+    }
+    [fromInput, flybyInput, toInput].forEach(function (inp) {
+      inp.setAttribute('list', 'calc-bodies');
+    });
 
     function findBody(name) {
-      for (var i = 0; i < bodies.length; i++) if (bodies[i].name === name) return bodies[i];
+      if (!name) return null;
+      var needle = name.trim().toLowerCase();
+      for (var i = 0; i < bodies.length; i++) {
+        if (bodies[i].name.toLowerCase() === needle) return bodies[i];
+      }
       return null;
     }
-
-    // All three dropdowns are populated with every body, sorted by semi-major
-    // axis.  Defaults give a sane Earth → Venus → Ceres example; users can
-    // swap any of them.
-    var sorted = bodies.slice().sort(function (a, b) { return a.a - b.a; });
-    [fromSel, flybySel, toSel].forEach(function (sel) {
-      sorted.forEach(function (b) {
-        var o = document.createElement('option');
-        o.value = b.name; o.textContent = b.name; sel.appendChild(o);
-      });
-    });
-    if (findBody('Earth')) fromSel.value = 'Earth';
-    if (findBody('Venus')) flybySel.value = 'Venus';
-    if (findBody('Ceres')) toSel.value = 'Ceres';
 
     function update() {
       var v = dateInput.value;
       if (!v) return;
       var startMs = new Date(v + 'T00:00:00Z').getTime();
       if (isNaN(startMs)) return;
-      var from = findBody(fromSel.value);
-      var flyby = findBody(flybySel.value);
-      var target = findBody(toSel.value);
-      if (!from || !flyby || !target) return;
+      var from = findBody(fromInput.value);
+      var flyby = findBody(flybyInput.value);
+      var target = findBody(toInput.value);
+      if (!from || !flyby || !target) {
+        resultBox.innerHTML = '<em>Pick valid From, Flyby, and To bodies from the suggestions.</em>';
+        return;
+      }
       var epoch = Date.UTC(1959, 0, 1);
       var endMs = startMs + 5 * YEAR_MS;
 
@@ -298,11 +311,14 @@
       }, 0);
     }
 
-    dateInput.addEventListener('change', update);
-    fromSel.addEventListener('change', update);
-    flybySel.addEventListener('change', update);
-    toSel.addEventListener('change', update);
-    update();
+    // Grid search is ~200 ms, so don't auto-fire on every keystroke.
+    // Submit button only.  Enter inside any field also triggers it.
+    submitBtn.addEventListener('click', update);
+    [fromInput, flybyInput, toInput, dateInput].forEach(function (inp) {
+      inp.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); update(); }
+      });
+    });
   }
 
   if (typeof document !== 'undefined') {

@@ -16,16 +16,14 @@
 Pick a *from* body, *to* body, and a start date.  The calculator lists the
 next five Hohmann-transfer launch windows from that pair, plus the arrival
 date for each (transfer time = `0.5 × ((a_from + a_to) / 2)^1.5` years).
-
-The start date defaults to **2020-01-01** — the game starts in 1959 but the
-real-world J2000 orbital elements used here are most accurate around the
-year 2000, and the launch-window math is mostly useful for planning a few
-years out.
+The body fields are typeahead — start typing and pick from the dropdown.
+The start date defaults to **2020-01-01**, the game's campaign start year.
 
 <div class="calc">
-<label>From: <select id="calc-from"></select></label>
-<label>To: <select id="calc-to"></select></label>
+<label>From: <input id="calc-from" list="calc-bodies" autocomplete="off" placeholder="Body name…" value="Earth"></label>
+<label>To: <input id="calc-to" list="calc-bodies" autocomplete="off" placeholder="Body name…" value="Mars"></label>
 <label>Start date: <input type="date" id="calc-date" value="2020-01-01"></label>
+<datalist id="calc-bodies"></datalist>
 <div id="calc-result"></div>
 </div>
 
@@ -168,10 +166,11 @@ Treat this as a **planning tool**, not a precise trajectory.  The reported
 ignores escape Δv from low Earth orbit and capture Δv at the target.
 
 <div class="calc">
-<label>From: <select id="ga-from"></select></label>
-<label>Flyby: <select id="ga-flyby"></select></label>
-<label>To: <select id="ga-to"></select></label>
+<label>From: <input id="ga-from" list="calc-bodies" autocomplete="off" placeholder="Body name…" value="Earth"></label>
+<label>Flyby: <input id="ga-flyby" list="calc-bodies" autocomplete="off" placeholder="Body name…" value="Venus"></label>
+<label>To: <input id="ga-to" list="calc-bodies" autocomplete="off" placeholder="Body name…" value="Ceres"></label>
 <label>Search from: <input type="date" id="ga-date" value="2020-01-01"></label>
+<button id="ga-submit" type="button">Calculate</button>
 <div id="ga-result"></div>
 </div>
 

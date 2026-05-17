@@ -734,15 +734,14 @@ fn page_launch_windows(ctx: &WikiCtx) -> String {
 <a id=\"window-calculator\"></a>\n\n\
 Pick a *from* body, *to* body, and a start date.  The calculator lists the\n\
 next five Hohmann-transfer launch windows from that pair, plus the arrival\n\
-date for each (transfer time = `0.5 × ((a_from + a_to) / 2)^1.5` years).\n\n\
-The start date defaults to **2020-01-01** — the game starts in 1959 but the\n\
-real-world J2000 orbital elements used here are most accurate around the\n\
-year 2000, and the launch-window math is mostly useful for planning a few\n\
-years out.\n\n\
+date for each (transfer time = `0.5 × ((a_from + a_to) / 2)^1.5` years).\n\
+The body fields are typeahead — start typing and pick from the dropdown.\n\
+The start date defaults to **2020-01-01**, the game's campaign start year.\n\n\
 <div class=\"calc\">\n\
-<label>From: <select id=\"calc-from\"></select></label>\n\
-<label>To: <select id=\"calc-to\"></select></label>\n\
+<label>From: <input id=\"calc-from\" list=\"calc-bodies\" autocomplete=\"off\" placeholder=\"Body name…\" value=\"Earth\"></label>\n\
+<label>To: <input id=\"calc-to\" list=\"calc-bodies\" autocomplete=\"off\" placeholder=\"Body name…\" value=\"Mars\"></label>\n\
 <label>Start date: <input type=\"date\" id=\"calc-date\" value=\"2020-01-01\"></label>\n\
+<datalist id=\"calc-bodies\"></datalist>\n\
 <div id=\"calc-result\"></div>\n\
 </div>\n\n\
 <script>\n\
@@ -806,10 +805,11 @@ Treat this as a **planning tool**, not a precise trajectory.  The reported\n\
 `|v_spacecraft − v_target|` at arrival, both expressed in km/s; it\n\
 ignores escape Δv from low Earth orbit and capture Δv at the target.\n\n\
 <div class=\"calc\">\n\
-<label>From: <select id=\"ga-from\"></select></label>\n\
-<label>Flyby: <select id=\"ga-flyby\"></select></label>\n\
-<label>To: <select id=\"ga-to\"></select></label>\n\
+<label>From: <input id=\"ga-from\" list=\"calc-bodies\" autocomplete=\"off\" placeholder=\"Body name…\" value=\"Earth\"></label>\n\
+<label>Flyby: <input id=\"ga-flyby\" list=\"calc-bodies\" autocomplete=\"off\" placeholder=\"Body name…\" value=\"Venus\"></label>\n\
+<label>To: <input id=\"ga-to\" list=\"calc-bodies\" autocomplete=\"off\" placeholder=\"Body name…\" value=\"Ceres\"></label>\n\
 <label>Search from: <input type=\"date\" id=\"ga-date\" value=\"2020-01-01\"></label>\n\
+<button id=\"ga-submit\" type=\"button\">Calculate</button>\n\
 <div id=\"ga-result\"></div>\n\
 </div>\n\n\
 <script src=\"{{{{ '/assets/js/gravity-assist.js' | relative_url }}}}\"></script>\n\n\

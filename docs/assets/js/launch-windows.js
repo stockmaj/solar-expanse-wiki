@@ -75,27 +75,30 @@
     if (!bodies || !earth) return;
 
     var dateInput = document.getElementById('calc-date');
-    var fromSelect = document.getElementById('calc-from');
-    var toSelect = document.getElementById('calc-to');
+    var fromInput = document.getElementById('calc-from');
+    var toInput = document.getElementById('calc-to');
+    var datalist = document.getElementById('calc-bodies');
     var resultBox = document.getElementById('calc-result');
-    if (!dateInput || !fromSelect || !toSelect || !resultBox) return;
+    if (!dateInput || !fromInput || !toInput || !datalist || !resultBox) return;
 
-    // Populate dropdowns sorted by semi-major axis.
-    var sorted = bodies.slice().sort(function (a, b) { return a.a - b.a; });
-    sorted.forEach(function (b) {
-      [fromSelect, toSelect].forEach(function (sel) {
-        var opt = document.createElement('option');
-        opt.value = b.name;
-        opt.textContent = b.name;
-        sel.appendChild(opt);
-      });
+    // Populate the shared datalist alphabetically.  Browsers (Chrome,
+    // Firefox, Safari) substring-match against the input value, so the
+    // user can type "mar" and see Mars / Mars-orbit asteroids in the
+    // suggestion popup.
+    var sorted = bodies.slice().sort(function (a, b) {
+      return a.name.localeCompare(b.name);
     });
-    fromSelect.value = 'Earth';
-    toSelect.value = 'Mars';
+    sorted.forEach(function (b) {
+      var opt = document.createElement('option');
+      opt.value = b.name;
+      datalist.appendChild(opt);
+    });
 
     function findBody(name) {
+      if (!name) return null;
+      var needle = name.trim().toLowerCase();
       for (var i = 0; i < bodies.length; i++) {
-        if (bodies[i].name === name) return bodies[i];
+        if (bodies[i].name.toLowerCase() === needle) return bodies[i];
       }
       return null;
     }
@@ -105,9 +108,12 @@
       if (!v) return;
       var start = new Date(v + 'T00:00:00Z');
       if (isNaN(start)) return;
-      var from = findBody(fromSelect.value);
-      var to = findBody(toSelect.value);
-      if (!from || !to) return;
+      var from = findBody(fromInput.value);
+      var to = findBody(toInput.value);
+      if (!from || !to) {
+        resultBox.innerHTML = '<em>Pick valid From and To bodies from the suggestions.</em>';
+        return;
+      }
       var windows = nextNWindows(from, to, start, 5);
       if (windows.length === 0) {
         resultBox.innerHTML = '<em>No transfer between identical orbits.</em>';
@@ -126,9 +132,14 @@
         '</tbody></table>';
     }
 
+    // Auto-update is cheap (~5 trig evaluations).  Listen to both `input`
+    // (fires on each keystroke) and `change` (fires when the user picks
+    // from the datalist popup, in browsers that don't fire `input` then).
+    ['input', 'change'].forEach(function (ev) {
+      fromInput.addEventListener(ev, update);
+      toInput.addEventListener(ev, update);
+    });
     dateInput.addEventListener('change', update);
-    fromSelect.addEventListener('change', update);
-    toSelect.addEventListener('change', update);
     update();
   }
 
