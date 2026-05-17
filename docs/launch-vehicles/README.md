@@ -5,20 +5,20 @@ has to ride one of these to reach orbit, and the launch cost paid here is paid
 on **every** launch — reusable vehicles amortise their build cost over many
 flights.
 
-| Launch Vehicle | Max Payload (t) | Reusable | Crew Rated | Build cost | Build time (d) | Launch cost | Maintenance (₡/d) | Description |
+| Launch Vehicle | Max Payload (t) | Reusable | Crew Rated | Build cost | Build time (d) | Launch cost | Maintenance / day | Description |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| **Sparrow** | 10 | No | Yes | 50 Metals | 50 | ₡150 | ₡10 | Cheap, simple, single use small Launch Vehicle. |
-| **Al-Ice Rocket** | 40 | No | Yes | 20 Metals<br>20 Water | 25 | ₡0 | ₡0 | Aluminium-Ice LV. Low efficiency but easily assembled from local resources. |
-| **Falcon** | 42 | Partial | Yes | 80 Metals<br>15 Rare Metals | 90 | ₡400 | ₡20 | Reusable Medium Launch Vehicle |
-| **Kestrel** | 64 | No | Yes | 100 Metals | 70 | ₡300 | ₡10 | Medium Launch Vehicle. |
-| **Al-Ice Rocket (Heavy)** | 100 | No | Yes | 50 Metals<br>50 Water | 50 | ₡0 | ₡0 | Aluminium-Ice LV. Low efficiency but easily assembled from local resources. Larger variant for heavy payloads. |
-| **Hawk** | 200 | No | Yes | 120 Metals | 120 | ₡500 | ₡10 | Old but reliable super heavy launch vehicle. |
-| **Eagle** | 800 | Partial | Yes | 250 Metals<br>25 Rare Metals | 110 | ₡3000 | ₡20 | Reusable Super Heavy-class Launch Vehicle |
-| **Pelican** | 1200 | Partial | Yes | 400 Metals<br>50 Rare Metals<br>40 Fissiles | 140 | ₡3000 | ₡10 | Nuclear-boosted Single-Stage-To-Orbit (SSTO) launch vehicle. |
-| **Albatross** | 1800 | No | Yes | 800 Metals | 180 | ₡4600 | ₡20 |  |
-| **Magpie** | 4000 | Partial | Yes | 500 Alloy<br>100 Rare Metals<br>100 Fissiles | 180 | ₡4800 | ₡10 | Powerful launch vehicle using gas core nuclear engines. |
-| **Condor** | 8000 | Partial | Yes | 500 Metals<br>500 Polymers<br>100 Rare Metals | 160 | ₡8000 | ₡10 | Advanced chemical launch vehicle powered by polynitrogen fuel. |
-| **Teratorn** | 20000 | Partial | Yes | 1000 Alloy<br>100 Exotic Alloys<br>200 Fissiles | 360 | ₡15000 | ₡10 | The largest and most powerful launch vehicle devised, the Teratorn can lift thousands of tons and quickly come back to lift another payload. |
+| **Sparrow** | 10 | No | Yes | 50 Metals | 50 | 150 | 10 | Cheap, simple, single use small Launch Vehicle. |
+| **Al-Ice Rocket** | 40 | No | Yes | 20 Metals<br>20 Water | 25 | 0 | 0 | Aluminium-Ice LV. Low efficiency but easily assembled from local resources. |
+| **Falcon** | 42 | Partial | Yes | 80 Metals<br>15 Rare Metals | 90 | 400 | 20 | Reusable Medium Launch Vehicle |
+| **Kestrel** | 64 | No | Yes | 100 Metals | 70 | 300 | 10 | Medium Launch Vehicle. |
+| **Al-Ice Rocket (Heavy)** | 100 | No | Yes | 50 Metals<br>50 Water | 50 | 0 | 0 | Aluminium-Ice LV. Low efficiency but easily assembled from local resources. Larger variant for heavy payloads. |
+| **Hawk** | 200 | No | Yes | 120 Metals | 120 | 500 | 10 | Old but reliable super heavy launch vehicle. |
+| **Eagle** | 800 | Partial | Yes | 250 Metals<br>25 Rare Metals | 110 | 3000 | 20 | Reusable Super Heavy-class Launch Vehicle |
+| **Pelican** | 1200 | Partial | Yes | 400 Metals<br>50 Rare Metals<br>40 Fissiles | 140 | 3000 | 10 | Nuclear-boosted Single-Stage-To-Orbit (SSTO) launch vehicle. |
+| **Albatross** | 1800 | No | Yes | 800 Metals | 180 | 4600 | 20 |  |
+| **Magpie** | 4000 | Partial | Yes | 500 Alloy<br>100 Rare Metals<br>100 Fissiles | 180 | 4800 | 10 | Powerful launch vehicle using gas core nuclear engines. |
+| **Condor** | 8000 | Partial | Yes | 500 Metals<br>500 Polymers<br>100 Rare Metals | 160 | 8000 | 10 | Advanced chemical launch vehicle powered by polynitrogen fuel. |
+| **Teratorn** | 20000 | Partial | Yes | 1000 Alloy<br>100 Exotic Alloys<br>200 Fissiles | 360 | 15000 | 10 | The largest and most powerful launch vehicle devised, the Teratorn can lift thousands of tons and quickly come back to lift another payload. |
 
 ## Reading the table
 

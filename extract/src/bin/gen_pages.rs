@@ -1013,8 +1013,8 @@ fn page_launch_vehicles(locale: &Locale, sirenix: &Sirenix) -> String {
                 if lv.can_send_human { "Yes" } else { "No" }.into(),
                 fmt_build_cost(&lv.build_cost, &resource_name),
                 fmt_amount(lv.build_time_days),
-                format!("₡{}", fmt_amount(lv.launch_cost)),
-                format!("₡{}", fmt_amount(lv.maintenance_cost_per_day)),
+                fmt_amount(lv.launch_cost),
+                fmt_amount(lv.maintenance_cost_per_day),
                 escape_cell(desc),
             ]
         })
@@ -1028,7 +1028,7 @@ fn page_launch_vehicles(locale: &Locale, sirenix: &Sirenix) -> String {
             "Build cost",
             "Build time (d)",
             "Launch cost",
-            "Maintenance (₡/d)",
+            "Maintenance / day",
             "Description",
         ],
         &rows,
@@ -1157,7 +1157,7 @@ fn page_resources(locale: &Locale, sirenix: &Sirenix) -> String {
         .map(|r| {
             let display = res_name.get(r.id.as_str()).copied().unwrap_or(r.id.as_str());
             let price = if r.market_price_base > 0.0 {
-                format!("₡{}", fmt_amount(r.market_price_base))
+                fmt_amount(r.market_price_base)
             } else {
                 "—".to_string()
             };
@@ -1305,7 +1305,7 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
 
             let mut reward_bits: Vec<String> = Vec::new();
             if c.money_reward > 0.0 {
-                reward_bits.push(format!("₡{}", fmt_amount(c.money_reward)));
+                reward_bits.push(format!("Cash: {}", fmt_amount(c.money_reward)));
             }
             for r in &c.resource_grants {
                 let label = resource_name
@@ -1430,6 +1430,20 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
         if f.is_obsolete {
             continue;
         }
+        // FacilitySegment entries are interstellar-ship-construction stages —
+        // narrative one-offs, not buildable production facilities.  Skip them.
+        if f.facility_type == "FacilitySegment" {
+            continue;
+        }
+        // Drop entries without a player-facing locale name; their data is incomplete.
+        let id_no_prefix = f.id.strip_prefix("build_").unwrap_or(&f.id);
+        if !locale
+            .facilities
+            .iter()
+            .any(|lf| lf.id == id_no_prefix && !lf.name.is_empty())
+        {
+            continue;
+        }
         if f.descriptor == "Orbital" {
             orbital.push(f);
         } else {
@@ -1465,7 +1479,7 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
             "—".to_string()
         };
         let maint = if f.maintenance_per_day > 0.0 {
-            format!("₡{}", fmt_amount(f.maintenance_per_day))
+            fmt_amount(f.maintenance_per_day)
         } else {
             "—".to_string()
         };
