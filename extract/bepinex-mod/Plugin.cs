@@ -28,6 +28,8 @@ namespace SolarExpanseWikiDumper
         private bool dumped;
         private bool armed;
         private float nextCheckTime;
+        private float nextStatusLog;
+        private bool firstUpdateLogged;
 
         private void Awake()
         {
@@ -51,7 +53,34 @@ namespace SolarExpanseWikiDumper
         // calls SetAllObjectInfos, so its non-empty count is our "scene ready" signal.
         private void Update()
         {
+            if (!firstUpdateLogged)
+            {
+                firstUpdateLogged = true;
+                Log.LogInfo("Plugin.Update() is being called by Unity.");
+            }
             if (!armed || dumped) return;
+
+            // Throttled state log — once every 3 seconds, regardless of which check fails.
+            // Runs OUTSIDE the 0.5s poll throttle so we can see what's silently returning early.
+            if (Time.unscaledTime >= nextStatusLog)
+            {
+                nextStatusLog = Time.unscaledTime + 3f;
+                var oimPeek = MonoBehaviourSingleton<ObjectInfoManager>.Instance;
+                var asoMgrPeek = SerializedMonoBehaviourSingleton<AllScriptableObjectManager>.Instance
+                                ?? UnityEngine.Object.FindObjectOfType<AllScriptableObjectManager>();
+                int allCount = -1;
+                bool fieldFound = false;
+                if (oimPeek != null)
+                {
+                    var allFieldPeek = typeof(ObjectInfoManager).GetField(
+                        "allObjectInfos", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                    fieldFound = allFieldPeek != null;
+                    var allPeek = allFieldPeek?.GetValue(oimPeek) as System.Collections.ICollection;
+                    allCount = allPeek != null ? allPeek.Count : -1;
+                }
+                Log.LogInfo($"poll state: oim={(oimPeek == null ? "null" : "present")} fieldFound={fieldFound} allObjectInfos.count={allCount} aso={(asoMgrPeek == null ? "null" : "present")}");
+            }
+
             if (Time.unscaledTime < nextCheckTime) return;
             nextCheckTime = Time.unscaledTime + 0.5f;
 
