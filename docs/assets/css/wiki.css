@@ -801,6 +801,35 @@ main hr {
   font-size: 12px;
   margin-left: 4px;
 }
+#calc-root .calc-onsite {
+  width: 60px;
+  background: var(--code-bg);
+  color: var(--fg);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 1px 4px;
+  font: inherit;
+  font-size: 12px;
+  text-align: right;
+  -moz-appearance: textfield;
+}
+#calc-root .calc-onsite::-webkit-outer-spin-button,
+#calc-root .calc-onsite::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+#calc-root .calc-onsite:focus {
+  outline: none;
+  border-color: var(--accent-dim);
+}
+#calc-root .calc-onsite-cell {
+  padding: 2px 4px;
+}
+#calc-root .calc-capsule-info {
+  color: var(--fg-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
 #calc-root .calc-totals .calc-section {
   text-align: left;
   font-size: 11px;

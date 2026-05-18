@@ -97,8 +97,8 @@
     var payload = {
       p: state.placed,
       c: state.checked,
-      ct: state.crewTransport,
       sc: state.spacecraft,
+      os: state.onSite,
     };
     return btoa(JSON.stringify(payload))
       .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -112,8 +112,8 @@
       return {
         placed: payload.p || {},
         checked: payload.c || {},
-        crewTransport: payload.ct || null,
         spacecraft: payload.sc || null,
+        onSite: payload.os || {},
       };
     } catch (e) { return null; }
   }
@@ -188,16 +188,16 @@
   function loadState() {
     try {
       var raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return { placed: {}, checked: {}, crewTransport: null, spacecraft: null };
+      if (!raw) return { placed: {}, checked: {}, spacecraft: null, onSite: {} };
       var s = JSON.parse(raw);
       return {
         placed: (s && s.placed) || {},
         checked: (s && s.checked) || {},
-        crewTransport: (s && s.crewTransport) || null,
         spacecraft: (s && s.spacecraft) || null,
+        onSite: (s && s.onSite) || {},
       };
     } catch (e) {
-      return { placed: {}, checked: {}, crewTransport: null, spacecraft: null };
+      return { placed: {}, checked: {}, spacecraft: null, onSite: {} };
     }
   }
 
@@ -314,7 +314,6 @@
         '</div>' +
         '<div class="calc-pane calc-pane-right">' +
           '<div class="calc-pane-header"><h3>Resources needed</h3></div>' +
-          '<div class="calc-crew-picker" id="calc-crew-picker"></div>' +
           '<div class="calc-crew-picker" id="calc-spacecraft-picker"></div>' +
           '<div id="calc-totals"></div>' +
         '</div>' +
@@ -329,16 +328,7 @@
       redById: indexBy(data.reductions, 'id'),
     };
 
-    // Default the crew transport selection if none is saved (or the saved id
-    // no longer exists). Pick the first unlocked module.
-    var crewIds = (data.crew_transports || []).reduce(function (m, c) { m[c.id] = c; return m; }, {});
-    if (!ctx.state.crewTransport || !crewIds[ctx.state.crewTransport]) {
-      var def = (data.crew_transports || []).find(function (c) { return !c.is_locked; })
-        || (data.crew_transports || [])[0];
-      ctx.state.crewTransport = def ? def.id : null;
-      saveState(ctx.state);
-    }
-    ctx.crewById = crewIds;
+    ctx.crewById = (data.crew_transports || []).reduce(function (m, c) { m[c.id] = c; return m; }, {});
 
     var scById = (data.spacecraft || []).reduce(function (m, s) { m[s.id] = s; return m; }, {});
     if (!ctx.state.spacecraft || !scById[ctx.state.spacecraft]) {
@@ -354,7 +344,6 @@
     bindReset(root, ctx);
     bindSave(root, ctx);
     bindShare(root, ctx);
-    bindCrewPicker(root, ctx);
     bindSpacecraftPicker(root, ctx);
     setupTooltips(root);
     rerenderAll(root, ctx);
@@ -381,36 +370,6 @@
         prompt('Copy this link:', url);
       }
     });
-  }
-
-  function renderCrewPicker(ctx) {
-    var transports = ctx.data.crew_transports || [];
-    if (!transports.length) return '';
-    return '<label>Crew transport: ' +
-      '<select id="calc-crew-select">' +
-      transports.map(function (t) {
-        var sel = t.id === ctx.state.crewTransport ? ' selected' : '';
-        var lockTag = t.is_locked ? ' (locked)' : '';
-        var loaded = t.mass + t.capacity;
-        return '<option value="' + escapeHtml(t.id) + '"' + sel + '>' +
-          escapeHtml(t.name) + ' — ' + t.capacity + ' seats, ' + loaded + ' t loaded' + lockTag +
-          '</option>';
-      }).join('') +
-      '</select></label>';
-  }
-
-  function bindCrewPicker(root, ctx) {
-    var el = root.querySelector('#calc-crew-picker');
-    if (!el) return;
-    el.innerHTML = renderCrewPicker(ctx);
-    var sel = el.querySelector('#calc-crew-select');
-    if (sel) {
-      sel.addEventListener('change', function () {
-        ctx.state.crewTransport = sel.value;
-        saveState(ctx.state);
-        rerenderTotals(root, ctx);
-      });
-    }
   }
 
   function renderSpacecraftPicker(ctx) {
@@ -491,15 +450,23 @@
 
   // Drop placed/checked entries whose ids no longer exist in the data.
   function pruneState(state, data) {
-    var facIds = {};
-    (data.facilities || []).forEach(function (f) { facIds[f.id] = true; });
+    var placeableIds = {};
+    (data.facilities || []).forEach(function (f) { placeableIds[f.id] = true; });
+    (data.crew_transports || []).forEach(function (c) { placeableIds[c.id] = true; });
     Object.keys(state.placed).forEach(function (id) {
-      if (!facIds[id]) delete state.placed[id];
+      if (!placeableIds[id]) delete state.placed[id];
     });
     var redIds = {};
     (data.reductions || []).forEach(function (r) { redIds[r.id] = true; });
     Object.keys(state.checked).forEach(function (id) {
       if (!redIds[id]) delete state.checked[id];
+    });
+    // Drop on-site entries for resources we no longer recognise.
+    var resIds = {};
+    (data.resources || []).forEach(function (r) { resIds[r.id] = true; });
+    resIds.human = true;  // human isn't in resources[] but is a valid on-site key
+    Object.keys(state.onSite || {}).forEach(function (rid) {
+      if (!resIds[rid]) delete state.onSite[rid];
     });
   }
 
@@ -566,6 +533,17 @@
       byCat[f.category].push(f);
     });
     catOrder.sort(function (a, b) { return a.localeCompare(b); });
+    // Crew transports as their own pseudo-category, pinned to the bottom.
+    var crewItems = (ctx.data.crew_transports || []).map(function (c) {
+      return {
+        id: c.id, name: c.name,
+        _isCapsule: true, _mass: c.mass, _capacity: c.capacity, _locked: c.is_locked,
+      };
+    });
+    if (crewItems.length) {
+      byCat['Crew Transport'] = crewItems;
+      catOrder.push('Crew Transport');
+    }
 
     var checked = Object.keys(ctx.state.checked)
       .map(function (id) { return ctx.redById[id]; })
@@ -574,7 +552,11 @@
     var html = '';
     var anyShown = false;
     catOrder.forEach(function (cat) {
-      var items = byCat[cat].slice().sort(function (a, b) { return a.name.localeCompare(b.name); });
+      var items = byCat[cat].slice().sort(function (a, b) {
+        // Within Crew Transport, sort by capacity ascending instead of name.
+        if (a._isCapsule && b._isCapsule) return a._capacity - b._capacity;
+        return a.name.localeCompare(b.name);
+      });
       var visible = items.filter(function (f) {
         return !q || f.name.toLowerCase().indexOf(q) !== -1;
       });
@@ -584,15 +566,24 @@
         '<div class="calc-facility-cat-name">' + escapeHtml(cat) + '</div>' +
         '<ul>' +
         visible.map(function (f) {
-          var reduced = applyReductions(f, checked);
-          var pipsHtml = (f.build_cost || []).map(function (bc) {
-            var amount = reduced[bc.resource] || 0;
-            var resName = (ctx.resById[bc.resource] && ctx.resById[bc.resource].name) || bc.resource;
-            return '<span class="calc-pip" data-tip="' + escapeHtml(resName + ': ' + amount.toLocaleString()) + '">' +
-              '<span class="calc-pip-num">' + fmtAbbrev(amount) + '</span>' +
-              '<img class="calc-pip-icon" src="' + escapeHtml(iconUrl(bc.resource)) + '" alt="">' +
+          var pipsHtml = '';
+          if (f._isCapsule) {
+            var lockTag = f._locked ? ' 🔒' : '';
+            pipsHtml = '<span class="calc-capsule-info" data-tip="' +
+              escapeHtml(f._capacity + ' seats, ' + f._mass + 't empty (' + (f._mass + f._capacity) + 't fully loaded)') + '">' +
+              f._capacity + ' seats · ' + f._mass + 't' + lockTag +
               '</span>';
-          }).join('');
+          } else {
+            var reduced = applyReductions(f, checked);
+            pipsHtml = (f.build_cost || []).map(function (bc) {
+              var amount = reduced[bc.resource] || 0;
+              var resName = (ctx.resById[bc.resource] && ctx.resById[bc.resource].name) || bc.resource;
+              return '<span class="calc-pip" data-tip="' + escapeHtml(resName + ': ' + amount.toLocaleString()) + '">' +
+                '<span class="calc-pip-num">' + fmtAbbrev(amount) + '</span>' +
+                '<img class="calc-pip-icon" src="' + escapeHtml(iconUrl(bc.resource)) + '" alt="">' +
+                '</span>';
+            }).join('');
+          }
           return '<li class="calc-facility-item" draggable="true" data-id="' + escapeHtml(f.id) + '">' +
             '<span class="calc-facility-name">' + escapeHtml(f.name) + '</span>' +
             '<span class="calc-facility-cost">' + pipsHtml + '</span>' +
@@ -629,7 +620,7 @@
   // ----- Placed list (middle pane) --------------------------------------
 
   function addFacility(root, ctx, id, delta) {
-    if (!ctx.facById[id]) return;
+    if (!ctx.facById[id] && !ctx.crewById[id]) return;
     var cur = ctx.state.placed[id] || 0;
     ctx.state.placed[id] = Math.max(0, cur + delta);
     saveState(ctx.state);
@@ -638,7 +629,7 @@
   }
 
   function setFacilityCount(root, ctx, id, value) {
-    if (!ctx.facById[id]) return;
+    if (!ctx.facById[id] && !ctx.crewById[id]) return;
     ctx.state.placed[id] = Math.max(0, Math.floor(value));
     saveState(ctx.state);
     rerenderPlaced(root, ctx);
@@ -648,29 +639,42 @@
   function renderPlacedList(ctx) {
     var ids = Object.keys(ctx.state.placed);
     if (ids.length === 0) {
-      return '<p class="calc-empty calc-placed-empty"><em>Click facilities on the left to add them.</em></p>';
+      return '<p class="calc-empty calc-placed-empty"><em>Click items on the left to add them.</em></p>';
     }
     var rows = ids
-      .map(function (id) { return { id: id, fac: ctx.facById[id], count: ctx.state.placed[id] }; })
-      .filter(function (r) { return r.fac; })
-      .sort(function (a, b) { return a.fac.name.localeCompare(b.fac.name); });
+      .map(function (id) {
+        var fac = ctx.facById[id];
+        var cap = ctx.crewById[id];
+        return { id: id, fac: fac, capsule: cap, name: (fac || cap || {}).name, count: ctx.state.placed[id] };
+      })
+      .filter(function (r) { return r.fac || r.capsule; })
+      .sort(function (a, b) { return a.name.localeCompare(b.name); });
 
     var checked = Object.keys(ctx.state.checked)
       .map(function (id) { return ctx.redById[id]; })
       .filter(Boolean);
 
     return '<ul class="calc-placed">' + rows.map(function (r) {
-      var reduced = applyReductions(r.fac, checked);
-      var pipsHtml = (r.fac.build_cost || []).map(function (bc) {
-        var amount = (reduced[bc.resource] || 0) * r.count;
-        var resName = (ctx.resById[bc.resource] && ctx.resById[bc.resource].name) || bc.resource;
-        return '<span class="calc-pip" data-tip="' + escapeHtml(resName + ': ' + amount.toLocaleString()) + '">' +
-          '<span class="calc-pip-num">' + fmtAbbrev(amount) + '</span>' +
-          '<img class="calc-pip-icon" src="' + escapeHtml(iconUrl(bc.resource)) + '" alt="">' +
+      var pipsHtml = '';
+      if (r.capsule) {
+        var totalMass = r.capsule.mass * r.count;
+        pipsHtml = '<span class="calc-pip" data-tip="' +
+          escapeHtml(r.count + ' × ' + r.capsule.mass + 't = ' + totalMass + 't (modules empty)') + '">' +
+          '<span class="calc-pip-num">' + fmtAbbrev(totalMass) + 't</span>' +
           '</span>';
-      }).join('');
+      } else {
+        var reduced = applyReductions(r.fac, checked);
+        pipsHtml = (r.fac.build_cost || []).map(function (bc) {
+          var amount = (reduced[bc.resource] || 0) * r.count;
+          var resName = (ctx.resById[bc.resource] && ctx.resById[bc.resource].name) || bc.resource;
+          return '<span class="calc-pip" data-tip="' + escapeHtml(resName + ': ' + amount.toLocaleString()) + '">' +
+            '<span class="calc-pip-num">' + fmtAbbrev(amount) + '</span>' +
+            '<img class="calc-pip-icon" src="' + escapeHtml(iconUrl(bc.resource)) + '" alt="">' +
+            '</span>';
+        }).join('');
+      }
       return '<li class="calc-placed-row" data-id="' + escapeHtml(r.id) + '">' +
-        '<span class="calc-placed-name">' + escapeHtml(r.fac.name) + '</span>' +
+        '<span class="calc-placed-name">' + escapeHtml(r.name) + '</span>' +
         '<span class="calc-placed-cost">' + pipsHtml + '</span>' +
         '<span class="calc-placed-counter">' +
           '<button type="button" class="calc-dec" data-id="' + escapeHtml(r.id) + '">−</button>' +
@@ -815,52 +819,96 @@
   // ----- Totals (right pane) --------------------------------------------
 
   function renderTotals(ctx) {
-    var placed = Object.keys(ctx.state.placed)
-      .map(function (id) { return { facility: ctx.facById[id], count: ctx.state.placed[id] }; })
-      .filter(function (p) { return p.facility; });
+    var allPlaced = Object.keys(ctx.state.placed).map(function (id) {
+      return { id: id, fac: ctx.facById[id], cap: ctx.crewById[id], count: ctx.state.placed[id] };
+    }).filter(function (p) { return (p.fac || p.cap) && p.count > 0; });
 
-    if (placed.length === 0) {
-      return '<p class="calc-empty"><em>Add facilities to see totals.</em></p>';
+    if (allPlaced.length === 0) {
+      return '<p class="calc-empty"><em>Add items to see totals.</em></p>';
     }
+
+    var facilityPlaced = allPlaced.filter(function (p) { return p.fac; })
+      .map(function (p) { return { facility: p.fac, count: p.count }; });
+    var capsulePlaced = allPlaced.filter(function (p) { return p.cap; });
 
     var checked = Object.keys(ctx.state.checked)
       .map(function (id) { return ctx.redById[id]; })
       .filter(Boolean);
 
-    var totals = totalResources(placed, checked);
-    var cargoRows = Object.keys(totals)
-      .map(function (rid) {
-        return {
-          rid: rid,
-          name: (ctx.resById[rid] && ctx.resById[rid].name) || rid,
-          amount: totals[rid],
-        };
-      })
-      .filter(function (r) { return r.amount > 0; });
+    // Build cargo rows from facility build_cost. Each row carries `needed`
+    // (raw demand) and `onSite` (user input); `amount` is what's left to ship.
+    var totals = totalResources(facilityPlaced, checked);
+    var cargoRows = Object.keys(totals).map(function (rid) {
+      var needed = totals[rid];
+      var onSite = (ctx.state.onSite && ctx.state.onSite[rid]) || 0;
+      return {
+        rid: rid,
+        name: (ctx.resById[rid] && ctx.resById[rid].name) || rid,
+        needed: needed,
+        onSite: onSite,
+        amount: Math.max(0, needed - onSite),
+        editable: true,
+      };
+    });
 
-    var workers = workerTotal(placed, checked);
-    var powerNet = powerNetTotal(placed, checked);
-
-    var transport = ctx.crewById && ctx.crewById[ctx.state.crewTransport];
-    var crew = crewTransportMass(workers, transport);
-    if (crew.mass > 0 && transport) {
-      var modulesT = crew.capsules * transport.mass;
+    // Capsule rows — one per placed type, contributing module mass.
+    capsulePlaced.forEach(function (p) {
+      var totalMass = p.cap.mass * p.count;
       cargoRows.push({
         rid: 'human',
-        name: transport.name + ' ×' + crew.capsules + ' (' + workers + ' humans)',
-        amount: Math.round(crew.mass),
-        tip: crew.capsules + ' × (' + transport.mass + 't module + ' + transport.capacity + 't crew) = ' +
-             modulesT + 't modules + ' + workers + 't crew = ' + Math.round(crew.mass) + 't',
+        name: p.cap.name + ' ×' + p.count + ' (modules, empty)',
+        needed: totalMass,
+        onSite: 0,
+        amount: totalMass,
+        editable: false,
+        tip: p.count + ' × ' + p.cap.mass + 't = ' + totalMass + 't of module mass (humans counted separately)',
+      });
+    });
+
+    // Humans cargo row — humans being shipped given demand, on-site, and seats.
+    var workers = workerTotal(facilityPlaced, checked);
+    var onSiteHumans = (ctx.state.onSite && ctx.state.onSite.human) || 0;
+    var onboardCapacity = capsulePlaced.reduce(function (s, p) { return s + p.cap.capacity * p.count; }, 0);
+    var humansToShip = Math.max(0, workers - onSiteHumans);
+    var humansShipped = Math.min(humansToShip, onboardCapacity);
+    if (humansShipped > 0) {
+      cargoRows.push({
+        rid: 'human',
+        name: 'Humans (in capsules)',
+        needed: humansShipped,
+        onSite: 0,
+        amount: humansShipped,
+        editable: false,
+        tip: humansShipped + ' humans × 1t each (capped at ' + onboardCapacity + ' seats from placed capsules)',
       });
     }
-    cargoRows.sort(function (a, b) { return b.amount - a.amount; });
+
+    cargoRows = cargoRows.filter(function (r) { return r.amount > 0 || r.editable; });
+    // Sort: editable resource rows by amount desc, then capsule/human rows last.
+    cargoRows.sort(function (a, b) {
+      if (a.editable !== b.editable) return a.editable ? -1 : 1;
+      return b.amount - a.amount;
+    });
 
     var grand = cargoRows.reduce(function (sum, r) { return sum + r.amount; }, 0);
 
     var operationalRows = [];
-    if (workers > 0) operationalRows.push({ rid: 'human', name: 'Humans on-site', amount: workers });
+    if (workers > 0) {
+      var shortage = Math.max(0, humansToShip - onboardCapacity);
+      var humansLabel = 'Humans ' + workers;
+      var detail = onboardCapacity + ' onboard' +
+        (onSiteHumans > 0 ? ', ' + onSiteHumans + ' on site' : '');
+      operationalRows.push({
+        rid: 'human',
+        name: humansLabel + ' (' + detail + ')',
+        amount: shortage > 0 ? '−' + shortage + ' short' : 'covered',
+        tip: 'Demand ' + workers + ' = facilities × workers_required (after crew-reduction research). ' +
+             'Onboard = Σ capsule capacity × count. On-site = your input (Humans row in cargo).',
+      });
+    }
+    var powerNet = powerNetTotal(facilityPlaced, checked);
     if (powerNet !== 0) operationalRows.push({ rid: 'energy', name: 'Power (net)', amount: powerNet });
-    var days = buildDayTotal(placed);
+    var days = buildDayTotal(facilityPlaced);
     if (days > 0) operationalRows.push({
       name: 'Total build days', amount: days,
       tip: 'Sum of build_time × count. Assumes serial construction; in-game you can parallelize across construction equipment slots.',
@@ -870,33 +918,47 @@
       return '<p class="calc-empty"><em>All costs reduced to 0.</em></p>';
     }
 
-    function rowHtml(r) {
+    function cargoRowHtml(r) {
       var tipAttr = r.tip ? ' data-tip="' + escapeHtml(r.tip) + '"' : '';
       var iconHtml = r.rid
         ? '<img class="calc-total-icon" src="' + escapeHtml(iconUrl(r.rid)) + '" alt=""> '
         : '';
+      var onSiteCell = r.editable
+        ? '<input type="number" min="0" class="calc-onsite" data-rid="' + escapeHtml(r.rid) +
+          '" value="' + (r.onSite || '') + '" placeholder="0">'
+        : '—';
       return '<tr' + tipAttr + '><td>' + iconHtml + escapeHtml(r.name) + '</td>' +
+        '<td class="calc-num calc-onsite-cell">' + onSiteCell + '</td>' +
         '<td class="calc-num">' + r.amount.toLocaleString() + '</td></tr>';
+    }
+    function opRowHtml(r) {
+      var tipAttr = r.tip ? ' data-tip="' + escapeHtml(r.tip) + '"' : '';
+      var iconHtml = r.rid
+        ? '<img class="calc-total-icon" src="' + escapeHtml(iconUrl(r.rid)) + '" alt=""> '
+        : '';
+      var amt = typeof r.amount === 'number' ? r.amount.toLocaleString() : r.amount;
+      return '<tr' + tipAttr + '><td colspan="2">' + iconHtml + escapeHtml(r.name) + '</td>' +
+        '<td class="calc-num">' + amt + '</td></tr>';
     }
 
     var html = '<table class="calc-totals">';
     if (cargoRows.length) {
-      var totalRow = '<tr class="calc-total-row"><td><strong>Total tons</strong></td>' +
+      var totalRow = '<tr class="calc-total-row"><td colspan="2"><strong>Total tons</strong></td>' +
         '<td class="calc-num"><strong>' + grand.toLocaleString() + '</strong></td></tr>';
       var trips = '';
       var ship = ctx.scById && ctx.scById[ctx.state.spacecraft];
       if (ship && grand > 0) {
         var n = Math.ceil(grand / ship.cargo_capacity);
-        trips = '<tr><td>' + escapeHtml(ship.name) + ' trips ' +
+        trips = '<tr><td colspan="2">' + escapeHtml(ship.name) + ' trips ' +
           '<span class="calc-trip-note">(' + ship.cargo_capacity + ' t / trip)</span></td>' +
           '<td class="calc-num">' + n.toLocaleString() + '</td></tr>';
       }
-      html += '<thead><tr><th colspan="2" class="calc-section">Cargo (to ship)</th></tr></thead>' +
-        '<tbody>' + cargoRows.map(rowHtml).join('') + totalRow + trips + '</tbody>';
+      html += '<thead><tr><th class="calc-section">Cargo (to ship)</th><th class="calc-section calc-num">On site</th><th class="calc-section calc-num">Tons</th></tr></thead>' +
+        '<tbody>' + cargoRows.map(cargoRowHtml).join('') + totalRow + trips + '</tbody>';
     }
     if (operationalRows.length) {
-      html += '<thead><tr><th colspan="2" class="calc-section">Operational (on-site)</th></tr></thead>' +
-        '<tbody>' + operationalRows.map(rowHtml).join('') + '</tbody>';
+      html += '<thead><tr><th colspan="3" class="calc-section">Operational (on-site)</th></tr></thead>' +
+        '<tbody>' + operationalRows.map(opRowHtml).join('') + '</tbody>';
     }
     html += '</table>';
     return html;
@@ -916,7 +978,35 @@
 
   function rerenderTotals(root, ctx) {
     var el = root.querySelector('#calc-totals');
+    // Preserve focus across the re-render so the user can keep typing into
+    // an on-site input — capture the focused rid + cursor position first,
+    // re-render, then restore.
+    var prev = document.activeElement;
+    var focusRid = (prev && prev.classList && prev.classList.contains('calc-onsite'))
+      ? prev.getAttribute('data-rid') : null;
+    var focusCursor = focusRid ? prev.selectionStart : null;
+
     el.innerHTML = renderTotals(ctx);
+
+    if (focusRid) {
+      var next = el.querySelector('.calc-onsite[data-rid="' + focusRid + '"]');
+      if (next) {
+        next.focus();
+        try { if (focusCursor != null) next.setSelectionRange(focusCursor, focusCursor); } catch (e) {}
+      }
+    }
+
+    el.querySelectorAll('.calc-onsite').forEach(function (inp) {
+      inp.addEventListener('input', function () {
+        var rid = inp.getAttribute('data-rid');
+        var v = parseFloat(inp.value);
+        if (!ctx.state.onSite) ctx.state.onSite = {};
+        if (isNaN(v) || v <= 0) delete ctx.state.onSite[rid];
+        else ctx.state.onSite[rid] = v;
+        saveState(ctx.state);
+        rerenderTotals(root, ctx);
+      });
+    });
   }
 
   if (typeof document !== 'undefined') {

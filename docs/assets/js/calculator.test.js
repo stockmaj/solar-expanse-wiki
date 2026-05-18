@@ -344,18 +344,18 @@ eq(
 if (typeof atob === 'undefined') { global.atob = require('buffer').Buffer.from(arguments[0], 'base64').toString('binary'); }
 
 const fullState = {
-  placed: { build_habitat: 3, build_alloymine: 1 },
+  placed: { build_habitat: 3, build_alloymine: 1, module_crew_compartment: 2 },
   checked: { research_lifesup_10: true },
-  crewTransport: 'module_crew_compartment',
   spacecraft: 'spacecraft_chem_large',
+  onSite: { metal: 100, human: 5 },
 };
 eq(decodeShareState(encodeShareState(fullState)), fullState, 'share: round-trip preserves full state');
 
 eq(
   decodeShareState(encodeShareState({
-    placed: {}, checked: {}, crewTransport: null, spacecraft: null,
+    placed: {}, checked: {}, spacecraft: null, onSite: {},
   })),
-  { placed: {}, checked: {}, crewTransport: null, spacecraft: null },
+  { placed: {}, checked: {}, spacecraft: null, onSite: {} },
   'share: round-trip preserves empty state'
 );
 
