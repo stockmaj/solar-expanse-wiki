@@ -545,12 +545,33 @@ struct ExoplanetBody {
 }
 
 #[derive(Serialize, Debug, Default, PartialEq, Clone)]
+struct AchievementCondition {
+    /// Source id of a ContractDefinition that must also be completed.
+    /// Empty when this condition isn't a contract-dependency.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    required_contract: String,
+    /// In-game year by which the achievement must be earned (derived from
+    /// `maxTime._DateTime`).  0 when no deadline is set.
+    #[serde(default, skip_serializing_if = "is_zero_i32")]
+    before_year: i32,
+}
+
+fn is_zero_i32(v: &i32) -> bool {
+    *v == 0
+}
+
+#[derive(Serialize, Debug, Default, PartialEq, Clone)]
 struct Achievement {
     id: String,
     name: String,
     source_type: String,
     source_id: String,
     description: String,
+    /// Extra requirements beyond completing the parent contract — year
+    /// deadlines and/or required prior contracts.  Empty for spacecraft /
+    /// LV-sourced achievements and for unconditional contract achievements.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    conditions: Vec<AchievementCondition>,
 }
 
 #[derive(Serialize)]
@@ -588,6 +609,42 @@ fn extract_binding_achievement_id(binding: &Value) -> Option<String> {
         .map(|s| s.to_string())
 }
 
+/// Parse the `conditions[]` array on a steamAchievement binding.  Each
+/// element becomes an `AchievementCondition`; we skip elements that yield
+/// nothing useful (no contract ref AND no real maxTime year).
+///
+/// The dump's `maxTime` is a `_DateTime` ISO string; the sentinel for "no
+/// deadline" is `0001-01-01`, while real deadlines are years like `2400`
+/// or `2600`.  Anything before year 100 is treated as the sentinel.
+fn parse_achievement_conditions(binding: &Value) -> Vec<AchievementCondition> {
+    let Some(arr) = binding.get("conditions").and_then(|v| v.as_array()) else {
+        return Vec::new();
+    };
+    arr.iter()
+        .filter_map(|cond| {
+            let required_contract = cond
+                .pointer("/contract/name")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string();
+            let before_year = cond
+                .pointer("/maxTime/_DateTime")
+                .and_then(|x| x.as_str())
+                .and_then(|s| s.get(..4))
+                .and_then(|s| s.parse::<i32>().ok())
+                .filter(|&y| y >= 100)
+                .unwrap_or(0);
+            if required_contract.is_empty() && before_year == 0 {
+                return None;
+            }
+            Some(AchievementCondition {
+                required_contract,
+                before_year,
+            })
+        })
+        .collect()
+}
+
 /// Walk `ContractDefinition.steamAchievements[]` and produce one `Achievement`
 /// row per (contract id, non-null binding) pair.  Empty when the contract has
 /// no `steamAchievements` field, an empty array, or every binding is a
@@ -608,6 +665,7 @@ fn parse_contract_achievements(v: &Value) -> Vec<Achievement> {
                 source_type: "contract".to_string(),
                 source_id: id.to_string(),
                 description: String::new(),
+                conditions: parse_achievement_conditions(binding),
             })
         })
         .collect()
@@ -626,6 +684,7 @@ fn parse_spacecraft_achievement(v: &Value) -> Option<Achievement> {
         source_type: "spacecraft".to_string(),
         source_id: id.to_string(),
         description: String::new(),
+        conditions: parse_achievement_conditions(binding),
     })
 }
 
@@ -643,6 +702,7 @@ fn parse_launch_vehicle_achievement(v: &Value) -> Option<Achievement> {
         source_type: "launch_vehicle".to_string(),
         source_id: id.to_string(),
         description: String::new(),
+        conditions: parse_achievement_conditions(binding),
     })
 }
 
@@ -4523,6 +4583,144 @@ mod tests {
                 ("spacecraft", "spacecraft_b"),
             ]
         );
+    }
+
+    // ---------- Achievement conditions ----------
+    //
+    // The `conditions` array on a steamAchievement binding holds the *actual*
+    // achievement requirements beyond "complete the parent contract":
+    //   * deadline conditions carry a `maxTime` (._DateTime) — earn the
+    //     achievement before this in-game date.  The year is what players
+    //     care about.
+    //   * dependency conditions carry a `contract` ref to a *different*
+    //     ContractDefinition that must also have been completed.
+    //
+    // Conditions on placeholder achievements (inner achievement == null) are
+    // ignored entirely (no row is emitted).
+
+    #[test]
+    fn parse_contract_achievements_captures_year_deadline_condition() {
+        // contract_general_interstellar2's "Wanderlust" achievement requires
+        // completing it before 2400-01-01.
+        let v = serde_json::json!({
+            "id": "contract_general_interstellar2",
+            "steamAchievements": [
+                {
+                    "conditions": [
+                        {
+                            "minTime": { "_DateTime": "0001-01-01T00:00:00.0000000" },
+                            "maxTime": { "_DateTime": "2400-01-01T00:00:00.0010000" },
+                            "negate": false
+                        }
+                    ],
+                    "conditionsType": "All",
+                    "achievement": { "name": "id_achievement_Wanderlust" }
+                }
+            ]
+        });
+        let achs = parse_contract_achievements(&v);
+        assert_eq!(achs.len(), 1);
+        assert_eq!(achs[0].conditions.len(), 1, "year deadline should be captured");
+        assert_eq!(achs[0].conditions[0].before_year, 2400);
+        assert!(achs[0].conditions[0].required_contract.is_empty());
+    }
+
+    #[test]
+    fn parse_contract_achievements_captures_required_contract_condition() {
+        // The "MarsTerraformed" achievement on contract_mars_terraform_atmo2
+        // requires also having completed contract_mars_terraform_water.
+        let v = serde_json::json!({
+            "id": "contract_mars_terraform_atmo2",
+            "steamAchievements": [
+                {
+                    "conditions": [
+                        {
+                            "contract": {
+                                "$ref": true,
+                                "type": "ContractDefinition",
+                                "name": "contract_mars_terraform_water"
+                            },
+                            "negate": false
+                        }
+                    ],
+                    "conditionsType": "All",
+                    "achievement": { "name": "id_achievement_MarsTerraformed" }
+                }
+            ]
+        });
+        let achs = parse_contract_achievements(&v);
+        assert_eq!(achs.len(), 1);
+        assert_eq!(achs[0].conditions.len(), 1);
+        assert_eq!(
+            achs[0].conditions[0].required_contract,
+            "contract_mars_terraform_water"
+        );
+        assert_eq!(achs[0].conditions[0].before_year, 0);
+    }
+
+    #[test]
+    fn parse_contract_achievements_captures_combined_conditions() {
+        // The "Terraform" achievement carries both: requires terraform_water
+        // AND must be earned before year 2600.  Both conditions surface.
+        let v = serde_json::json!({
+            "id": "contract_mars_terraform_atmo2",
+            "steamAchievements": [
+                {
+                    "conditions": [
+                        {
+                            "contract": {
+                                "$ref": true,
+                                "type": "ContractDefinition",
+                                "name": "contract_mars_terraform_water"
+                            },
+                            "negate": false
+                        },
+                        {
+                            "minTime": { "_DateTime": "0001-01-01T00:00:00.0000000" },
+                            "maxTime": { "_DateTime": "2600-01-01T00:00:00.0010000" },
+                            "negate": false
+                        }
+                    ],
+                    "conditionsType": "All",
+                    "achievement": { "name": "id_achievement_Terraform" }
+                }
+            ]
+        });
+        let achs = parse_contract_achievements(&v);
+        assert_eq!(achs.len(), 1);
+        assert_eq!(achs[0].conditions.len(), 2);
+        // First condition: required contract; second: year deadline.
+        let req: Vec<&str> = achs[0]
+            .conditions
+            .iter()
+            .map(|c| c.required_contract.as_str())
+            .filter(|s| !s.is_empty())
+            .collect();
+        assert_eq!(req, vec!["contract_mars_terraform_water"]);
+        let yr: Vec<i32> = achs[0]
+            .conditions
+            .iter()
+            .map(|c| c.before_year)
+            .filter(|&y| y != 0)
+            .collect();
+        assert_eq!(yr, vec![2600]);
+    }
+
+    #[test]
+    fn parse_contract_achievements_leaves_conditions_empty_when_array_is_empty() {
+        let v = serde_json::json!({
+            "id": "contract_x",
+            "steamAchievements": [
+                {
+                    "conditions": [],
+                    "conditionsType": "All",
+                    "achievement": { "name": "id_achievement_X" }
+                }
+            ]
+        });
+        let achs = parse_contract_achievements(&v);
+        assert_eq!(achs.len(), 1);
+        assert!(achs[0].conditions.is_empty());
     }
 
     #[test]

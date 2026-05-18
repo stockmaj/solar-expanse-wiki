@@ -173,6 +173,23 @@ struct AchievementStat {
     source_id: String,
     #[serde(default)]
     description: String,
+    /// Extra requirements parsed from the binding's `conditions[]` — year
+    /// deadlines and required prior contracts.  Empty when the achievement
+    /// has no constraints beyond completing the parent contract.
+    #[serde(default)]
+    conditions: Vec<AchievementConditionStat>,
+}
+
+#[derive(Deserialize, Clone, Default)]
+struct AchievementConditionStat {
+    /// Contract id that must also be completed; empty when the condition is
+    /// purely a year deadline.
+    #[serde(default)]
+    required_contract: String,
+    /// In-game year by which the achievement must be earned; 0 when no
+    /// deadline applies.
+    #[serde(default)]
+    before_year: i32,
 }
 
 #[derive(Deserialize, Clone, Default)]
@@ -4723,7 +4740,7 @@ fn humanize_achievement_id(id: &str) -> String {
 
 /// Steam achievements page.  Renders one section per source_type
 /// (`contract` / `spacecraft` / `launch_vehicle`), each with a stat table
-/// keyed on (achievement name, player-facing source name, description).
+/// keyed on (achievement name, link to its trigger row, optional condition).
 ///
 /// Source-name resolution is locale-first:
 ///   * contract → `locale.contracts[].name`
@@ -4735,6 +4752,17 @@ fn humanize_achievement_id(id: &str) -> String {
 /// `achievement_*` keys don't exist, so the renderer always uses
 /// `humanize_achievement_id` unless the upstream parser stamped a real
 /// `name` on the `AchievementStat`.
+///
+/// The "How to earn" / "Trigger" cell is a markdown link to the trigger's
+/// row on its dedicated page (../contracts/, ../spacecraft/, etc.) so a
+/// reader can jump straight to the contract description or spacecraft
+/// stats.
+///
+/// The Condition column carries year deadlines and required prior
+/// contracts parsed from each binding's `conditions[]` array.  It only
+/// renders for source types that actually carry conditions in the dump:
+/// contracts.  Spacecraft and LV tables omit it entirely because every
+/// such binding has an empty `conditions[]`.
 ///
 /// Sections with zero rows are omitted entirely (no point in showing
 /// "## By launch vehicle" if no LV currently binds an achievement).
@@ -4768,7 +4796,7 @@ fn page_achievements(locale: &Locale, sirenix: &Sirenix) -> String {
     // Resolve the source's player-facing name; fall back to the raw id
     // only as a last resort (and log it in the rendered cell so a wiki
     // reader can still recognize it).
-    let render_source = |source_type: &str, source_id: &str| -> String {
+    let resolve_name = |source_type: &str, source_id: &str| -> String {
         let name = match source_type {
             "contract" => contract_name.get(source_id).copied(),
             "spacecraft" => sc_name.get(source_id).copied(),
@@ -4781,53 +4809,125 @@ fn page_achievements(locale: &Locale, sirenix: &Sirenix) -> String {
         }
     };
 
+    // Build the "how to earn / trigger" cell as a markdown link to the
+    // source row on its dedicated page.
+    let render_source_link = |source_type: &str, source_id: &str, label: &str| -> String {
+        let display = format!("{} ({})", resolve_name(source_type, source_id), label);
+        let escaped = escape_cell(&display);
+        match source_type {
+            "contract" => link_cross_page("contracts", "contract", source_id, &escaped),
+            "spacecraft" => link_cross_page("spacecraft", "spacecraft", source_id, &escaped),
+            "launch_vehicle" => link_cross_page("launch-vehicles", "lv", source_id, &escaped),
+            _ => escaped,
+        }
+    };
+
+    // Render the `conditions[]` array as a human-readable cell.  Year
+    // deadlines become "By year 2400"; required prior contracts become
+    // markdown links to that contract's row on /contracts/.  Multiple
+    // conditions on a single achievement join with "<br>".
+    let render_conditions = |conds: &[AchievementConditionStat]| -> String {
+        let bits: Vec<String> = conds
+            .iter()
+            .filter_map(|c| {
+                if !c.required_contract.is_empty() {
+                    let pretty = resolve_name("contract", &c.required_contract);
+                    let link = link_cross_page(
+                        "contracts",
+                        "contract",
+                        &c.required_contract,
+                        &escape_cell(&pretty),
+                    );
+                    Some(format!("After {link}"))
+                } else if c.before_year > 0 {
+                    Some(format!("By year {}", c.before_year))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if bits.is_empty() {
+            "—".to_string()
+        } else {
+            bits.join("<br>")
+        }
+    };
+
     let mut out = String::new();
     out.push_str(
         "# Achievements\n\n\
 Steam achievements available in **Solar Expanse**, with how to earn each.\n\
-Sourced from the game's `ContractDefinition`, `SpacecraftType`, and\n\
-`LaunchVehicleType` tables — every binding here corresponds to an in-game\n\
-trigger that awards the achievement.\n\n",
+Sourced from the game's `ContractDefinition` and `SpacecraftType` tables —\n\
+every binding here corresponds to an in-game trigger that awards the\n\
+achievement.  Each contract / spacecraft name links to its row on the\n\
+relevant page.\n\n",
     );
 
+    // A section renders either two columns (Achievement + Trigger) or three
+    // (+ Condition) depending on `with_conditions`.  Spacecraft / LV bind
+    // unconditional achievements in the dump, so they get the 2-col layout.
     let section = |out: &mut String,
                    header: &str,
                    label: &str,
                    filter_type: &str,
-                   trigger_header: &str| {
+                   trigger_header: &str,
+                   with_conditions: bool| {
         let rows: Vec<Vec<String>> = sirenix
             .achievements
             .iter()
             .filter(|a| a.source_type == filter_type)
             .map(|a| {
-                let how = format!("{} ({})", render_source(&a.source_type, &a.source_id), label);
-                let desc = if a.description.is_empty() {
-                    "—".to_string()
-                } else {
-                    escape_cell(&a.description)
-                };
-                vec![escape_cell(&render_name(a)), escape_cell(&how), desc]
+                let how = render_source_link(&a.source_type, &a.source_id, label);
+                let mut row = vec![escape_cell(&render_name(a)), how];
+                if with_conditions {
+                    row.push(render_conditions(&a.conditions));
+                }
+                row
             })
             .collect();
         if rows.is_empty() {
             return;
         }
         out.push_str(&format!("## {header}\n\n"));
-        out.push_str(&md_table(
-            &["Achievement", trigger_header, "Description"],
-            &rows,
-        ));
+        let headers: &[&str] = if with_conditions {
+            &["Achievement", trigger_header, "Condition"]
+        } else {
+            &["Achievement", trigger_header]
+        };
+        out.push_str(&md_table(headers, &rows));
         out.push('\n');
     };
 
-    section(&mut out, "By contract", "contract", "contract", "How to earn (contract)");
-    section(&mut out, "By spacecraft", "spacecraft", "spacecraft", "Trigger spacecraft");
-    section(&mut out, "By launch vehicle", "launch vehicle", "launch_vehicle", "Trigger launch vehicle");
+    section(
+        &mut out,
+        "By contract",
+        "contract",
+        "contract",
+        "How to earn (contract)",
+        true,
+    );
+    section(
+        &mut out,
+        "By spacecraft",
+        "spacecraft",
+        "spacecraft",
+        "Trigger spacecraft",
+        false,
+    );
+    section(
+        &mut out,
+        "By launch vehicle",
+        "launch vehicle",
+        "launch_vehicle",
+        "Trigger launch vehicle",
+        false,
+    );
 
     out.push_str(
         "## Notes\n\n\
 - Some contracts bind more than one achievement (e.g. *Interstellar 2* awards\n  both *To Infinity* and *Wanderlust* — the latter only if completed before\n  the year 2400).  Each binding appears as its own row.\n\
 - Spacecraft-bound achievements typically fire the first time you operate a\n  craft of that propulsion class — building, fueling, or launching one\n  depending on the achievement.\n\
+- The Condition column lists the extra requirements parsed from each\n  binding's `conditions[]` array — typically a year deadline or a\n  prerequisite contract.  \"—\" means the achievement fires the moment the\n  parent contract is completed, with no further constraint.\n\
 - Achievement names are derived from the in-game id when no localized\n  display name is available; the in-game UI may polish the wording further.\n\n\
 ## See also\n\n\
 - [Contracts](../contracts/) — full contract list and dependency chain\n\
@@ -9033,6 +9133,7 @@ mod tests {
                     source_type: "contract".into(),
                     source_id: "contract_asteroid_impact".into(),
                     description: String::new(),
+                    ..Default::default()
                 },
                 AchievementStat {
                     id: "id_achievement_FirstOrbit".into(),
@@ -9040,6 +9141,7 @@ mod tests {
                     source_type: "contract".into(),
                     source_id: "contract_tutorial_firstorbit".into(),
                     description: String::new(),
+                    ..Default::default()
                 },
                 AchievementStat {
                     id: "id_achievement_ThePowerofaStar".into(),
@@ -9047,6 +9149,7 @@ mod tests {
                     source_type: "spacecraft".into(),
                     source_id: "spacecraft_fusion_large".into(),
                     description: String::new(),
+                    ..Default::default()
                 },
                 AchievementStat {
                     id: "id_achievement_HeavyLifter".into(),
@@ -9054,6 +9157,7 @@ mod tests {
                     source_type: "launch_vehicle".into(),
                     source_id: "lv_chem_seadragon".into(),
                     description: String::new(),
+                    ..Default::default()
                 },
             ],
             ..Sirenix::default()
@@ -9408,6 +9512,7 @@ mod tests {
         assert!(page.starts_with("# Exoplanet Systems"));
         assert!(page.contains("not available"), "empty-data page must explain the situation:\n{page}");
     }
+    #[test]
     fn achievements_page_has_one_section_per_source_type() {
         let locale = achievements_fixture_locale();
         let sirenix = achievements_fixture_sirenix();
@@ -9484,6 +9589,7 @@ mod tests {
                 source_type: "contract".into(),
                 source_id: "contract_asteroid_impact".into(),
                 description: String::new(),
+                ..Default::default()
             }],
             ..Sirenix::default()
         };
@@ -9506,11 +9612,184 @@ mod tests {
                 source_type: "contract".into(),
                 source_id: "contract_asteroid_impact".into(),
                 description: String::new(),
+                ..Default::default()
             }],
             ..Sirenix::default()
         };
         let page = page_achievements(&locale, &sirenix);
         assert!(page.contains("Not Today!"), "expected locale name:\n{page}");
+    }
+
+    // ---------- New assertions for the reworked Achievements page ----------
+    //
+    // 1. Source name in the "How to earn" / "Trigger" cell must be a
+    //    markdown link to the row on the corresponding page
+    //    (../contracts/#contract-<id> or ../spacecraft/#spacecraft-<id>).
+    // 2. The empty "Description" column is replaced by a "Condition" column
+    //    that renders year deadlines and required prior contracts when the
+    //    binding carries `conditions[]`.  Spacecraft achievements have no
+    //    conditions in the dump so their section omits the column entirely.
+    // 3. The intro paragraph no longer claims LV is a source, since no LV
+    //    actually populates an inner achievement.
+
+    #[test]
+    fn achievements_page_links_contract_row_to_contracts_page() {
+        let locale = achievements_fixture_locale();
+        let sirenix = achievements_fixture_sirenix();
+        let page = page_achievements(&locale, &sirenix);
+        // The "How to earn" cell for a contract-sourced achievement must be
+        // a markdown link to the row's anchor on /contracts/.  Underscores
+        // in the source id are slugged to dashes by `anchor_id`.
+        assert!(
+            page.contains(
+                "[Asteroid Impact (contract)](../contracts/#contract-contract-asteroid-impact)"
+            ),
+            "expected contract link in How-to-earn cell:\n{page}"
+        );
+        assert!(
+            page.contains(
+                "[First Orbit (contract)](../contracts/#contract-contract-tutorial-firstorbit)"
+            ),
+            "expected First Orbit link:\n{page}"
+        );
+    }
+
+    #[test]
+    fn achievements_page_links_spacecraft_row_to_spacecraft_page() {
+        let locale = achievements_fixture_locale();
+        let sirenix = achievements_fixture_sirenix();
+        let page = page_achievements(&locale, &sirenix);
+        assert!(
+            page.contains(
+                "[Sirius (spacecraft)](../spacecraft/#spacecraft-spacecraft-fusion-large)"
+            ),
+            "expected spacecraft link in Trigger cell:\n{page}"
+        );
+    }
+
+    #[test]
+    fn achievements_page_drops_description_column_in_favor_of_condition() {
+        // The old Description column was empty for every row.  The new
+        // Condition column carries year deadlines and required-contract
+        // dependencies parsed from the binding `conditions[]`.
+        let locale = achievements_fixture_locale();
+        let sirenix = achievements_fixture_sirenix();
+        let page = page_achievements(&locale, &sirenix);
+        assert!(
+            !page.contains("| Description |") && !page.contains("Description |\n"),
+            "Description column must be removed:\n{page}"
+        );
+        assert!(
+            page.contains("| Condition |") || page.contains("Condition |"),
+            "Condition column must be present in at least one section:\n{page}"
+        );
+    }
+
+    #[test]
+    fn achievements_page_renders_year_deadline_condition() {
+        let locale = achievements_fixture_locale();
+        let sirenix = Sirenix {
+            achievements: vec![AchievementStat {
+                id: "id_achievement_Wanderlust".into(),
+                source_type: "contract".into(),
+                source_id: "contract_asteroid_impact".into(),
+                conditions: vec![AchievementConditionStat {
+                    required_contract: String::new(),
+                    before_year: 2400,
+                }],
+                ..Default::default()
+            }],
+            ..Sirenix::default()
+        };
+        let page = page_achievements(&locale, &sirenix);
+        assert!(
+            page.contains("by year 2400") || page.contains("By year 2400"),
+            "year deadline must surface in Condition cell:\n{page}"
+        );
+    }
+
+    #[test]
+    fn achievements_page_renders_required_contract_condition_as_link() {
+        // A condition that references another contract should render as a
+        // markdown link to that contract's row on /contracts/.
+        let locale = achievements_fixture_locale();
+        let sirenix = Sirenix {
+            achievements: vec![AchievementStat {
+                id: "id_achievement_MarsTerraformed".into(),
+                source_type: "contract".into(),
+                source_id: "contract_asteroid_impact".into(),
+                conditions: vec![AchievementConditionStat {
+                    required_contract: "contract_tutorial_firstorbit".into(),
+                    before_year: 0,
+                }],
+                ..Default::default()
+            }],
+            ..Sirenix::default()
+        };
+        let page = page_achievements(&locale, &sirenix);
+        // Player-facing name from locale, linking to the same-id anchor.
+        assert!(
+            page.contains(
+                "[First Orbit](../contracts/#contract-contract-tutorial-firstorbit)"
+            ),
+            "required contract should be a link to its /contracts/ row:\n{page}"
+        );
+        assert!(
+            !page.contains("contract_tutorial_firstorbit (contract)"),
+            "should not show raw id in the prereq cell:\n{page}"
+        );
+    }
+
+    #[test]
+    fn achievements_page_spacecraft_section_omits_condition_column() {
+        // No spacecraft-sourced achievement in the dump carries conditions,
+        // so the Spacecraft table should be a 2-column (Achievement +
+        // Trigger spacecraft) table without an empty Condition column.
+        let locale = achievements_fixture_locale();
+        let sirenix = Sirenix {
+            achievements: vec![AchievementStat {
+                id: "id_achievement_ThePowerofaStar".into(),
+                source_type: "spacecraft".into(),
+                source_id: "spacecraft_fusion_large".into(),
+                ..Default::default()
+            }],
+            ..Sirenix::default()
+        };
+        let page = page_achievements(&locale, &sirenix);
+        // Find the "## By spacecraft" section and its header row.
+        let sc_idx = page
+            .find("## By spacecraft")
+            .expect("spacecraft section must exist");
+        let after = &page[sc_idx..];
+        // The header row of the spacecraft table comes right after the heading.
+        let header_line = after
+            .lines()
+            .find(|l| l.starts_with("| Achievement"))
+            .expect("header row must exist");
+        assert!(
+            !header_line.contains("Condition"),
+            "spacecraft section header must not include Condition:\n{header_line}"
+        );
+    }
+
+    #[test]
+    fn achievements_page_intro_lists_only_populated_source_types() {
+        // The intro paragraph should not claim LaunchVehicleType is a source
+        // because no LV actually populates an inner achievement in the dump.
+        let locale = achievements_fixture_locale();
+        let sirenix = achievements_fixture_sirenix();
+        let page = page_achievements(&locale, &sirenix);
+        // Grab just the intro (text before the first H2).
+        let intro_end = page.find("## ").unwrap_or(page.len());
+        let intro = &page[..intro_end];
+        assert!(
+            !intro.contains("LaunchVehicleType"),
+            "intro must not name LaunchVehicleType as a source:\n{intro}"
+        );
+        assert!(
+            intro.contains("ContractDefinition") && intro.contains("SpacecraftType"),
+            "intro must name the two real source tables:\n{intro}"
+        );
     }
 
     #[test]
