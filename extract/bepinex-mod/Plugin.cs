@@ -38,8 +38,9 @@ namespace SolarExpanseWikiDumper
             // dedicated MonoBehaviour on a persistent GameObject to drive the poll.
             var go = new GameObject("SolarExpanseWikiDumperPoller");
             UnityEngine.Object.DontDestroyOnLoad(go);
-            go.AddComponent<DumperPoller>();
+            var comp = go.AddComponent<DumperPoller>();
             Log.LogInfo("DumperPoller component spawned on persistent GameObject; waiting for ObjectInfoManager + AllScriptableObjectManager.");
+            Log.LogInfo($"DumperPoller component spawned. goActive={go.activeInHierarchy} compNull={(comp == null)} compEnabled={(comp != null && comp.enabled)}");
         }
     }
 
@@ -61,6 +62,21 @@ namespace SolarExpanseWikiDumper
         private float nextCheckTime;
         private float nextStatusLog;
         private bool firstUpdateLogged;
+
+        private void Awake()
+        {
+            Plugin.Log.LogInfo("DumperPoller.Awake fired.");
+        }
+
+        private void OnEnable()
+        {
+            Plugin.Log.LogInfo($"DumperPoller.OnEnable fired. gameObject.activeInHierarchy={gameObject.activeInHierarchy} enabled={enabled}");
+        }
+
+        private void Start()
+        {
+            Plugin.Log.LogInfo("DumperPoller.Start fired.");
+        }
 
         private void Update()
         {
