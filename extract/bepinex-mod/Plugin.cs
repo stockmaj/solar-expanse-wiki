@@ -25,12 +25,6 @@ namespace SolarExpanseWikiDumper
 
         internal static BepInEx.Logging.ManualLogSource Log;
 
-        private bool dumped;
-        private bool armed;
-        private float nextCheckTime;
-        private float nextStatusLog;
-        private bool firstUpdateLogged;
-
         private void Awake()
         {
             Log = Logger;
@@ -40,25 +34,42 @@ namespace SolarExpanseWikiDumper
                 Log.LogInfo($"Marker present at {marker}; dumper will not run.  Delete it to re-dump.");
                 return;
             }
-            armed = true;
-            Log.LogInfo("Update poll armed; waiting for ObjectInfoManager + AllScriptableObjectManager to be ready.");
+            // Plugin.Update() isn't ticked by Unity in this BepInEx setup, so spawn a
+            // dedicated MonoBehaviour on a persistent GameObject to drive the poll.
+            var go = new GameObject("SolarExpanseWikiDumperPoller");
+            UnityEngine.Object.DontDestroyOnLoad(go);
+            go.AddComponent<DumperPoller>();
+            Log.LogInfo("DumperPoller component spawned on persistent GameObject; waiting for ObjectInfoManager + AllScriptableObjectManager.");
         }
+    }
 
-        // Poll every ~0.5s for the managers to be live and ObjectInfo list populated.
-        // We previously hooked ObjectInfoManager.SetAllObjectInfos via Harmony, but the
-        // postfix never fired on the game's actual load path (likely inlined or hit a
-        // mismatched overload), so we switched to a guaranteed-coverage Update poll.
-        // ObjectInfoManager is MonoBehaviourSingleton<ObjectInfoManager>; its
-        // allObjectInfos list only gets populated once SolarLoader.CreateSolarSystem
-        // calls SetAllObjectInfos, so its non-empty count is our "scene ready" signal.
+    // Poll every ~0.5s for the managers to be live and ObjectInfo list populated.
+    // We previously hooked ObjectInfoManager.SetAllObjectInfos via Harmony, but the
+    // postfix never fired on the game's actual load path (likely inlined or hit a
+    // mismatched overload), so we switched to a guaranteed-coverage Update poll.
+    // ObjectInfoManager is MonoBehaviourSingleton<ObjectInfoManager>; its
+    // allObjectInfos list only gets populated once SolarLoader.CreateSolarSystem
+    // calls SetAllObjectInfos, so its non-empty count is our "scene ready" signal.
+    //
+    // Lives on its own persistent GameObject (created in Plugin.Awake) because
+    // Plugin.Update() was never being ticked by Unity in BepInEx 5.4.23.5 — the
+    // BepInEx-Manager host GameObject apparently doesn't tick plugin BaseUnityPlugin
+    // instances in this build.
+    internal class DumperPoller : MonoBehaviour
+    {
+        private bool dumped;
+        private float nextCheckTime;
+        private float nextStatusLog;
+        private bool firstUpdateLogged;
+
         private void Update()
         {
             if (!firstUpdateLogged)
             {
                 firstUpdateLogged = true;
-                Log.LogInfo("Plugin.Update() is being called by Unity.");
+                Plugin.Log.LogInfo("DumperPoller.Update() is being called by Unity.");
             }
-            if (!armed || dumped) return;
+            if (dumped) return;
 
             // Throttled state log — once every 3 seconds, regardless of which check fails.
             // Runs OUTSIDE the 0.5s poll throttle so we can see what's silently returning early.
@@ -78,7 +89,7 @@ namespace SolarExpanseWikiDumper
                     var allPeek = allFieldPeek?.GetValue(oimPeek) as System.Collections.ICollection;
                     allCount = allPeek != null ? allPeek.Count : -1;
                 }
-                Log.LogInfo($"poll state: oim={(oimPeek == null ? "null" : "present")} fieldFound={fieldFound} allObjectInfos.count={allCount} aso={(asoMgrPeek == null ? "null" : "present")}");
+                Plugin.Log.LogInfo($"poll state: oim={(oimPeek == null ? "null" : "present")} fieldFound={fieldFound} allObjectInfos.count={allCount} aso={(asoMgrPeek == null ? "null" : "present")}");
             }
 
             if (Time.unscaledTime < nextCheckTime) return;
@@ -101,15 +112,15 @@ namespace SolarExpanseWikiDumper
             var dir = Application.streamingAssetsPath;
             try
             {
-                Log.LogInfo($"Update poll: ObjectInfoManager has {all.Count} bodies and AllScriptableObjectManager is ready — running dump.");
+                Plugin.Log.LogInfo($"Update poll: ObjectInfoManager has {all.Count} bodies and AllScriptableObjectManager is ready — running dump.");
                 var json = Dumper.Dump(asoMgr);
-                File.WriteAllText(Path.Combine(dir, OutputFileName), json);
-                File.WriteAllText(Path.Combine(dir, MarkerFileName), DateTime.UtcNow.ToString("O"));
-                Log.LogInfo($"Wrote {json.Length:N0} characters to {OutputFileName}");
+                File.WriteAllText(Path.Combine(dir, Plugin.OutputFileName), json);
+                File.WriteAllText(Path.Combine(dir, Plugin.MarkerFileName), DateTime.UtcNow.ToString("O"));
+                Plugin.Log.LogInfo($"Wrote {json.Length:N0} characters to {Plugin.OutputFileName}");
             }
             catch (Exception ex)
             {
-                Log.LogError($"Dump failed: {ex}");
+                Plugin.Log.LogError($"Dump failed: {ex}");
             }
         }
     }
