@@ -190,6 +190,68 @@ struct ScenarioStartStat {
     scenario_id: String,
     #[serde(default)]
     corp_starts: Vec<CorpStartStat>,
+    /// Per-body initial habitability snapshot at scenario load. One entry per
+    /// `ObjectInfoSaves[]` element in the StartGameData save; sorted by
+    /// `body_id` for deterministic order. Empty for the Early Exploration
+    /// (testStartGAme) save whose dump doesn't carry a populated
+    /// `habitabilityParameters` block.
+    #[serde(default)]
+    body_habitability: Vec<ScenarioBodyHabitabilityStat>,
+}
+
+/// Mirrors `parse_sirenix::ScenarioBodyHabitability`. See that struct's doc
+/// comment for unit conventions (notably: temperature in °C, pressure in
+/// Earth atmospheres, gravity in m/s²).
+#[derive(Deserialize, Clone, Default)]
+struct ScenarioBodyHabitabilityStat {
+    body_name: String,
+    #[allow(dead_code)]
+    body_id: i32,
+    #[serde(default)]
+    temperature: f64,
+    #[serde(default)]
+    composition: f64,
+    #[serde(default)]
+    pressure: f64,
+    #[serde(default)]
+    gravity: f64,
+    #[serde(default)]
+    water: f64,
+    #[serde(default)]
+    radiation: f64,
+    #[serde(default)]
+    magnetic_field: f64,
+    #[serde(default)]
+    albedo: f64,
+    #[allow(dead_code)]
+    #[serde(default)]
+    internal_flux: f64,
+    #[allow(dead_code)]
+    #[serde(default)]
+    heat_capacity_rock: f64,
+    #[allow(dead_code)]
+    #[serde(default)]
+    total_heat_capacity: f64,
+    #[serde(default)]
+    temperature_swings: f64,
+    #[allow(dead_code)]
+    #[serde(default)]
+    mirrors_strength: f64,
+    #[allow(dead_code)]
+    #[serde(default)]
+    shades_strength: f64,
+    #[allow(dead_code)]
+    #[serde(default)]
+    extreme_volcanism: f64,
+    #[allow(dead_code)]
+    #[serde(default)]
+    environmental_toxicity: f64,
+    #[allow(dead_code)]
+    #[serde(default)]
+    cryo_volcanism: f64,
+    #[allow(dead_code)]
+    #[serde(default)]
+    hydro_carbon_lakes: f64,
 }
 
 #[derive(Deserialize, Clone, Default)]
@@ -1263,7 +1325,8 @@ Habitability can be improved through terraforming.\n\n\
 - [Asteroids](asteroids.md) — main belt, NEOs, Trojans/Greeks, and others\n\
 - [Comets](comets.md) — periodic comets\n\
 - [Exoplanets](exoplanets.md) — Trappist-1 and Kepler-90 systems\n\
-- [Launch Windows](launch-windows.md) — synodic periods for planning Earth → body missions\n"
+- [Launch Windows](launch-windows.md) — synodic periods for planning Earth → body missions\n\
+- [Initial habitability per scenario](scenario-state.md) — start-of-scenario temperature, pressure, gravity, water, radiation, etc. for each named body, compared across the four pre-built saves\n"
     )
 }
 
@@ -4648,6 +4711,188 @@ For launch-window timing for any destination, see [Launch Windows](../celestial-
     )
 }
 
+/// Map a habitability field's raw scenario-start value to a player-facing
+/// formatted string. Wraps `fmt_opt` for the numeric formatting choices
+/// (decimals shown vary by field magnitude).
+fn fmt_habit(v: f64, places: usize) -> String {
+    if !v.is_finite() {
+        "—".to_string()
+    } else if v == 0.0 {
+        "0".to_string()
+    } else {
+        format!("{v:.places$}")
+    }
+}
+
+/// Per-body initial-habitability snapshot page. One section per resolved
+/// planet/moon (asteroids and other numerically-keyed bodies are filtered
+/// out — they don't appear in `PlanetarySystemDescriptor.tabObjectInfoData`
+/// and showing a wall of "186" rows isn't useful).
+///
+/// For each body we emit a comparison table — one row per scenario — with
+/// the player-facing habitability columns. This makes it easy to see, for
+/// example, that Mars has roughly the same temperature in all three
+/// populated scenarios but its water level varies as terraforming progresses
+/// across the timeline.
+///
+/// Early Exploration's StartGameData (testStartGAme) doesn't carry a
+/// populated `habitabilityParameters` block in the current dump, so its
+/// row reads "data unavailable" rather than zeros.
+fn page_scenario_state(sirenix: &Sirenix) -> String {
+    if sirenix.scenario_starts.is_empty() {
+        return "# Initial habitability per scenario\n\n_No scenario data available._\n".into();
+    }
+
+    // Numeric body ids that aren't in the tabObjectInfoData mapping
+    // (asteroids, dwarf-planet placeholders) end up with body_name equal to
+    // the stringified id. Filter those out — the named planet/moon list is
+    // what players want to compare.
+    let is_resolved_name =
+        |b: &ScenarioBodyHabitabilityStat| -> bool { b.body_name.parse::<i32>().is_err() };
+
+    // Stable ordering for the Sol-system bodies: planets in distance order,
+    // then their moons grouped after the parent. We reuse the existing
+    // PLANETS + moons_by_parent definitions for canonical order.
+    let mut ordered_bodies: Vec<String> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let push = |name: &str,
+                out: &mut Vec<String>,
+                seen: &mut std::collections::HashSet<String>| {
+        if seen.insert(name.to_string()) {
+            out.push(name.to_string());
+        }
+    };
+    let moons = moons_by_parent();
+    for planet in PLANETS {
+        push(planet, &mut ordered_bodies, &mut seen);
+        if let Some((_, ms)) = moons.iter().find(|(p, _)| p == planet) {
+            for m in ms {
+                push(m, &mut ordered_bodies, &mut seen);
+            }
+        }
+    }
+
+    // Find which bodies actually appear in *any* scenario's snapshot. Some
+    // bodies (e.g. moons of the outer planets that aren't loaded in the
+    // earlier-timeline scenes) may be absent from some scenarios.
+    let mut present: std::collections::BTreeSet<String> =
+        std::collections::BTreeSet::new();
+    for s in &sirenix.scenario_starts {
+        for b in &s.body_habitability {
+            if is_resolved_name(b) {
+                present.insert(b.body_name.clone());
+            }
+        }
+    }
+
+    // Build the per-body sections. For each body, render one table comparing
+    // all four scenarios.
+    let scenario_order = [
+        "StartGameEpoch_EarlyExploration",
+        "StartGameEpoch_TheExpansion",
+        "StartGameEpoch_Colonization",
+        "StartGameEpoch_RaceBeyond",
+    ];
+
+    let mut out = String::from(
+        "# Initial habitability per scenario\n\n\
+Every Solar Expanse scenario ships with a pre-built save that pins every\n\
+body's starting environmental state. This page lays those values out side\n\
+by side so the four start dates can be compared at a glance — useful for\n\
+spotting how much of Mars's water has already been delivered by the time\n\
+the *Colonization Era* scenario opens, or how Venus's temperature has\n\
+budged across the timeline.\n\n\
+**Reading the tables.** Each row is one scenario. Values are pulled\n\
+directly from the StartGameData's `ObjectInfoSaves[].habitabilityParameters`\n\
+block — the same values the game reads at scenario load. Units (inferred\n\
+from the well-known planets):\n\n\
+| Column | Unit |\n\
+| --- | --- |\n\
+| Temperature | °C |\n\
+| Pressure | Earth atmospheres |\n\
+| Gravity | m/s² |\n\
+| Water | 0–1 fraction |\n\
+| Radiation | game-specific scale (Earth ≈ 1) |\n\
+| Magnetic field | game-specific scale (Earth ≈ 40) |\n\
+| Albedo | 0–1 surface reflectivity |\n\
+| Composition | 0–1 atmospheric composition score |\n\
+| Day–night ΔT | °C |\n\n\
+*Note: the Early Exploration save (testStartGAme in the dump) doesn't carry\n\
+a populated habitabilityParameters block, so its row reads \"—\" across the\n\
+board.*\n\n",
+    );
+
+    for body_name in &ordered_bodies {
+        if !present.contains(body_name) {
+            continue;
+        }
+        // Find this body's snapshot in each scenario.
+        let rows: Vec<Vec<String>> = scenario_order
+            .iter()
+            .filter_map(|epoch_id| {
+                let scenario = sirenix
+                    .scenario_starts
+                    .iter()
+                    .find(|s| s.scenario_id == *epoch_id)?;
+                let label = epoch_display_name(epoch_id);
+                let body = scenario
+                    .body_habitability
+                    .iter()
+                    .find(|b| &b.body_name == body_name);
+                match body {
+                    Some(b) => Some(vec![
+                        format!("**{label}**"),
+                        fmt_habit(b.temperature, 1),
+                        fmt_habit(b.pressure, 3),
+                        fmt_habit(b.gravity, 2),
+                        fmt_habit(b.water, 3),
+                        fmt_habit(b.radiation, 2),
+                        fmt_habit(b.magnetic_field, 2),
+                        fmt_habit(b.albedo, 2),
+                        fmt_habit(b.composition, 3),
+                        fmt_habit(b.temperature_swings, 1),
+                    ]),
+                    None => Some(vec![
+                        format!("**{label}**"),
+                        "—".into(),
+                        "—".into(),
+                        "—".into(),
+                        "—".into(),
+                        "—".into(),
+                        "—".into(),
+                        "—".into(),
+                        "—".into(),
+                        "—".into(),
+                    ]),
+                }
+            })
+            .collect();
+        out.push_str(&format!("## {body_name}\n\n"));
+        out.push_str(&md_table(
+            &[
+                "Scenario",
+                "Temp (°C)",
+                "Pressure",
+                "Gravity",
+                "Water",
+                "Radiation",
+                "Magnetic",
+                "Albedo",
+                "Composition",
+                "Day–night ΔT",
+            ],
+            &rows,
+        ));
+        out.push('\n');
+    }
+
+    out.push_str("## See also\n\n");
+    out.push_str("- [Celestial Bodies overview](README.md)\n");
+    out.push_str("- [Planets](planets.md)\n");
+    out.push_str("- [Moons](moons.md)\n");
+    out
+}
+
 fn page_root() -> String {
     String::from(
         "# Solar Expanse Wiki\n\n\
@@ -6030,10 +6275,10 @@ mod tests {
             // scenario_starts drives the "playable in Sol-system" filter for
             // the epoch table — only epoch ids present here are rendered.
             scenario_starts: vec![
-                ScenarioStartStat { scenario_id: "StartGameEpoch_EarlyExploration".into(), corp_starts: vec![] },
-                ScenarioStartStat { scenario_id: "StartGameEpoch_TheExpansion".into(), corp_starts: vec![] },
-                ScenarioStartStat { scenario_id: "StartGameEpoch_Colonization".into(), corp_starts: vec![] },
-                ScenarioStartStat { scenario_id: "StartGameEpoch_RaceBeyond".into(), corp_starts: vec![] },
+                ScenarioStartStat { scenario_id: "StartGameEpoch_EarlyExploration".into(), corp_starts: vec![], body_habitability: vec![] },
+                ScenarioStartStat { scenario_id: "StartGameEpoch_TheExpansion".into(), corp_starts: vec![], body_habitability: vec![] },
+                ScenarioStartStat { scenario_id: "StartGameEpoch_Colonization".into(), corp_starts: vec![], body_habitability: vec![] },
+                ScenarioStartStat { scenario_id: "StartGameEpoch_RaceBeyond".into(), corp_starts: vec![], body_habitability: vec![] },
             ],
             ..Default::default()
         };
@@ -6111,6 +6356,7 @@ mod tests {
                 starting_spacecraft: 0,
                 ..Default::default()
             }],
+            body_habitability: vec![],
         };
         let sirenix = Sirenix {
             scenario_starts: vec![
@@ -6182,6 +6428,7 @@ mod tests {
                     starting_spacecraft: 0,
                     ..Default::default()
                 }],
+                body_habitability: vec![],
             }],
             ..Default::default()
         };
@@ -6213,6 +6460,7 @@ mod tests {
                         starting_spacecraft: 0,
                         ..Default::default()
                     }],
+                    body_habitability: vec![],
                 },
                 ScenarioStartStat {
                     scenario_id: "StartGameEpoch_TheExpansion".into(),
@@ -6229,6 +6477,7 @@ mod tests {
                         starting_spacecraft: 4,
                         ..Default::default()
                     }],
+                    body_habitability: vec![],
                 },
             ],
             ..Default::default()
@@ -6294,6 +6543,7 @@ mod tests {
                     starting_spacecraft: 0,
                     ..Default::default()
                 }],
+                body_habitability: vec![],
             }],
             ..Default::default()
         };
@@ -6355,6 +6605,7 @@ mod tests {
                     starting_spacecraft: 0,
                     ..Default::default()
                 }],
+                body_habitability: vec![],
             }],
             ..Default::default()
         };
@@ -6384,6 +6635,7 @@ mod tests {
                     starting_spacecraft: 0,
                     ..Default::default()
                 }],
+                body_habitability: vec![],
             }],
             ..Default::default()
         };
@@ -6424,6 +6676,7 @@ mod tests {
                         ("build_metalmine".into(), 1),
                     ],
                 }],
+                body_habitability: vec![],
             }],
             ..Default::default()
         };
@@ -8519,6 +8772,27 @@ mod tests {
         }
     }
 
+    /// Build a habitability stat with the supplied (temperature, pressure,
+    /// gravity, water) plus zeros for everything else — handy for tests.
+    fn habit_stat(
+        body_id: i32,
+        body_name: &str,
+        t: f64,
+        p: f64,
+        g: f64,
+        w: f64,
+    ) -> ScenarioBodyHabitabilityStat {
+        ScenarioBodyHabitabilityStat {
+            body_id,
+            body_name: body_name.into(),
+            temperature: t,
+            pressure: p,
+            gravity: g,
+            water: w,
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn humanize_planet_type_strips_prefix_and_capitalizes() {
         assert_eq!(humanize_planet_type("planet_rocky_volcanic"), "Rocky volcanic");
@@ -8549,6 +8823,83 @@ mod tests {
                     mass_1e24_kg: 7.811376, radius_km: 6988.987,
                 },
             ],
+        }
+    }
+
+    #[test]
+    fn scenario_state_page_emits_per_body_section_with_scenario_rows() {
+        // One body (Mars) appearing in three scenarios — the page should
+        // render a section header, a column header per stat, and one row
+        // per scenario carrying that scenario's values.
+        let sirenix = Sirenix {
+            scenario_starts: vec![
+                ScenarioStartStat {
+                    scenario_id: "StartGameEpoch_TheExpansion".into(),
+                    corp_starts: vec![],
+                    body_habitability: vec![habit_stat(59, "Mars", -63.3, 0.006, 3.71, 0.0)],
+                },
+                ScenarioStartStat {
+                    scenario_id: "StartGameEpoch_Colonization".into(),
+                    corp_starts: vec![],
+                    body_habitability: vec![habit_stat(59, "Mars", -62.5, 0.007, 3.71, 0.02)],
+                },
+                ScenarioStartStat {
+                    scenario_id: "StartGameEpoch_RaceBeyond".into(),
+                    corp_starts: vec![],
+                    body_habitability: vec![habit_stat(59, "Mars", -60.0, 0.020, 3.71, 0.15)],
+                },
+            ],
+            ..Default::default()
+        };
+        let page = page_scenario_state(&sirenix);
+
+        // Section header for Mars.
+        assert!(
+            page.contains("## Mars\n"),
+            "expected `## Mars` section header:\n{page}"
+        );
+
+        // All four scenario labels must appear in the body's table, with the
+        // Early Exploration row falling back to em-dashes since it isn't
+        // present in the sirenix.scenario_starts list.
+        for label in [
+            "Early Exploration",
+            "The Expansion",
+            "Colonization Era",
+            "Race Beyond",
+        ] {
+            assert!(
+                page.contains(label),
+                "expected scenario label `{label}`:\n{page}"
+            );
+        }
+
+        // The Mars Colonization row must carry the actual values we passed
+        // in. Take the line that's a table row (starts with `|`) and contains
+        // the bolded Colonization label — the intro paragraph mentions the
+        // label too but isn't a table row.
+        let line = page
+            .lines()
+            .find(|l| l.starts_with("| ") && l.contains("**Colonization Era**"))
+            .expect("Colonization Era table row");
+        assert!(
+            line.contains("-62.5"),
+            "Mars temperature missing from Colonization row: {line}"
+        );
+        assert!(
+            line.contains("0.007"),
+            "Mars pressure missing from Colonization row: {line}"
+        );
+        assert!(
+            line.contains("3.71"),
+            "Mars gravity missing from Colonization row: {line}"
+        );
+
+        // No internal `StartGameEpoch_*` ids should appear as visible cells.
+        for l in page.lines() {
+            if l.starts_with("| ") && l.contains("StartGameEpoch_") {
+                panic!("internal epoch id leaked into a player-facing cell: {l}");
+            }
         }
     }
 
@@ -8648,6 +8999,30 @@ mod tests {
     }
 
     #[test]
+    fn scenario_state_page_filters_out_unresolved_numeric_ids() {
+        // Asteroids and exotic bodies aren't in tabObjectInfoData and end up
+        // with body_name == "<id>". They must NOT render as section headers —
+        // a `## 223` heading is noise.
+        let sirenix = Sirenix {
+            scenario_starts: vec![ScenarioStartStat {
+                scenario_id: "StartGameEpoch_Colonization".into(),
+                corp_starts: vec![],
+                body_habitability: vec![
+                    habit_stat(66, "Earth", 15.0, 1.0, 9.79, 0.7),
+                    habit_stat(223, "223", -130.0, 0.0, 0.0, 0.0),
+                ],
+            }],
+            ..Default::default()
+        };
+        let page = page_scenario_state(&sirenix);
+        assert!(page.contains("## Earth\n"), "Earth section expected:\n{page}");
+        assert!(
+            !page.contains("## 223\n"),
+            "numeric-id sections must be suppressed:\n{page}"
+        );
+    }
+
+    #[test]
     fn asteroid_taxonomy_page_renames_helium3_display_label() {
         // "Helium3" → "Helium-3" for the H2 heading (matches the locale's
         // resource label).
@@ -8670,6 +9045,37 @@ mod tests {
         assert!(
             page.contains("## Helium-3 Asteroid"),
             "Helium3 class should render as Helium-3 Asteroid:\n{page}"
+        );
+    }
+
+    #[test]
+    fn scenario_state_page_orders_bodies_by_planet_then_moons() {
+        // Section order: planet → its moons → next planet → ... The natural
+        // canonical order so the page reads from the inner solar system out.
+        let sirenix = Sirenix {
+            scenario_starts: vec![ScenarioStartStat {
+                scenario_id: "StartGameEpoch_Colonization".into(),
+                corp_starts: vec![],
+                body_habitability: vec![
+                    habit_stat(66, "Earth", 15.0, 1.0, 9.79, 0.7),
+                    habit_stat(87, "Moon", 40.0, 0.0, 1.62, 0.0),
+                    habit_stat(59, "Mars", -63.0, 0.006, 3.71, 0.0),
+                    habit_stat(89, "Phobos", -40.0, 0.0, 0.005, 0.0),
+                ],
+            }],
+            ..Default::default()
+        };
+        let page = page_scenario_state(&sirenix);
+        let pos = |needle: &str| page.find(needle).unwrap_or(usize::MAX);
+        let p_earth = pos("## Earth\n");
+        let p_moon = pos("## Moon\n");
+        let p_mars = pos("## Mars\n");
+        let p_phobos = pos("## Phobos\n");
+        assert!(p_earth < p_moon, "Earth should precede Moon ({p_earth} < {p_moon})");
+        assert!(p_moon < p_mars, "Moon should precede Mars ({p_moon} < {p_mars})");
+        assert!(
+            p_mars < p_phobos,
+            "Mars should precede Phobos ({p_mars} < {p_phobos})"
         );
     }
 
@@ -8793,6 +9199,19 @@ mod tests {
             "root README must link to achievements page:\n{root}"
         );
     }
+
+    #[test]
+    fn scenario_state_page_handles_empty_data_gracefully() {
+        // No scenario starts → page still renders without panicking and
+        // emits a sentinel notice instead of an unstructured wall of
+        // markdown.
+        let sirenix = Sirenix::default();
+        let page = page_scenario_state(&sirenix);
+        assert!(
+            page.contains("No scenario data available"),
+            "expected sentinel:\n{page}"
+        );
+    }
 }
 
 fn main() -> Result<()> {
@@ -8829,6 +9248,7 @@ fn main() -> Result<()> {
     write_file(&wiki_root, "celestial-bodies/comets.md", &page_comets(&ctx))?;
     write_file(&wiki_root, "celestial-bodies/exoplanets.md", &page_exoplanets(&ctx))?;
     write_file(&wiki_root, "celestial-bodies/launch-windows.md", &page_launch_windows(&ctx))?;
+    write_file(&wiki_root, "celestial-bodies/scenario-state.md", &page_scenario_state(&sirenix))?;
     write_file(&wiki_root, "spacecraft/README.md", &page_spacecraft(&locale, &sirenix))?;
     write_file(&wiki_root, "launch-vehicles/README.md", &page_launch_vehicles(&locale, &sirenix))?;
     write_file(&wiki_root, "facilities/README.md", &page_facilities(&locale, &sirenix))?;

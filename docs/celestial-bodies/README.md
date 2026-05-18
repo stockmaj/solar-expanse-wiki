@@ -56,3 +56,4 @@ Habitability can be improved through terraforming.
 - [Comets](comets.md) — periodic comets
 - [Exoplanets](exoplanets.md) — Trappist-1 and Kepler-90 systems
 - [Launch Windows](launch-windows.md) — synodic periods for planning Earth → body missions
+- [Initial habitability per scenario](scenario-state.md) — start-of-scenario temperature, pressure, gravity, water, radiation, etc. for each named body, compared across the four pre-built saves
