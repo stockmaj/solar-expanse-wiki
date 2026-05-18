@@ -402,7 +402,10 @@ struct SpacecraftStat {
     cargo_capacity: f64,
     fuel_capacity: f64,
     reusability: f64,
-    #[allow(dead_code)]
+    /// True when the SpacecraftType has `needLaunchVehicleToGoToMoon=true`
+    /// — that is, an LV is required from *any* planet/moon. False means the
+    /// craft can self-launch from low-G bodies, but Earth still forces an LV
+    /// (Earth is the hard-coded `Company.mainObjectInfo` in the gate).
     needs_launch_vehicle: bool,
     built_in_orbit: bool,
     #[allow(dead_code)]
@@ -1430,6 +1433,7 @@ lift them to space.\n\n",
                 "Exhaust V",
                 "Reusable",
                 "Built at",
+                "Launch vehicle",
                 "Build cost",
                 "Time (d)",
                 "Description",
@@ -1443,6 +1447,7 @@ lift them to space.\n\n",
                 Some("Effective exhaust velocity — chemical ~3-5 km/s, nuclear ~8-15, fusion 20+"),
                 Some("Survives the trip and can fly again (Yes / Partial / No)"),
                 Some("Where the spacecraft is assembled — Orbit means built in an orbital shipyard; Surface means built on a planet"),
+                Some("When the craft needs a launch vehicle to leave a planet/moon surface. Earth always requires an LV; on lower-gravity bodies many craft can self-launch."),
                 Some("Resources required to construct"),
                 Some("Build time in days"),
                 None,
@@ -1489,6 +1494,25 @@ lift them to space.\n\n",
             "Orbit".into()
         } else {
             "Surface".into()
+        };
+        // Launch-vehicle requirement comes from `SpacecraftType.needLaunchVehicleToGoToMoon`
+        // combined with the game's gate in `FindSuitableLaunchVehicleForFlight`:
+        //   - If the craft is built in orbit, it never surfaces (label that explicitly).
+        //   - If the flag is true, the craft needs an LV from *every* planet/moon.
+        //   - If the flag is false, the craft can self-launch from low-G bodies
+        //     (Luna, Mars, asteroids), but Earth's special case as
+        //     `Company.mainObjectInfo` forces an LV anyway.
+        let launch_vehicle_cell: String = if is_spawned_not_built {
+            // The Orbital Payload Container is spawned by a launch facility
+            // (elevator, mass driver, spin launch, catapult) rather than
+            // launched conventionally — the LV column doesn't apply.
+            "—".into()
+        } else if s.built_in_orbit {
+            "Built in orbit".into()
+        } else if s.needs_launch_vehicle {
+            "Any body".into()
+        } else {
+            "Earth only".into()
         };
         let build_cost_cell = if is_spawned_not_built {
             "—".into()
@@ -1541,6 +1565,7 @@ lift them to space.\n\n",
             exhaust,
             fmt_reusability(s.reusability).into(),
             built_at,
+            launch_vehicle_cell,
             build_cost_cell,
             build_time_cell,
             desc_cell,
@@ -1563,7 +1588,8 @@ lift them to space.\n\n",
 - **Engine thrust** is the force the spacecraft's default engine produces, in newtons (or kilo-/mega-newtons for readability). More thrust = shorter burns, higher acceleration, but the spacecraft can only carry so much fuel.\n\
 - **Exhaust V** is the engine's effective exhaust velocity in km/s, equivalent to specific impulse (multiply by ~102 to get ISP in seconds). Higher exhaust V = more Δv per kilogram of fuel = longer reach, but typically less thrust. Chemical engines sit around 3–5 km/s; nuclear thermal 8–15; fusion and ion drives 20+.\n\
 - **Build cost** is the resource cost of building the spacecraft itself (engine and tank modules are paid for separately when configured).\n\
-- **Built at** is where the craft is assembled: *Orbit* means it's built in an orbital shipyard and never lands; *Surface* means it's built on a planet's surface (some surface craft are full SSTOs, some are upper stages or ride a [launch vehicle](../launch-vehicles/) — the player picks which LV to pair with the craft at flight-planning time, so no fixed mapping is listed here).\n\n\
+- **Built at** is where the craft is assembled: *Orbit* means it's built in an orbital shipyard and never lands; *Surface* means it's built on a planet's surface (some surface craft are full SSTOs, some are upper stages or ride a [launch vehicle](../launch-vehicles/) — the player picks which LV to pair with the craft at flight-planning time, so no fixed mapping is listed here).\n\
+- **Launch vehicle** says when the craft must ride an LV to reach orbit: *Earth only* means it can self-launch from Luna, Mars, and asteroids but still needs an LV from Earth's gravity well; *Any body* means it needs an LV from every planet/moon (most early chemical and electric craft); *Built in orbit* means it never sits on a surface so the column doesn't apply. Earth always forces an LV regardless of the underlying flag.\n\n\
 ## See also\n\n\
 - [Launch Vehicles](../launch-vehicles/) — surface-to-orbit lifters\n\
 - [Research](../research/) — propulsion tech tree\n",
@@ -5486,6 +5512,145 @@ mod tests {
         assert!(
             row.contains("../research/#research-research-sc-iris"),
             "Iris row should link to its research-unlock anchor:\n{row}"
+        );
+    }
+
+    #[test]
+    fn spacecraft_page_has_launch_vehicle_column_header_and_tooltip() {
+        // The Spacecraft page should expose a "Launch vehicle" column with
+        // an explanatory tooltip — players need to know which craft are
+        // Earth-launchable on their own (none) vs. surface-launchable
+        // elsewhere (most non-chemical craft) vs. built in orbit.
+        let locale = nav_fixture_locale();
+        let sirenix = Sirenix {
+            spacecraft: vec![make_sc_stat("spacecraft_chem_small", false)],
+            ..Default::default()
+        };
+        let page = page_spacecraft(&locale, &sirenix);
+        assert!(
+            page.contains("Launch vehicle"),
+            "spacecraft page missing 'Launch vehicle' column header:\n{page}"
+        );
+        // Tooltip should reference Earth specifically because Earth is the
+        // hard-coded `Company.mainObjectInfo` that always requires an LV.
+        assert!(
+            page.contains("Earth"),
+            "Launch vehicle column tooltip should mention Earth:\n{page}"
+        );
+    }
+
+    #[test]
+    fn spacecraft_page_iris_row_says_any_body_when_needs_launch_vehicle() {
+        // Iris (spacecraft_chem_small) has needs_launch_vehicle=true in the
+        // dump — it needs an LV from *any* planet/moon, not just Earth.
+        let locale = nav_fixture_locale();
+        let mut iris = make_sc_stat("spacecraft_chem_small", false);
+        iris.needs_launch_vehicle = true;
+        let sirenix = Sirenix {
+            spacecraft: vec![iris],
+            ..Default::default()
+        };
+        let page = page_spacecraft(&locale, &sirenix);
+        let row = page
+            .lines()
+            .find(|l| l.contains("Iris"))
+            .expect("Iris row present");
+        assert!(
+            row.contains("Any body") || row.contains("Required from any"),
+            "Iris row should advertise LV required from any body:\n{row}"
+        );
+    }
+
+    #[test]
+    fn spacecraft_page_stratos_row_says_earth_only_when_self_launching() {
+        // Stratos (spacecraft_chem_large) has needs_launch_vehicle=false in
+        // the dump — it can self-launch from Luna/Mars/asteroids but Earth's
+        // special-case still forces an LV.
+        let mut locale = nav_fixture_locale();
+        locale.spacecraft.push(NameDesc {
+            id: "spacecraft_chem_large".into(),
+            name: "Stratos".into(),
+            description: "Large chemical craft.".into(),
+        });
+        let stratos = make_sc_stat("spacecraft_chem_large", false);
+        // make_sc_stat already defaults needs_launch_vehicle=false; assert
+        // the precondition for clarity.
+        assert!(!stratos.needs_launch_vehicle);
+        let sirenix = Sirenix {
+            spacecraft: vec![stratos],
+            ..Default::default()
+        };
+        let page = page_spacecraft(&locale, &sirenix);
+        let row = page
+            .lines()
+            .find(|l| l.contains("Stratos"))
+            .expect("Stratos row present");
+        assert!(
+            row.contains("Earth only"),
+            "Stratos row should advertise LV required from Earth only:\n{row}"
+        );
+    }
+
+    #[test]
+    fn spacecraft_page_spawned_orbital_payload_container_dashes_launch_vehicle() {
+        // The Orbital Payload Container has empty build_cost AND
+        // build_time_days == 0 — the game spawns it from a launch facility
+        // (elevator / mass driver / spin launch / catapult) rather than
+        // launching it conventionally, so the "Launch vehicle" column
+        // shouldn't claim "Any body" / "Earth only" / etc.
+        let mut locale = nav_fixture_locale();
+        locale.spacecraft.push(NameDesc {
+            id: "spacecraft_capsule".into(),
+            name: "Orbital Payload Container".into(),
+            description: "Spawned payload.".into(),
+        });
+        let mut opc = make_sc_stat("spacecraft_capsule", false);
+        opc.needs_launch_vehicle = true; // dump value
+        opc.build_cost = vec![]; // spawned, not built
+        opc.build_time_days = 0.0;
+        let sirenix = Sirenix {
+            spacecraft: vec![opc],
+            ..Default::default()
+        };
+        let page = page_spacecraft(&locale, &sirenix);
+        let row = page
+            .lines()
+            .find(|l| l.contains("Orbital Payload Container"))
+            .expect("OPC row present");
+        // Row format: | name | mass | cargo | fuel | thrust | exhaust | reusable | built_at | launch_vehicle | build_cost | time | desc |
+        // built_at is "—" already; the LV column should follow suit.
+        let cells: Vec<&str> = row.split('|').map(|c| c.trim()).collect();
+        // index 9 is the 9th cell after the leading empty (Launch vehicle column)
+        let lv_cell = cells.get(9).expect("LV cell present");
+        assert_eq!(
+            *lv_cell, "—",
+            "spawned-not-built craft should dash the LV column; row:\n{row}"
+        );
+    }
+
+    #[test]
+    fn spacecraft_page_orbital_build_row_says_built_in_orbit() {
+        // Orbital-build craft never sit on a planetary surface so the LV
+        // column should communicate that, not parrot the underlying flag.
+        let mut locale = nav_fixture_locale();
+        locale.spacecraft.push(NameDesc {
+            id: "spacecraft_fusion_large".into(),
+            name: "Zeus".into(),
+            description: "Orbital fusion ship.".into(),
+        });
+        let zeus = make_sc_stat("spacecraft_fusion_large", /* built_in_orbit */ true);
+        let sirenix = Sirenix {
+            spacecraft: vec![zeus],
+            ..Default::default()
+        };
+        let page = page_spacecraft(&locale, &sirenix);
+        let row = page
+            .lines()
+            .find(|l| l.contains("Zeus"))
+            .expect("Zeus row present");
+        assert!(
+            row.contains("Built in orbit") || row.contains("Orbital build"),
+            "orbital-build craft should declare 'Built in orbit' in the LV column:\n{row}"
         );
     }
 
