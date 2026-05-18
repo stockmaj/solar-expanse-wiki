@@ -1005,25 +1005,13 @@ fn exoplanet_table(ctx: &WikiCtx, ids: &[&str]) -> String {
     )
 }
 
-fn page_exoplanets(ctx: &WikiCtx) -> String {
-    let trappist = exoplanet_table(ctx, EXOPLANETS_TRAPPIST);
-    let kepler = exoplanet_table(ctx, EXOPLANETS_KEPLER);
-    format!(
-        "# Exoplanet Systems\n\n\
-Distant star systems reachable only through interstellar travel via a generation\n\
-ship constructed in the late game.\n\n\
-_Semi-major axis here is measured around the host star, not the Sun._\n\n\
-## TRAPPIST-1\n\n\
-A red dwarf star with seven terrestrial planets, several within its habitable zone.\n\n\
-{trappist}\n\
-## Kepler-90\n\n\
-A Sun-like star with at least eight known planets, the only confirmed system that\n\
-rivals the Solar System in planet count.\n\n\
-{kepler}\n\
-## See also\n\n\
-- [Planets](planets.md)\n\
-- [Celestial Bodies overview](README.md)\n"
-    )
+fn page_exoplanets(_ctx: &WikiCtx, sirenix: &Sirenix) -> String {
+    // Both `/celestial-bodies/exoplanets.md` and `/exoplanets/` render the
+    // same dump-driven content (4 systems with real orbital data).  The
+    // legacy hand-curated em-dash placeholder table was being served at the
+    // Bodies-nav path; consolidating onto `page_exoplanets_systems` so the
+    // Bodies-nav URL no longer shows empty cells.
+    page_exoplanets_systems(sirenix)
 }
 
 fn page_launch_windows(ctx: &WikiCtx) -> String {
@@ -5815,7 +5803,7 @@ mod tests {
             }],
         };
         let ctx = WikiCtx::build(&locale, &stats);
-        let page = page_exoplanets(&ctx);
+        let page = page_exoplanets(&ctx, &sirenix);
         let row = page
             .lines()
             .find(|l| l.contains("**Trappist-1b**"))
@@ -9568,7 +9556,7 @@ fn main() -> Result<()> {
     write_file(&wiki_root, "celestial-bodies/moons.md", &page_moons(&ctx))?;
     write_file(&wiki_root, "celestial-bodies/asteroids.md", &page_asteroids(&ctx))?;
     write_file(&wiki_root, "celestial-bodies/comets.md", &page_comets(&ctx))?;
-    write_file(&wiki_root, "celestial-bodies/exoplanets.md", &page_exoplanets(&ctx))?;
+    write_file(&wiki_root, "celestial-bodies/exoplanets.md", &page_exoplanets(&ctx, &sirenix))?;
     write_file(&wiki_root, "celestial-bodies/launch-windows.md", &page_launch_windows(&ctx))?;
     write_file(&wiki_root, "celestial-bodies/scenario-state.md", &page_scenario_state(&sirenix))?;
     write_file(&wiki_root, "spacecraft/README.md", &page_spacecraft(&locale, &sirenix))?;
