@@ -20,6 +20,10 @@ namespace SolarExpanseWikiDumper
         private const string PluginName = "Solar Expanse Wiki Dumper";
         private const string PluginVersion = "0.1.0";
 
+        // Legacy single-file names — kept as the fallback when we can't resolve the
+        // active scenario's epoch + player corp.  In normal operation we write
+        // per-combo files like sirenix-dump-EarlyExploration-Solex.json instead,
+        // and self-disable per combo via sirenix-dump-EarlyExploration-Solex.flag.
         internal const string OutputFileName = "sirenix-dump.json";
         internal const string MarkerFileName = "sirenix-dump.flag";
 
@@ -35,17 +39,16 @@ namespace SolarExpanseWikiDumper
         // When the gameplay scene loads, the ObjectInfo MonoBehaviours and the
         // AllScriptableObjectManager singleton are all present, so we can run the
         // dump directly from the handler.
+        //
+        // We deliberately do NOT short-circuit in Awake on a marker file — the
+        // marker check moved into OnSceneLoaded and is now per-combo, so a marker
+        // from one epoch+corp run must not block other combinations.  The
+        // per-combo check in OnSceneLoaded is the single source of truth.
         private void Awake()
         {
             Log = Logger;
-            var marker = Path.Combine(Application.streamingAssetsPath, MarkerFileName);
-            if (File.Exists(marker))
-            {
-                Log.LogInfo($"Marker present at {marker}; dumper will not run. Delete it to re-dump.");
-                return;
-            }
             SceneManager.sceneLoaded += OnSceneLoaded;
-            Log.LogInfo("Subscribed to SceneManager.sceneLoaded. Waiting for the gameplay scene to load.");
+            Log.LogInfo("Subscribed to SceneManager.sceneLoaded. Dump will be written per epoch+corp combo (sirenix-dump-{Epoch}-{Corp}.json).");
         }
 
         private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
@@ -71,15 +74,77 @@ namespace SolarExpanseWikiDumper
                          ?? UnityEngine.Object.FindObjectOfType<AllScriptableObjectManager>();
             if (asoMgr == null) { Log.LogInfo("  AllScriptableObjectManager not available; will wait."); return; }
 
-            dumped = true;
-            var dir = Application.streamingAssetsPath;
+            // Resolve the active scenario's epoch id and the player's corp id.
+            // Both live under GameManager.StartGameConfig:
+            //   StartGameConfig.StartGameEpoch.ID  (e.g. "StartGameEpoch_EarlyExploration")
+            //   StartGameConfig.Company.ID         (e.g. "Solex")
+            // We strip the "StartGameEpoch_" prefix when present so the file names
+            // match the wiki's preferred short form ("EarlyExploration", etc.).
+            string epochId = null;
+            string playerCorp = null;
             try
             {
-                Log.LogInfo($"  ready: ObjectInfoManager has {all.Count} bodies. Running dump.");
+                var gm = MonoBehaviourSingleton<GameManager>.Instance;
+                var cfg = gm?.StartGameConfig ?? GameManager.StaticStartGameConfig;
+                if (cfg != null)
+                {
+                    if (cfg.StartGameEpoch != null)
+                    {
+                        epochId = cfg.StartGameEpoch.ID;
+                        if (string.IsNullOrEmpty(epochId)) epochId = cfg.StartGameEpoch.name;
+                        if (!string.IsNullOrEmpty(epochId) && epochId.StartsWith("StartGameEpoch_"))
+                            epochId = epochId.Substring("StartGameEpoch_".Length);
+                    }
+                    if (cfg.Company != null)
+                    {
+                        playerCorp = cfg.Company.ID;
+                        if (string.IsNullOrEmpty(playerCorp)) playerCorp = cfg.Company.name;
+                    }
+                }
+                // Fall back to Player.Definition if Company wasn't on the config (it
+                // can be null on load-from-save paths where StaticStartGameConfig
+                // hasn't been promoted yet).
+                if (string.IsNullOrEmpty(playerCorp) && gm?.Player != null)
+                {
+                    var def = gm.Player.Definition;
+                    if (def != null) playerCorp = string.IsNullOrEmpty(def.ID) ? def.name : def.ID;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.LogWarning($"  Failed to resolve epoch/corp: {ex.GetType().Name}: {ex.Message}");
+            }
+
+            string outName, markerName;
+            if (string.IsNullOrEmpty(epochId) || string.IsNullOrEmpty(playerCorp))
+            {
+                Log.LogWarning($"  Could not resolve epoch (got '{epochId ?? "<null>"}') or corp (got '{playerCorp ?? "<null>"}'); falling back to legacy {OutputFileName}.");
+                outName = OutputFileName;
+                markerName = MarkerFileName;
+            }
+            else
+            {
+                outName = $"sirenix-dump-{epochId}-{playerCorp}.json";
+                markerName = $"sirenix-dump-{epochId}-{playerCorp}.flag";
+            }
+
+            var dir = Application.streamingAssetsPath;
+            var markerPath = Path.Combine(dir, markerName);
+            if (File.Exists(markerPath))
+            {
+                Log.LogInfo($"Marker for {epochId}-{playerCorp} present; skipping dump.");
+                dumped = true;
+                return;
+            }
+
+            dumped = true;
+            try
+            {
+                Log.LogInfo($"  ready: ObjectInfoManager has {all.Count} bodies. Running dump for {epochId}-{playerCorp}.");
                 var json = Dumper.Dump(asoMgr);
-                File.WriteAllText(Path.Combine(dir, OutputFileName), json);
-                File.WriteAllText(Path.Combine(dir, MarkerFileName), DateTime.UtcNow.ToString("O"));
-                Log.LogInfo($"Wrote {json.Length:N0} characters to {OutputFileName}");
+                File.WriteAllText(Path.Combine(dir, outName), json);
+                File.WriteAllText(markerPath, DateTime.UtcNow.ToString("O"));
+                Log.LogInfo($"Wrote {json.Length:N0} characters to {outName}");
             }
             catch (Exception ex)
             {
