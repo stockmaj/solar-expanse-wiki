@@ -35,17 +35,24 @@ namespace SolarExpanseWikiDumper
                 return;
             }
             new Harmony(PluginGuid).PatchAll();
-            Log.LogInfo("Harmony patches installed; waiting for AllScriptableObjectManager.InitializeSingleton.");
+            Log.LogInfo("Harmony patches installed; waiting for ObjectInfoManager.SetAllObjectInfos (fires after scenario load).");
         }
     }
 
-    [HarmonyPatch(typeof(AllScriptableObjectManager), "InitializeSingleton")]
+    // We hook ObjectInfoManager.SetAllObjectInfos rather than
+    // AllScriptableObjectManager.InitializeSingleton because the latter runs at
+    // game launch, before any scenario is loaded — at that point no ObjectInfo
+    // MonoBehaviours exist yet and the [OdinSerialize] resourceMiningLicenseFeePerT
+    // dictionaries are empty.  SetAllObjectInfos is called from
+    // SolarLoader.CreateSolarSystem once all bodies are instantiated; by the time
+    // its postfix fires the per-body license-fee tables are fully populated.
+    [HarmonyPatch(typeof(ObjectInfoManager), "SetAllObjectInfos")]
     internal static class DumpPatch
     {
         private static bool dumped;
 
         // ReSharper disable once UnusedMember.Local
-        private static void Postfix(AllScriptableObjectManager __instance)
+        private static void Postfix(ObjectInfoManager __instance)
         {
             if (dumped) return;
             dumped = true;
@@ -53,8 +60,15 @@ namespace SolarExpanseWikiDumper
             var dir = Application.streamingAssetsPath;
             try
             {
-                Plugin.Log.LogInfo("InitializeSingleton postfix fired — running dump.");
-                var json = Dumper.Dump(__instance);
+                Plugin.Log.LogInfo("ObjectInfoManager.SetAllObjectInfos postfix fired — running dump.");
+                var asoMgr = SerializedMonoBehaviourSingleton<AllScriptableObjectManager>.Instance
+                             ?? UnityEngine.Object.FindObjectOfType<AllScriptableObjectManager>();
+                if (asoMgr == null)
+                {
+                    Plugin.Log.LogError("AllScriptableObjectManager.Instance is null at SetAllObjectInfos postfix; aborting dump.");
+                    return;
+                }
+                var json = Dumper.Dump(asoMgr);
                 File.WriteAllText(Path.Combine(dir, Plugin.OutputFileName), json);
                 File.WriteAllText(Path.Combine(dir, Plugin.MarkerFileName), DateTime.UtcNow.ToString("O"));
                 Plugin.Log.LogInfo($"Wrote {json.Length:N0} characters to {Plugin.OutputFileName}");
