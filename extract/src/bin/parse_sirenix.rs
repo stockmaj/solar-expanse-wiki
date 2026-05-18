@@ -134,6 +134,37 @@ struct SpaceComponent {
     is_locked: bool,
 }
 
+/// Per-resource thermal / phase constants from
+/// `ResourceDefinition.terraformationInfo`. The values drive Solar Expanse's
+/// atmosphere and surface-temperature sim — boiling / melting points, latent
+/// heat of vaporization, heat capacity, greenhouse contribution. Units come
+/// from inspecting how the C# sim consumes them (see Assembly-CSharp
+/// `TerraformationInfoDef`):
+///
+/// * `boiling_temperature_k` / `melting_temperature_k` — kelvin (used with
+///   the gas constant R = 8.314 J/(mol·K) in the Clausius-Clapeyron formula).
+/// * `vaporization_latent_heat` — J/mol (divided by R in the same formula).
+/// * `pressure_triple_point` — atmospheres (water's 0.00611 atm = 611 Pa,
+///   CO2's 5.11 atm both match real values).
+/// * `heat_capacity` — specific heat, J/(kg·K) for steam-like resources.
+/// * `optical_depth_parameter` — dimensionless greenhouse coefficient
+///   (formerly `gasIRAbsorbtionCoefficient`).
+///
+/// The C# default initializes every field to 1.0 (`TerraformationInfoDef
+/// { resourceOpticalDepthParameter = 1.0, … }`), which is the "unset"
+/// placeholder for ledger resources like Energy / Human / Supplies that
+/// never participate in the atmosphere sim. `parse_resource` drops those
+/// rows so the terraforming page only surfaces resources with real physics.
+#[derive(Serialize, Debug, Default, PartialEq, Clone)]
+struct TerraformationInfo {
+    optical_depth_parameter: f64,
+    heat_capacity: f64,
+    vaporization_latent_heat: f64,
+    boiling_temperature_k: f64,
+    melting_temperature_k: f64,
+    pressure_triple_point: f64,
+}
+
 #[derive(Serialize, Debug, Default, PartialEq)]
 struct Resource {
     id: String,
@@ -141,6 +172,11 @@ struct Resource {
     market_price_base: f64,
     show_on_ui: bool,
     can_be_left_on_object: bool,
+    /// Thermal / phase constants for the terraforming sim. `None` for
+    /// resources whose `terraformationInfo` is the C# all-1.0 placeholder
+    /// default (ledger resources like Energy / Human / Supplies).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    terraformation_info: Option<TerraformationInfo>,
 }
 
 #[derive(Serialize, Debug, Default, PartialEq)]
@@ -288,6 +324,57 @@ struct BodyLicenseFee {
     fees_per_t: std::collections::BTreeMap<String, f64>,
 }
 
+/// One of the four exoplanet star systems reachable through a generation
+/// ship in the late game. Sourced from `PlanetarySystemDescriptor`
+/// entries whose `$name` is `PlanetarySystem_Trappist`,
+/// `PlanetarySystem_Kepler90`, `PlanetarySystem_TauCeti`, or
+/// `PlanetarySystem_ProximaCentauri`. Sol's `PlanetarySystem_Realistic`
+/// is intentionally excluded — it's covered by the existing
+/// celestial-bodies pages.
+#[derive(Serialize, Debug, Default, PartialEq, Clone)]
+struct ExoplanetSystem {
+    /// Player-facing name, e.g. "Trappist-1", "Kepler-90", "Tau Ceti",
+    /// "Proxima Centauri".
+    name: String,
+    /// Internal `$name` from the dump (kept for traceability; never shown
+    /// to players).
+    id: String,
+    /// Spectral class of the primary star, parsed from `solarSystemData.star1`
+    /// (e.g. `startype_M8` → `"M8"`).
+    star_type: String,
+    /// Spectral class of the companion star if present; `None` for the four
+    /// shipped exoplanet systems, which are all single-star.
+    second_star_type: Option<String>,
+    /// `solarSystemData.systemAge` string (`"Young"` / `"Mature"`).
+    system_age: String,
+    /// Orbital bodies in the system, in `tabObjectInfoData` order.
+    bodies: Vec<ExoplanetBody>,
+}
+
+/// One body in an `ExoplanetSystem`'s `tabObjectInfoData` array. Orbital
+/// parameters live under `addNBodyData`; the planet-type taxonomy under
+/// `planetType` (e.g. `planet_rocky_volcanic`, `planet_gas_gasgiant`).
+#[derive(Serialize, Debug, Default, PartialEq, Clone)]
+struct ExoplanetBody {
+    /// Player-facing name from `addNBodyData.name` (e.g. "TRAPPIST-1b",
+    /// "Tau Ceti g", "Proxima Centauri d").
+    name: String,
+    /// Generated-planet-type id (e.g. `planet_rocky_volcanic`). The
+    /// renderer humanizes this for display.
+    planet_type: String,
+    /// Semi-major axis around the host star, in AU. From `addNBodyData.a`.
+    semi_major_axis_au: f64,
+    /// Orbital eccentricity (dimensionless). From `addNBodyData.e`.
+    eccentricity: f64,
+    /// Inclination relative to the system's reference plane, in degrees.
+    /// Note: the dump field is misspelled `inclication`.
+    inclination_deg: f64,
+    /// Body mass in 10²⁴ kg. From `addNBodyData.massIn1Pow24`.
+    mass_1e24_kg: f64,
+    /// Mean radius in kilometres. From `addNBodyData.radiusKM`.
+    radius_km: f64,
+}
+
 #[derive(Serialize)]
 struct Sirenix {
     spacecraft: Vec<Spacecraft>,
@@ -304,6 +391,10 @@ struct Sirenix {
     /// BepInEx mod's `ObjectInfo` walk; otherwise one entry per body in
     /// the loaded scene, sorted by `body_name`.
     license_fees: Vec<BodyLicenseFee>,
+    /// Four exoplanet star systems (Trappist-1, Kepler-90, Tau Ceti,
+    /// Proxima Centauri) reachable via a generation ship in the late game.
+    /// Empty when the dump has no `PlanetarySystemDescriptor` array.
+    exoplanet_systems: Vec<ExoplanetSystem>,
 }
 
 fn parse_spacecraft(v: &Value) -> Option<Spacecraft> {
@@ -819,7 +910,37 @@ fn parse_resource(v: &Value) -> Option<Resource> {
         market_price_base: lookup_f64(v, &["marketClearingPriceBase"]).unwrap_or(0.0),
         show_on_ui: lookup_bool(v, &["showOnUI"]).unwrap_or(true),
         can_be_left_on_object: lookup_bool(v, &["canBeLeftOnObject"]).unwrap_or(false),
+        terraformation_info: parse_terraformation_info(v.get("terraformationInfo")),
     })
+}
+
+/// Parse `terraformationInfo`. Returns `None` when the field is missing or
+/// carries the C# all-1.0 placeholder default (ledger resources never set
+/// real values); otherwise returns the populated struct.
+fn parse_terraformation_info(v: Option<&Value>) -> Option<TerraformationInfo> {
+    let obj = v?;
+    let ti = TerraformationInfo {
+        optical_depth_parameter: lookup_f64(obj, &["resourceOpticalDepthParameter"]).unwrap_or(0.0),
+        heat_capacity: lookup_f64(obj, &["resourceHeatCapacity"]).unwrap_or(0.0),
+        vaporization_latent_heat: lookup_f64(obj, &["vaporizationLatentHeat"]).unwrap_or(0.0),
+        boiling_temperature_k: lookup_f64(obj, &["baseTemperatureBoiling"]).unwrap_or(0.0),
+        melting_temperature_k: lookup_f64(obj, &["temperatureMelting"]).unwrap_or(0.0),
+        pressure_triple_point: lookup_f64(obj, &["pressureTriplePoint"]).unwrap_or(0.0),
+    };
+    // The C# default initializes every field to 1.0. Treat that exact
+    // signature as "unset" and drop the row. Any resource with real physics
+    // overrides at least one field to a non-1.0 value (water has 373 K
+    // boiling, hydrogen 14 K melting, etc.).
+    let is_placeholder = ti.optical_depth_parameter == 1.0
+        && ti.heat_capacity == 1.0
+        && ti.vaporization_latent_heat == 1.0
+        && ti.boiling_temperature_k == 1.0
+        && ti.melting_temperature_k == 1.0
+        && ti.pressure_triple_point == 1.0;
+    if is_placeholder {
+        return None;
+    }
+    Some(ti)
 }
 
 fn parse_contract(v: &Value) -> Option<Contract> {
@@ -1355,6 +1476,90 @@ fn parse_build_cost(list: Option<&Value>) -> Vec<ResourceCost> {
         .collect()
 }
 
+/// Map a `PlanetarySystemDescriptor.$name` to the in-game player-facing
+/// system label. The dump's identifiers are dev-internal (and the Trappist
+/// one is misspelled "Trapist" in some `StartGame*` siblings); the names
+/// below match what the player sees in the new-game scenario picker and in
+/// `CelestialBodiesNames` translation keys for the system's planets.
+fn exoplanet_display_name(dump_name: &str) -> Option<&'static str> {
+    match dump_name {
+        "PlanetarySystem_Trappist" => Some("Trappist-1"),
+        "PlanetarySystem_Kepler90" => Some("Kepler-90"),
+        "PlanetarySystem_TauCeti" => Some("Tau Ceti"),
+        "PlanetarySystem_ProximaCentauri" => Some("Proxima Centauri"),
+        _ => None,
+    }
+}
+
+/// Strip the `startype_` prefix from a `StarTypeDefinition` reference,
+/// yielding just the spectral class (e.g. `startype_M8` → `"M8"`,
+/// `startype_G2` → `"G2"`).
+fn star_class_from_ref(s: &str) -> String {
+    s.strip_prefix("startype_").unwrap_or(s).to_string()
+}
+
+/// Parse one body entry from `solarSystemData.tabObjectInfoData[]`. Returns
+/// `None` if the entry is missing the orbital sub-block we need.
+fn parse_exoplanet_body(v: &Value) -> Option<ExoplanetBody> {
+    let nbody = v.get("addNBodyData")?;
+    let name = nbody.get("name").and_then(|x| x.as_str()).unwrap_or("").to_string();
+    if name.is_empty() {
+        return None;
+    }
+    let planet_type = v
+        .pointer("/planetType/name")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
+    let f = |k: &str| -> f64 { nbody.get(k).and_then(|x| x.as_f64()).unwrap_or(0.0) };
+    Some(ExoplanetBody {
+        name,
+        planet_type,
+        semi_major_axis_au: f("a"),
+        eccentricity: f("e"),
+        // Dump field is misspelled `inclication` — match it verbatim.
+        inclination_deg: f("inclication"),
+        mass_1e24_kg: f("massIn1Pow24"),
+        radius_km: f("radiusKM"),
+    })
+}
+
+/// Parse a `PlanetarySystemDescriptor` entry into an `ExoplanetSystem`,
+/// returning `None` if the entry isn't one of the four shipped exoplanet
+/// systems or if its `solarSystemData.star1` is null (the `PerfectSystem`
+/// stub has no star and no bodies, so we skip it).
+fn parse_exoplanet_system(v: &Value) -> Option<ExoplanetSystem> {
+    let dump_name = v.get("$name").and_then(|x| x.as_str())?;
+    let display = exoplanet_display_name(dump_name)?;
+    let data = v.get("solarSystemData")?;
+    let star1 = data
+        .pointer("/star1/name")
+        .and_then(|x| x.as_str())
+        .map(star_class_from_ref)?;
+    let second = data
+        .pointer("/star2/name")
+        .and_then(|x| x.as_str())
+        .map(star_class_from_ref);
+    let system_age = data
+        .get("systemAge")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
+    let bodies: Vec<ExoplanetBody> = data
+        .get("tabObjectInfoData")
+        .and_then(|x| x.as_array())
+        .map(|arr| arr.iter().filter_map(parse_exoplanet_body).collect())
+        .unwrap_or_default();
+    Some(ExoplanetSystem {
+        name: display.to_string(),
+        id: dump_name.to_string(),
+        star_type: star1,
+        second_star_type: second,
+        system_age,
+        bodies,
+    })
+}
+
 fn lookup_f64(v: &Value, path: &[&str]) -> Option<f64> {
     let mut cur = v;
     for &k in path {
@@ -1524,6 +1729,22 @@ fn main() -> Result<()> {
         .unwrap_or_default();
     license_fees.sort_by(|a, b| a.body_name.cmp(&b.body_name));
 
+    // Exoplanet star systems (Trappist-1, Kepler-90, Tau Ceti, Proxima
+    // Centauri). `parse_exoplanet_system` returns `None` for non-exoplanet
+    // descriptors (the Sol/Realistic system, Dummy, JSON, Simplified,
+    // PerfectSystem), so this filter naturally yields the four we want.
+    // Ordered by host-star spectral class then name for stable output.
+    let mut exoplanet_systems: Vec<ExoplanetSystem> = raw
+        .get("PlanetarySystemDescriptor")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(parse_exoplanet_system).collect())
+        .unwrap_or_default();
+    exoplanet_systems.sort_by(|a, b| {
+        a.star_type
+            .cmp(&b.star_type)
+            .then(a.name.cmp(&b.name))
+    });
+
     let out = Sirenix {
         spacecraft,
         launch_vehicles,
@@ -1536,10 +1757,11 @@ fn main() -> Result<()> {
         scenario_starts,
         epochs,
         license_fees,
+        exoplanet_systems,
     };
     serde_json::to_writer_pretty(fs::File::create(&output)?, &out)?;
     eprintln!(
-        "wrote {} ({} spacecraft, {} LVs, {} research, {} facilities, {} components, {} crew transports, {} resources, {} contracts, {} scenarios, {} epochs, {} bodies w/ license fees)",
+        "wrote {} ({} spacecraft, {} LVs, {} research, {} facilities, {} components, {} crew transports, {} resources, {} contracts, {} scenarios, {} epochs, {} bodies w/ license fees, {} exoplanet systems)",
         output.display(),
         out.spacecraft.len(),
         out.launch_vehicles.len(),
@@ -1552,6 +1774,7 @@ fn main() -> Result<()> {
         out.scenario_starts.len(),
         out.epochs.len(),
         out.license_fees.len(),
+        out.exoplanet_systems.len(),
     );
     Ok(())
 }
@@ -2540,5 +2763,191 @@ mod tests {
             c.date_time_string_start.as_deref(),
             Some("2080-01-01 00:00:00")
         );
+    }
+
+    fn trappist_fixture() -> Value {
+        // Shape mirrors a real `PlanetarySystemDescriptor` entry: top-level
+        // `$name`, then `solarSystemData` with `star1` (a `$ref` whose `name`
+        // is a `startype_*` id), `systemAge`, and `tabObjectInfoData[]`.
+        // Each body nests its orbital data under `addNBodyData` (with the
+        // misspelled field `inclication`) and its taxonomy under `planetType`.
+        serde_json::json!({
+            "$name": "PlanetarySystem_Trappist",
+            "$type": "PlanetarySystemDescriptor",
+            "id": "PlanetarySystem_Trappist",
+            "solarSystemData": {
+                "star1": { "$ref": true, "type": "StarTypeDefinition", "name": "startype_M8" },
+                "star2": null,
+                "planetAmount": 2,
+                "systemAge": "Mature",
+                "tabObjectInfoData": [
+                    {
+                        "addNBodyData": {
+                            "name": "TRAPPIST-1b",
+                            "a": 0.0115,
+                            "e": 0.02,
+                            "p": 0,
+                            "omega_uc": 10,
+                            "omega_lc": 249,
+                            "inclication": 1,
+                            "massIn1Pow24": 8.18164,
+                            "radiusKM": 7390.36
+                        },
+                        "planetType": {
+                            "$ref": true,
+                            "type": "GeneratedPlanetType",
+                            "name": "planet_rocky_volcanic"
+                        }
+                    },
+                    {
+                        "addNBodyData": {
+                            "name": "TRAPPIST-1c",
+                            "a": 0.0158,
+                            "e": 0.01,
+                            "inclication": 0.85,
+                            "massIn1Pow24": 7.811376,
+                            "radiusKM": 6988.987
+                        },
+                        "planetType": {
+                            "name": "planet_rocky_barren"
+                        }
+                    }
+                ]
+            }
+        })
+    }
+
+    #[test]
+    fn parses_trappist_system_into_exoplanet_system() {
+        let sys = parse_exoplanet_system(&trappist_fixture())
+            .expect("Trappist fixture should parse");
+        assert_eq!(sys.name, "Trappist-1");
+        assert_eq!(sys.id, "PlanetarySystem_Trappist");
+        assert_eq!(sys.star_type, "M8");
+        assert!(sys.second_star_type.is_none());
+        assert_eq!(sys.system_age, "Mature");
+        assert_eq!(sys.bodies.len(), 2);
+    }
+
+    #[test]
+    fn parses_trappist_body_with_orbital_data() {
+        let sys = parse_exoplanet_system(&trappist_fixture()).expect("parses");
+        let b = &sys.bodies[0];
+        assert_eq!(b.name, "TRAPPIST-1b");
+        assert_eq!(b.planet_type, "planet_rocky_volcanic");
+        assert!((b.semi_major_axis_au - 0.0115).abs() < 1e-9);
+        assert!((b.eccentricity - 0.02).abs() < 1e-9);
+        // Misspelled `inclication` field carries the inclination value.
+        assert!((b.inclination_deg - 1.0).abs() < 1e-9);
+        assert!((b.mass_1e24_kg - 8.18164).abs() < 1e-6);
+        assert!((b.radius_km - 7390.36).abs() < 1e-3);
+    }
+
+    #[test]
+    fn rejects_non_exoplanet_planetary_system() {
+        // The Sol scenario, Simplified, Dummy, JSON, and the empty
+        // PerfectSystem stub are not exoplanet systems. The filter must
+        // return None for any descriptor whose $name isn't one of the
+        // four shipped exoplanet systems.
+        let v = serde_json::json!({
+            "$name": "PlanetarySystem_Realistic",
+            "solarSystemData": {
+                "star1": { "name": "startype_G2" },
+                "star2": null,
+                "systemAge": "Mature",
+                "tabObjectInfoData": []
+            }
+        });
+        assert!(parse_exoplanet_system(&v).is_none());
+
+        // PerfectSystem ships with a null star and zero bodies — its
+        // PlanetarySystemDescriptor exists but isn't a real destination.
+        let perfect = serde_json::json!({
+            "$name": "PlanetarySystem_PerfectSystem",
+            "solarSystemData": {
+                "star1": null,
+                "star2": null,
+                "systemAge": "Young",
+                "tabObjectInfoData": []
+            }
+        });
+        assert!(parse_exoplanet_system(&perfect).is_none());
+    }
+
+    #[test]
+    fn star_class_strips_startype_prefix() {
+        assert_eq!(star_class_from_ref("startype_M8"), "M8");
+        assert_eq!(star_class_from_ref("startype_G2"), "G2");
+        // Passes through anything that doesn't carry the prefix.
+        assert_eq!(star_class_from_ref("F9"), "F9");
+    }
+
+    #[test]
+    fn parses_resource_terraformation_info_for_water() {
+        // Water's real values from the Sirenix dump. Confirms field-name
+        // mapping and that the thermal constants survive parsing.
+        let v = serde_json::json!({
+            "id": "id_resource_water",
+            "resourceType": "Normal",
+            "showOnUI": true,
+            "canBeLeftOnObject": true,
+            "marketClearingPriceBase": 0.0,
+            "terraformationInfo": {
+                "resourceOpticalDepthParameter": 0.002,
+                "resourceHeatCapacity": 1860,
+                "vaporizationLatentHeat": 50000,
+                "baseTemperatureBoiling": 373,
+                "temperatureMelting": 220,
+                "pressureTriplePoint": 0.00611
+            }
+        });
+        let r = parse_resource(&v).expect("parses");
+        let ti = r.terraformation_info.expect("terraformation info present");
+        assert_eq!(ti.optical_depth_parameter, 0.002);
+        assert_eq!(ti.heat_capacity, 1860.0);
+        assert_eq!(ti.vaporization_latent_heat, 50000.0);
+        assert_eq!(ti.boiling_temperature_k, 373.0);
+        assert_eq!(ti.melting_temperature_k, 220.0);
+        assert_eq!(ti.pressure_triple_point, 0.00611);
+    }
+
+    #[test]
+    fn parse_resource_drops_placeholder_terraformation_info() {
+        // The TerraformationInfoDef default in the C# code initializes every
+        // field to 1.0. Resources that never override it (antimatter, energy,
+        // human/colonists, supplies, …) should land with `None` so the
+        // terraforming page can skip them rather than rendering a row of 1's.
+        let v = serde_json::json!({
+            "id": "id_resource_antimatter",
+            "resourceType": "Normal",
+            "showOnUI": true,
+            "terraformationInfo": {
+                "resourceOpticalDepthParameter": 1.0,
+                "resourceHeatCapacity": 1.0,
+                "vaporizationLatentHeat": 1.0,
+                "baseTemperatureBoiling": 1.0,
+                "temperatureMelting": 1.0,
+                "pressureTriplePoint": 1.0
+            }
+        });
+        let r = parse_resource(&v).expect("parses");
+        assert!(
+            r.terraformation_info.is_none(),
+            "all-1.0 placeholder should be dropped, got {:?}",
+            r.terraformation_info
+        );
+    }
+
+    #[test]
+    fn parse_resource_handles_missing_terraformation_info() {
+        // Old / hand-rolled fixtures may omit the field entirely; the parser
+        // must not panic and must leave the field as None.
+        let v = serde_json::json!({
+            "id": "id_resource_water",
+            "resourceType": "Normal",
+            "showOnUI": true,
+        });
+        let r = parse_resource(&v).expect("parses");
+        assert!(r.terraformation_info.is_none());
     }
 }
