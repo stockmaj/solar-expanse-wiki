@@ -688,6 +688,10 @@ main hr {
 #calc-root .calc-totals .calc-total-row td {
   border-top: 2px solid var(--rule);
 }
+#calc-root .calc-trip-note {
+  color: var(--fg-muted);
+  font-size: 11px;
+}
 
 /* Fast custom tooltips — single floating element on <body> (positioned by JS).
    Lives outside the calc panes' overflow:auto so it isn't clipped. 100ms

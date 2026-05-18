@@ -1,7 +1,7 @@
 // Node-only unit tests for calculator.js — additive-stacking math.
 // Run with `node docs/assets/js/calculator.test.js` from anywhere.
 
-const { applyReductions, workerTotal, powerNetTotal, addSaved, removeSaved, iconFile, fmtAbbrev, crewTransportMass } = require('./calculator.js');
+const { applyReductions, workerTotal, powerNetTotal, addSaved, removeSaved, iconFile, fmtAbbrev, crewTransportMass, buildDayTotal } = require('./calculator.js');
 
 let passed = 0;
 let failed = 0;
@@ -323,6 +323,19 @@ eq(crewTransportMass(12, compartment), { capsules: 3, mass: 27 }, 'crew: 12 huma
 eq(crewTransportMass(35, medium),      { capsules: 2, mass: 65 }, 'crew: 35 humans in mediums → 2 caps (30T) + 35T = 65');
 eq(crewTransportMass(150, large),      { capsules: 2, mass: 270 }, 'crew: 150 humans in larges → 2 (120T) + 150T = 270');
 eq(crewTransportMass(5, null),         { capsules: 0, mass: 0 }, 'crew: no transport selected → 0');
+
+// ----- Build days ---------------------------------------------------------
+
+eq(buildDayTotal([]), 0, 'build days: empty placed → 0');
+eq(
+  buildDayTotal([
+    { facility: { build_time_days: 150 }, count: 2 },
+    { facility: { build_time_days: 100 }, count: 1 },
+    { facility: {}, count: 3 },
+  ]),
+  400,
+  'build days: serial sum of build_time × count, missing field treated as 0'
+);
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed === 0 ? 0 : 1);

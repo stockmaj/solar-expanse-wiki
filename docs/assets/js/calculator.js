@@ -125,6 +125,17 @@
     return { capsules: capsules, mass: mass };
   }
 
+  // Sum of build_time_days × count.  Assumes serial construction (one
+  // construction slot); the in-game pace can be parallelised, so this is an
+  // upper bound.
+  function buildDayTotal(placed) {
+    var total = 0;
+    placed.forEach(function (p) {
+      total += (p.facility.build_time_days || 0) * p.count;
+    });
+    return Math.round(total);
+  }
+
   // Net power need = consumption − (production × PowerProduction bonus).
   // Positive → deficit, negative → surplus.
   function powerNetTotal(placed, checkedReductions) {
@@ -152,15 +163,16 @@
   function loadState() {
     try {
       var raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return { placed: {}, checked: {}, crewTransport: null };
+      if (!raw) return { placed: {}, checked: {}, crewTransport: null, spacecraft: null };
       var s = JSON.parse(raw);
       return {
         placed: (s && s.placed) || {},
         checked: (s && s.checked) || {},
         crewTransport: (s && s.crewTransport) || null,
+        spacecraft: (s && s.spacecraft) || null,
       };
     } catch (e) {
-      return { placed: {}, checked: {}, crewTransport: null };
+      return { placed: {}, checked: {}, crewTransport: null, spacecraft: null };
     }
   }
 
@@ -262,6 +274,7 @@
         '<div class="calc-pane calc-pane-right">' +
           '<div class="calc-pane-header"><h3>Resources needed</h3></div>' +
           '<div class="calc-crew-picker" id="calc-crew-picker"></div>' +
+          '<div class="calc-crew-picker" id="calc-spacecraft-picker"></div>' +
           '<div id="calc-totals"></div>' +
         '</div>' +
       '</div>';
@@ -286,12 +299,21 @@
     }
     ctx.crewById = crewIds;
 
+    var scById = (data.spacecraft || []).reduce(function (m, s) { m[s.id] = s; return m; }, {});
+    if (!ctx.state.spacecraft || !scById[ctx.state.spacecraft]) {
+      // Default to the smallest, always-available chemical spacecraft (Iris).
+      ctx.state.spacecraft = (data.spacecraft || [])[0] ? data.spacecraft[0].id : null;
+      saveState(ctx.state);
+    }
+    ctx.scById = scById;
+
     bindReductions(root, ctx);
     bindFacilityList(root, ctx);
     bindPlaced(root, ctx);
     bindReset(root, ctx);
     bindSave(root, ctx);
     bindCrewPicker(root, ctx);
+    bindSpacecraftPicker(root, ctx);
     setupTooltips(root);
     rerenderAll(root, ctx);
   }
@@ -320,6 +342,34 @@
     if (sel) {
       sel.addEventListener('change', function () {
         ctx.state.crewTransport = sel.value;
+        saveState(ctx.state);
+        rerenderTotals(root, ctx);
+      });
+    }
+  }
+
+  function renderSpacecraftPicker(ctx) {
+    var ships = ctx.data.spacecraft || [];
+    if (!ships.length) return '';
+    return '<label>Spacecraft: ' +
+      '<select id="calc-sc-select">' +
+      ships.map(function (s) {
+        var sel = s.id === ctx.state.spacecraft ? ' selected' : '';
+        return '<option value="' + escapeHtml(s.id) + '"' + sel + '>' +
+          escapeHtml(s.name) + ' — ' + s.cargo_capacity + ' t / trip' +
+          '</option>';
+      }).join('') +
+      '</select></label>';
+  }
+
+  function bindSpacecraftPicker(root, ctx) {
+    var el = root.querySelector('#calc-spacecraft-picker');
+    if (!el) return;
+    el.innerHTML = renderSpacecraftPicker(ctx);
+    var sel = el.querySelector('#calc-sc-select');
+    if (sel) {
+      sel.addEventListener('change', function () {
+        ctx.state.spacecraft = sel.value;
         saveState(ctx.state);
         rerenderTotals(root, ctx);
       });
@@ -729,10 +779,13 @@
     var transport = ctx.crewById && ctx.crewById[ctx.state.crewTransport];
     var crew = crewTransportMass(workers, transport);
     if (crew.mass > 0 && transport) {
+      var modulesT = crew.capsules * transport.mass;
       cargoRows.push({
         rid: 'human',
         name: transport.name + ' ×' + crew.capsules + ' (' + workers + ' humans)',
         amount: Math.round(crew.mass),
+        tip: crew.capsules + ' × (' + transport.mass + ' t module + crew) = ' +
+             modulesT + ' t modules + ' + workers + ' t crew = ' + Math.round(crew.mass) + ' t',
       });
     }
     cargoRows.sort(function (a, b) { return b.amount - a.amount; });
@@ -742,15 +795,22 @@
     var operationalRows = [];
     if (workers > 0) operationalRows.push({ rid: 'human', name: 'Humans on-site', amount: workers });
     if (powerNet !== 0) operationalRows.push({ rid: 'energy', name: 'Power (net)', amount: powerNet });
+    var days = buildDayTotal(placed);
+    if (days > 0) operationalRows.push({
+      name: 'Total build days', amount: days,
+      tip: 'Sum of build_time × count. Assumes serial construction; in-game you can parallelize across construction equipment slots.',
+    });
 
     if (cargoRows.length === 0 && operationalRows.length === 0) {
       return '<p class="calc-empty"><em>All costs reduced to 0.</em></p>';
     }
 
     function rowHtml(r) {
-      return '<tr><td>' +
-        '<img class="calc-total-icon" src="' + escapeHtml(iconUrl(r.rid)) + '" alt=""> ' +
-        escapeHtml(r.name) + '</td>' +
+      var tipAttr = r.tip ? ' data-tip="' + escapeHtml(r.tip) + '"' : '';
+      var iconHtml = r.rid
+        ? '<img class="calc-total-icon" src="' + escapeHtml(iconUrl(r.rid)) + '" alt=""> '
+        : '';
+      return '<tr' + tipAttr + '><td>' + iconHtml + escapeHtml(r.name) + '</td>' +
         '<td class="calc-num">' + r.amount.toLocaleString() + '</td></tr>';
     }
 
@@ -758,8 +818,16 @@
     if (cargoRows.length) {
       var totalRow = '<tr class="calc-total-row"><td><strong>Total tons</strong></td>' +
         '<td class="calc-num"><strong>' + grand.toLocaleString() + '</strong></td></tr>';
+      var trips = '';
+      var ship = ctx.scById && ctx.scById[ctx.state.spacecraft];
+      if (ship && grand > 0) {
+        var n = Math.ceil(grand / ship.cargo_capacity);
+        trips = '<tr><td>' + escapeHtml(ship.name) + ' trips ' +
+          '<span class="calc-trip-note">(' + ship.cargo_capacity + ' t / trip)</span></td>' +
+          '<td class="calc-num">' + n.toLocaleString() + '</td></tr>';
+      }
       html += '<thead><tr><th colspan="2" class="calc-section">Cargo (to ship)</th></tr></thead>' +
-        '<tbody>' + cargoRows.map(rowHtml).join('') + totalRow + '</tbody>';
+        '<tbody>' + cargoRows.map(rowHtml).join('') + totalRow + trips + '</tbody>';
     }
     if (operationalRows.length) {
       html += '<thead><tr><th colspan="2" class="calc-section">Operational (on-site)</th></tr></thead>' +
@@ -801,6 +869,7 @@
     iconFile: iconFile,
     fmtAbbrev: fmtAbbrev,
     crewTransportMass: crewTransportMass,
+    buildDayTotal: buildDayTotal,
   };
 
   if (typeof module !== 'undefined' && module.exports) {

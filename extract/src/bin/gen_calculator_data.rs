@@ -15,6 +15,8 @@ struct Sirenix {
     resources: Vec<ResourceStat>,
     #[serde(default)]
     crew_transports: Vec<CrewTransportStat>,
+    #[serde(default)]
+    spacecraft: Vec<SpacecraftStat>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -23,6 +25,14 @@ struct CrewTransportStat {
     capacity: i64,
     mass: f64,
     is_locked: bool,
+}
+
+#[derive(Deserialize, Clone)]
+struct SpacecraftStat {
+    id: String,
+    cargo_capacity: f64,
+    #[serde(default)]
+    can_be_built_by_player: bool,
 }
 
 #[derive(Deserialize, Clone)]
@@ -38,6 +48,8 @@ struct FacilityStat {
     energy_consumption: f64,
     #[serde(default)]
     produces: Vec<ResourceCost>,
+    #[serde(default)]
+    build_time_days: f64,
 }
 
 #[derive(Deserialize, Clone)]
@@ -71,6 +83,8 @@ struct Locale {
     research: Vec<LocaleEntry>,
     #[serde(default)]
     resources: Vec<LocaleEntry>,
+    #[serde(default)]
+    spacecraft: Vec<LocaleEntry>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -88,6 +102,15 @@ struct CalculatorData {
     resources: Vec<CalcResource>,
     reductions: Vec<CalcReduction>,
     crew_transports: Vec<CalcCrewTransport>,
+    spacecraft: Vec<CalcSpacecraft>,
+}
+
+#[derive(Serialize, Debug, PartialEq)]
+struct CalcSpacecraft {
+    id: String,
+    name: String,
+    /// Cargo tons per trip.
+    cargo_capacity: f64,
 }
 
 #[derive(Serialize, Debug, PartialEq)]
@@ -110,6 +133,7 @@ struct CalcFacility {
     workers_required: i64,
     energy_consumption: f64,
     power_production: f64,
+    build_time_days: f64,
 }
 
 #[derive(Serialize, Debug, PartialEq)]
@@ -206,6 +230,7 @@ fn build_calculator_data(sirenix: &Sirenix, locale: &Locale) -> CalculatorData {
             workers_required: f.workers_required,
             energy_consumption: f.energy_consumption,
             power_production,
+            build_time_days: f.build_time_days,
         });
     }
 
@@ -297,11 +322,37 @@ fn build_calculator_data(sirenix: &Sirenix, locale: &Locale) -> CalculatorData {
         })
         .collect();
 
+    // Player-buildable interplanetary spacecraft, filtered to those with a
+    // realistic cargo capacity. The dump uses 999999 as a sentinel for
+    // payload containers / asteroid pullers — those aren't cargo ferries.
+    let spacecraft_name: std::collections::HashMap<&str, &str> = locale
+        .spacecraft
+        .iter()
+        .map(|s| (s.id.as_str(), s.name.as_str()))
+        .collect();
+    let mut spacecraft: Vec<CalcSpacecraft> = sirenix
+        .spacecraft
+        .iter()
+        .filter(|s| s.can_be_built_by_player && s.cargo_capacity > 0.0 && s.cargo_capacity < 99_000.0)
+        .map(|s| CalcSpacecraft {
+            id: s.id.clone(),
+            name: spacecraft_name.get(s.id.as_str()).copied().unwrap_or(&s.id).to_string(),
+            cargo_capacity: s.cargo_capacity,
+        })
+        .collect();
+    spacecraft.sort_by(|a, b| {
+        a.cargo_capacity
+            .partial_cmp(&b.cargo_capacity)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.id.cmp(&b.id))
+    });
+
     CalculatorData {
         facilities,
         resources,
         reductions,
         crew_transports,
+        spacecraft,
     }
 }
 
@@ -405,6 +456,7 @@ mod tests {
                     description: String::new(),
                 })
                 .collect(),
+            spacecraft: Vec::new(),
         }
     }
 
