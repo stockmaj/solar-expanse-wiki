@@ -294,6 +294,24 @@ struct ResearchStat {
     show_in_tree: bool,
     #[serde(default)]
     contract_unlocks: Vec<String>,
+    /// Era tier (0 early, 1 mid, 2 late) — drives the "Era" column.
+    #[serde(default)]
+    stage: u8,
+    /// Stacked secondary unlocks from `unlockDataList[]` (excluding contracts).
+    /// Surfaced as extra lines in the Unlocks cell.
+    #[serde(default)]
+    secondary_unlocks: Vec<SecondaryUnlockStat>,
+}
+
+#[derive(Deserialize, Clone, Default)]
+struct SecondaryUnlockStat {
+    action: String,
+    #[serde(default)]
+    target: String,
+    #[serde(default)]
+    bonus: String,
+    #[serde(default)]
+    bonus_parameter: f64,
 }
 
 #[derive(Deserialize, Clone)]
@@ -3816,7 +3834,90 @@ fn resolve_bonus_component(
     }
 }
 
+/// Map the era tier from `ResearchStat.stage` (0/1/2) to a player-facing label.
+/// Values outside the known range fall through to "Early" so the column never
+/// renders an empty cell.
+fn era_label(stage: u8) -> &'static str {
+    match stage {
+        0 => "Early",
+        1 => "Mid",
+        2 => "Late",
+        _ => "Early",
+    }
+}
+
+/// Render a single `SecondaryUnlockStat` as one line of the Unlocks cell.
+/// Bonuses look like `+20 Component thrust`; facility/spacecraft/LV unlocks
+/// look like `Facility: Habitat Dome` (linked when an anchor exists).
+fn fmt_secondary_unlock(
+    s: &SecondaryUnlockStat,
+    facility_name: &BTreeMap<&str, &str>,
+    facility_anchored: &std::collections::BTreeSet<&str>,
+    spacecraft_name: &BTreeMap<&str, &str>,
+    lv_name: &BTreeMap<&str, &str>,
+) -> String {
+    match s.action.as_str() {
+        "UnlockBonus" => {
+            let kind = if s.bonus.is_empty() { "Bonus".to_string() } else { humanize_kind(&s.bonus) };
+            let sign = if s.bonus_parameter < 0.0 { "" } else { "+" };
+            format!("{sign}{} {}", fmt_amount(s.bonus_parameter), kind)
+        }
+        "UnlockFacility" => {
+            let key = s.target.strip_prefix("build_").unwrap_or(&s.target);
+            let resolved_name = facility_name.get(key).copied();
+            let pretty = match resolved_name {
+                Some(name) if !name.is_empty() => smart_title_case(name),
+                _ => {
+                    if key.contains('_') || key.chars().all(|c| c.is_lowercase() || c == '_' || c.is_ascii_digit()) {
+                        title_case_words(&key.replace('_', " "))
+                    } else {
+                        smart_title_case(key)
+                    }
+                }
+            };
+            if facility_anchored.contains(key) {
+                let link = link_cross_page("facilities", "facility", key, &format!("**{pretty}**"));
+                format!("Facility: {link}")
+            } else {
+                format!("Facility: **{pretty}**")
+            }
+        }
+        "UnlockSpacecraftType" => {
+            let pretty = spacecraft_name.get(s.target.as_str()).copied().unwrap_or(s.target.as_str());
+            let link = link_cross_page("spacecraft", "spacecraft", &s.target, &format!("**{pretty}**"));
+            format!("Spacecraft: {link}")
+        }
+        "UnlockVehicleType" => {
+            let pretty = lv_name.get(s.target.as_str()).copied().unwrap_or(s.target.as_str());
+            let link = link_cross_page("launch-vehicles", "lv", &s.target, &format!("**{pretty}**"));
+            format!("Launch Vehicle: {link}")
+        }
+        other => other.to_string(),
+    }
+}
+
 fn fmt_research_unlock(
+    r: &ResearchStat,
+    facility_name: &BTreeMap<&str, &str>,
+    facility_anchored: &std::collections::BTreeSet<&str>,
+    spacecraft_name: &BTreeMap<&str, &str>,
+    lv_name: &BTreeMap<&str, &str>,
+) -> String {
+    let primary = fmt_research_unlock_primary(r, facility_name, facility_anchored, spacecraft_name, lv_name);
+    if r.secondary_unlocks.is_empty() {
+        return primary;
+    }
+    let mut lines: Vec<String> = Vec::with_capacity(r.secondary_unlocks.len() + 1);
+    if primary != "—" {
+        lines.push(primary);
+    }
+    for s in &r.secondary_unlocks {
+        lines.push(fmt_secondary_unlock(s, facility_name, facility_anchored, spacecraft_name, lv_name));
+    }
+    if lines.is_empty() { "—".into() } else { lines.join("<br>") }
+}
+
+fn fmt_research_unlock_primary(
     r: &ResearchStat,
     facility_name: &BTreeMap<&str, &str>,
     facility_anchored: &std::collections::BTreeSet<&str>,
@@ -4023,6 +4124,7 @@ research tree (Computing, Chemical Propulsion, Spacecraft, …).\n\n",
                     vec![
                         name_cell,
                         fmt_work_hours(r.work_hours),
+                        era_label(r.stage).to_string(),
                         prereqs,
                         fmt_research_unlock(r, &facility_name, &facility_anchored, &spacecraft_name, &lv_name),
                         escape_cell(&desc_for(&r.id)),
@@ -4030,10 +4132,11 @@ research tree (Computing, Chemical Propulsion, Spacecraft, …).\n\n",
                 })
                 .collect();
             out.push_str(&md_table_with_tips(
-                &["Research", "Cost (h)", "Prereqs", "Unlocks", "Description"],
+                &["Research", "Cost (h)", "Era", "Prereqs", "Unlocks", "Description"],
                 &[
                     None,
                     Some("Cost in work-hours; divide by your labs' research output to get the actual research time in days"),
+                    Some("Tech tree era — broad progression tier of this research."),
                     None,
                     None,
                     None,
@@ -4048,8 +4151,9 @@ research tree (Computing, Chemical Propulsion, Spacecraft, …).\n\n",
     out.push_str(
         "## Reading the table\n\n\
 - **Cost** is in work hours and is divided by your laboratories' research output to get the actual research time in days.\n\
+- **Era** is the broad tech-tree tier: *Early* / *Mid* / *Late*. The tree gates entire eras behind milestone nodes, so most early choices are independent and later choices depend on a long chain of early ones.\n\
 - **Prerequisites** must be completed before the node becomes available.\n\
-- **Unlocks** — *Builds X* means the node makes a new facility constructable; *Spacecraft / Launch Vehicle* means the node unlocks a new ship or lifter; numeric bonuses apply to listed components.\n\n\
+- **Unlocks** — *Builds X* means the node makes a new facility constructable; *Spacecraft / Launch Vehicle* means the node unlocks a new ship or lifter; numeric bonuses apply to listed components. A research node can stack multiple unlocks — the primary unlock comes first, then any additional bonuses or facilities/spacecraft/launch vehicles it also unlocks appear on follow-on lines in the same cell.\n\n\
 ## See also\n\n\
 - [Spacecraft](../spacecraft/) — propulsion research feeds directly into these\n\
 - [Launch Vehicles](../launch-vehicles/)\n",
@@ -4821,6 +4925,8 @@ mod tests {
             bonus_components: vec![],
             show_in_tree: false,
             contract_unlocks: vec![],
+            stage: 0,
+            secondary_unlocks: vec![],
         }
     }
 
@@ -5671,6 +5777,120 @@ mod tests {
         assert!(
             !page.contains("moonlandingMultiModuleDeliverTest"),
             "raw _test id rendered in Next column:\n{page}"
+        );
+    }
+
+    #[test]
+    fn research_page_renders_era_column_for_each_stage() {
+        // The Research table gains an "Era" column between Cost and Prereqs,
+        // mapping stage 0/1/2 → Early / Mid / Late.  A stage=1 entry must
+        // render "Mid" in its row.
+        let locale = nav_fixture_locale();
+        let mut mid = make_research("research_lifesup_1", "UnlockFacility", Some("geothermal"));
+        mid.stage = 1;
+        let sirenix = Sirenix {
+            research: vec![mid],
+            ..Default::default()
+        };
+        let page = page_research(&locale, &sirenix);
+        // Header is present (uses md_table_with_tips' span wrapper).
+        assert!(
+            page.contains(">Era<") || page.contains(" Era "),
+            "page missing Era column header:\n{page}"
+        );
+        // The stage=1 row renders "Mid".
+        assert!(
+            page.contains("| Mid |"),
+            "page missing Mid cell for stage=1 research:\n{page}"
+        );
+    }
+
+    #[test]
+    fn research_page_renders_era_late_for_stage_two() {
+        let locale = nav_fixture_locale();
+        let mut late = make_research("research_lifesup_1", "UnlockFacility", Some("geothermal"));
+        late.stage = 2;
+        let sirenix = Sirenix {
+            research: vec![late],
+            ..Default::default()
+        };
+        let page = page_research(&locale, &sirenix);
+        assert!(
+            page.contains("| Late |"),
+            "page missing Late cell for stage=2 research:\n{page}"
+        );
+    }
+
+    #[test]
+    fn research_page_renders_stacked_secondary_bonuses_in_unlocks_cell() {
+        // A research with two secondary bonuses (e.g. fusion-prop III: thrust +20
+        // and power production +25) should render both lines in the Unlocks
+        // cell, in addition to its primary unlock.
+        let locale = nav_fixture_locale();
+        let mut r = make_research("research_lifesup_1", "UnlockFacility", Some("geothermal"));
+        r.secondary_unlocks = vec![
+            SecondaryUnlockStat {
+                action: "UnlockBonus".into(),
+                target: String::new(),
+                bonus: "ComponentThrust".into(),
+                bonus_parameter: 20.0,
+            },
+            SecondaryUnlockStat {
+                action: "UnlockBonus".into(),
+                target: String::new(),
+                bonus: "PowerProduction".into(),
+                bonus_parameter: 25.0,
+            },
+        ];
+        let sirenix = Sirenix {
+            research: vec![r],
+            ..Default::default()
+        };
+        let page = page_research(&locale, &sirenix);
+        assert!(
+            page.contains("+20 Component thrust"),
+            "page missing first secondary bonus:\n{page}"
+        );
+        assert!(
+            page.contains("+25 Power production"),
+            "page missing second secondary bonus:\n{page}"
+        );
+        // Both bonuses live in the same Unlocks cell, joined by `<br>`.
+        assert!(
+            page.contains("+20 Component thrust<br>+25 Power production"),
+            "secondary bonuses not stacked into a single cell with <br>:\n{page}"
+        );
+    }
+
+    #[test]
+    fn research_page_renders_secondary_facility_unlock() {
+        // Lifesup II type research: primary unlock is a bonus, secondary
+        // unlock is a facility (build_habitatdome).  The Unlocks cell should
+        // show the facility name (resolved via locale fixture) on its own line.
+        let mut locale = nav_fixture_locale();
+        locale.facilities.push(Facility {
+            id: "habitatdome".into(),
+            name: "Habitat Dome".into(),
+            description: "Mid-tier habitat.".into(),
+        });
+        let mut r = make_research("research_lifesup_1", "UnlockBonus", None);
+        r.bonus_kind = Some("BuildSpeed".into());
+        r.bonus_amount = 25.0;
+        r.bonus_components = vec!["Facility".into()];
+        r.secondary_unlocks = vec![SecondaryUnlockStat {
+            action: "UnlockFacility".into(),
+            target: "build_habitatdome".into(),
+            bonus: String::new(),
+            bonus_parameter: 0.0,
+        }];
+        let sirenix = Sirenix {
+            research: vec![r],
+            ..Default::default()
+        };
+        let page = page_research(&locale, &sirenix);
+        assert!(
+            page.contains("Facility: ") && page.contains("Habitat Dome"),
+            "page missing secondary facility unlock label:\n{page}"
         );
     }
 

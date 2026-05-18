@@ -61,6 +61,29 @@ struct Research {
     bonus_components: Vec<String>,    // e.g. ["eng_chem"]
     show_in_tree: bool,
     contract_unlocks: Vec<String>,    // every contract id this research unlocks (from unlockData + unlockDataList)
+    /// Era tier (0 early, 1 mid, 2 late) from `stage` in the dump.
+    #[serde(default)]
+    stage: u8,
+    /// Secondary unlock entries from `unlockDataList[]` — everything except
+    /// the UnlockContract entries that are already on `contract_unlocks`.
+    /// Each entry is a parsed bonus or facility/spacecraft/LV unlock that
+    /// stacks on top of the primary `unlockData`.
+    #[serde(default)]
+    secondary_unlocks: Vec<SecondaryUnlock>,
+}
+
+#[derive(Serialize, Debug, Default, PartialEq, Clone)]
+struct SecondaryUnlock {
+    /// e.g. "UnlockBonus", "UnlockFacility", "UnlockSpacecraftType", "UnlockVehicleType".
+    /// Skip "UnlockContract" — those still flow to contract_unlocks as before.
+    action: String,
+    /// Target id (e.g., "build_habitatdome", "spacecraft_chem_small"), or "" for pure bonuses.
+    target: String,
+    /// Bonus name (e.g., "ComponentThrust", "PowerProduction", "BuildCost", "LaunchCost").
+    /// Empty for non-bonus actions.
+    bonus: String,
+    /// Numeric bonus magnitude (e.g., 20 for +20%, or 25 for +25). Zero for non-bonus.
+    bonus_parameter: f64,
 }
 
 #[derive(Serialize, Debug, Default, PartialEq)]
@@ -456,7 +479,14 @@ fn parse_research(v: &Value) -> Option<Research> {
     // multiple unlock actions (e.g. unlock a facility AND unlock a contract that
     // depends on that facility); we want all of them so contract depth can chain
     // through research.
+    //
+    // While walking `unlockDataList[]`, also collect everything *else* (bonuses,
+    // facility/spacecraft/LV unlocks) into `secondary_unlocks` so the wiki can
+    // surface stacked bonuses next to the primary unlock.  Contract entries
+    // continue to flow into `contract_unlocks` only — they're already covered
+    // by the contracts page.
     let mut contract_unlocks: Vec<String> = Vec::new();
+    let mut secondary_unlocks: Vec<SecondaryUnlock> = Vec::new();
     if action == "UnlockContract" && !parameter1.is_empty() {
         contract_unlocks.push(parameter1.to_string());
     }
@@ -466,18 +496,51 @@ fn parse_research(v: &Value) -> Option<Research> {
                 .get("actionUnlock")
                 .and_then(|x| x.as_str())
                 .unwrap_or("");
-            if act != "UnlockContract" {
+            if act == "UnlockContract" {
+                if let Some(p1) = entry
+                    .get("parameter1")
+                    .and_then(|x| x.as_str())
+                    .filter(|s| !s.is_empty())
+                {
+                    contract_unlocks.push(p1.to_string());
+                }
                 continue;
             }
-            if let Some(p1) = entry
+            if act.is_empty() || act == "None" {
+                continue;
+            }
+            let target = entry
                 .get("parameter1")
                 .and_then(|x| x.as_str())
-                .filter(|s| !s.is_empty())
-            {
-                contract_unlocks.push(p1.to_string());
-            }
+                .unwrap_or("")
+                .to_string();
+            let bonus = entry
+                .get("bonus")
+                .and_then(|x| x.as_str())
+                .filter(|s| !s.is_empty() && *s != "None")
+                .unwrap_or("")
+                .to_string();
+            let bonus_parameter = entry
+                .get("bonusParameter")
+                .and_then(|x| x.as_f64())
+                .unwrap_or(0.0);
+            // For pure bonus entries `parameter1` is just a Roman-numeral tier
+            // label (e.g. "III"), not a build/lv/sc id — drop it from target so
+            // the renderer doesn't try to resolve it.
+            let target = if act == "UnlockBonus" { String::new() } else { target };
+            secondary_unlocks.push(SecondaryUnlock {
+                action: act.to_string(),
+                target,
+                bonus,
+                bonus_parameter,
+            });
         }
     }
+
+    let stage = v
+        .get("stage")
+        .and_then(|x| x.as_u64())
+        .unwrap_or(0) as u8;
 
     Some(Research {
         id,
@@ -492,6 +555,8 @@ fn parse_research(v: &Value) -> Option<Research> {
         bonus_components,
         show_in_tree,
         contract_unlocks,
+        stage,
+        secondary_unlocks,
     })
 }
 
@@ -1816,6 +1881,108 @@ mod tests {
         assert_eq!(r.bonus_amount, 5.0);
         assert_eq!(r.bonus_components, vec!["eng_chem"]);
         assert!(r.unlock_target.is_none());
+    }
+
+    #[test]
+    fn parses_research_stage_for_era_tier() {
+        // `stage` is the era tier (0 early / 1 mid / 2 late).  Most entries are 0;
+        // mid- and late-game research carry non-zero values that map to the
+        // research-tree progression we surface as an "Era" column.
+        let v = serde_json::json!({
+            "id": "research_fusionprop_4",
+            "researchType": {"name": "Engineering"},
+            "researchSubType": {"name": "SubBranch_Fusion"},
+            "stage": 2,
+            "unlockData": {
+                "actionUnlock": "UnlockBonus",
+                "parameter1": "III",
+                "bonus": "ComponentExhaustV",
+                "bonusParameter": 25,
+                "id_ComponentOrOther": ["eng_fusion"]
+            }
+        });
+        let r = parse_research(&v).expect("should parse");
+        assert_eq!(r.stage, 2);
+
+        // Missing stage defaults to 0 (early).
+        let bare = serde_json::json!({
+            "id": "research_chem_main1",
+            "researchType": {"name": "Engineering"},
+            "researchSubType": {"name": "SubBranch_Chemical"}
+        });
+        let r0 = parse_research(&bare).expect("should parse");
+        assert_eq!(r0.stage, 0);
+    }
+
+    #[test]
+    fn parses_research_secondary_unlocks_from_unlock_data_list() {
+        // A single research entry can stack multiple secondary unlock actions in
+        // `unlockDataList[]`: bonuses, facility unlocks, etc.  We must capture
+        // every entry except `UnlockContract` (which still flows to
+        // `contract_unlocks`), so the wiki Unlocks cell can render them.
+        let v = serde_json::json!({
+            "id": "research_fusionprop_4",
+            "researchType": {"name": "Engineering"},
+            "researchSubType": {"name": "SubBranch_Fusion"},
+            "stage": 2,
+            "unlockData": {
+                "actionUnlock": "UnlockBonus",
+                "parameter1": "III",
+                "bonus": "ComponentExhaustV",
+                "bonusParameter": 25,
+                "id_ComponentOrOther": ["eng_fusion"]
+            },
+            "unlockDataList": [
+                {
+                    "actionUnlock": "UnlockBonus",
+                    "parameter1": "III",
+                    "bonus": "ComponentThrust",
+                    "bonusParameter": 20,
+                    "id_ComponentOrOther": ["eng_fusion"]
+                },
+                {
+                    "actionUnlock": "UnlockBonus",
+                    "parameter1": "",
+                    "bonus": "PowerProduction",
+                    "bonusParameter": 25,
+                    "id_ComponentOrOther": ["build_power_fusion"]
+                },
+                {
+                    "actionUnlock": "UnlockFacility",
+                    "parameter1": "build_habitatdome",
+                    "bonus": "None",
+                    "bonusParameter": 0,
+                    "id_ComponentOrOther": []
+                },
+                {
+                    "actionUnlock": "UnlockContract",
+                    "parameter1": "contract_foo",
+                    "bonus": "None",
+                    "bonusParameter": 0,
+                    "id_ComponentOrOther": []
+                }
+            ]
+        });
+        let r = parse_research(&v).expect("should parse");
+        // Contract entries continue to flow into `contract_unlocks` only — not
+        // into the secondary-unlocks vector.
+        assert_eq!(r.contract_unlocks, vec!["contract_foo"]);
+        // Three non-contract entries: two bonuses + one facility unlock.
+        assert_eq!(r.secondary_unlocks.len(), 3);
+
+        assert_eq!(r.secondary_unlocks[0].action, "UnlockBonus");
+        assert_eq!(r.secondary_unlocks[0].bonus, "ComponentThrust");
+        assert_eq!(r.secondary_unlocks[0].bonus_parameter, 20.0);
+        assert_eq!(r.secondary_unlocks[0].target, "");
+
+        assert_eq!(r.secondary_unlocks[1].action, "UnlockBonus");
+        assert_eq!(r.secondary_unlocks[1].bonus, "PowerProduction");
+        assert_eq!(r.secondary_unlocks[1].bonus_parameter, 25.0);
+
+        assert_eq!(r.secondary_unlocks[2].action, "UnlockFacility");
+        assert_eq!(r.secondary_unlocks[2].target, "build_habitatdome");
+        assert_eq!(r.secondary_unlocks[2].bonus, "");
+        assert_eq!(r.secondary_unlocks[2].bonus_parameter, 0.0);
     }
 
     fn scenario_fixture() -> Value {
