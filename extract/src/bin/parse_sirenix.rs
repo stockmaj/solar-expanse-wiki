@@ -781,12 +781,22 @@ fn parse_spacecraft(v: &Value) -> Option<Spacecraft> {
 
     let build_cost = parse_build_cost(v.pointer("/hull/priceBase/listResources"));
 
+    // The top-level `cargoCapacity` is the spacecraft *type's* default — for
+    // most ships it's a placeholder (Hermes 80, Prometheus 150, Zeus 150)
+    // rather than what you actually get with the standard hull.  Real
+    // capacity lives in `hull.cargoCapacityBase` (Hermes 300, Prometheus
+    // 800, Zeus 20000).  Fall back to the top-level value when the hull is
+    // empty/missing — sail spacecraft don't populate the hull block.
+    let hull_cargo = lookup_f64(v, &["hull", "cargoCapacityBase"]).unwrap_or(0.0);
+    let top_cargo = f(&["cargoCapacity"]);
+    let cargo_capacity = if hull_cargo > 0.0 { hull_cargo } else { top_cargo };
+
     Some(Spacecraft {
         id,
         engine_module,
         engine_type,
         mass: f(&["mass"]),
-        cargo_capacity: f(&["cargoCapacity"]),
+        cargo_capacity,
         fuel_capacity: f(&["fuelCapacity"]),
         reusability: f(&["reusability"]),
         needs_launch_vehicle: b(&["needLaunchVehicleToGoToMoon"]),
@@ -2719,6 +2729,7 @@ mod tests {
                     "spaceComponent": { "$ref": true, "type": "SpaceComponent", "name": "eng_chemsmall" },
                     "count": 1
                 },
+                "cargoCapacityBase": 2,
                 "priceBase": {
                     "listResources": [
                         {
@@ -2730,6 +2741,32 @@ mod tests {
                 }
             }
         })
+    }
+
+    #[test]
+    fn prefers_hull_cargo_base_over_top_level_cargo() {
+        let v = serde_json::json!({
+            "id": "spacecraft_electric_small",
+            "engineType": "electric",
+            "cargoCapacity": 80,
+            "hull": { "cargoCapacityBase": 300 }
+        });
+        let sc = parse_spacecraft(&v).expect("should parse");
+        assert_eq!(sc.cargo_capacity, 300.0,
+            "Hermes-style: hull.cargoCapacityBase (300) is the real value, not top-level cargoCapacity (80)");
+    }
+
+    #[test]
+    fn falls_back_to_top_level_cargo_when_hull_is_zero() {
+        let v = serde_json::json!({
+            "id": "spacecraft_sail_long",
+            "engineType": "sail",
+            "cargoCapacity": 80,
+            "hull": { "cargoCapacityBase": 0 }
+        });
+        let sc = parse_spacecraft(&v).expect("should parse");
+        assert_eq!(sc.cargo_capacity, 80.0,
+            "sail-style: hull cargo is 0, fall back to top-level cargoCapacity");
     }
 
     fn cheat_fixture() -> Value {

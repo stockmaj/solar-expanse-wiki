@@ -333,17 +333,14 @@
 
     ctx.crewById = (data.crew_transports || []).reduce(function (m, c) { m[c.id] = c; return m; }, {});
 
-    var scById = (data.spacecraft || []).reduce(function (m, s) { m[s.id] = s; return m; }, {});
-    if (!ctx.state.spacecraft || !scById[ctx.state.spacecraft]) {
-      // Default to the smallest, always-available chemical spacecraft (Iris).
-      ctx.state.spacecraft = (data.spacecraft || [])[0] ? data.spacecraft[0].id : null;
+    // Seed the cargo-capacity input from the first non-trivial spacecraft so
+    // users see a working trip count out of the box; they can edit it freely.
+    if (!ctx.state.shipCapacity) {
+      var seed = (data.spacecraft || []).find(function (s) { return s.cargo_capacity >= 100; })
+        || (data.spacecraft || [])[0];
+      ctx.state.shipCapacity = seed ? seed.cargo_capacity : null;
       saveState(ctx.state);
     }
-    if (!ctx.state.shipCapacity && scById[ctx.state.spacecraft]) {
-      ctx.state.shipCapacity = scById[ctx.state.spacecraft].cargo_capacity;
-      saveState(ctx.state);
-    }
-    ctx.scById = scById;
 
     bindReductions(root, ctx);
     bindFacilityList(root, ctx);
@@ -380,38 +377,16 @@
   }
 
   function renderSpacecraftPicker(ctx) {
-    var ships = ctx.data.spacecraft || [];
-    if (!ships.length) return '';
     var cap = ctx.state.shipCapacity || '';
-    return '<label>Spacecraft: ' +
-      '<select id="calc-sc-select">' +
-      ships.map(function (s) {
-        var sel = s.id === ctx.state.spacecraft ? ' selected' : '';
-        return '<option value="' + escapeHtml(s.id) + '"' + sel + '>' +
-          escapeHtml(s.name) + ' (base ' + s.cargo_capacity + ' t)' +
-          '</option>';
-      }).join('') +
-      '</select></label> ' +
-      '<label>Cargo: <input type="number" min="1" id="calc-sc-cap" value="' + cap + '" placeholder="t / trip" data-tip="In-game capacity (after cargo-bay modules and Expanded Cargo Bays research).">  t / trip</label>';
+    return '<label>Spacecraft cargo: ' +
+      '<input type="number" min="1" id="calc-sc-cap" value="' + cap + '" placeholder="t / trip" data-tip="In-game cargo capacity (per trip). The dump-derived defaults are based on the standard hull; cargo-bay modules and Expanded Cargo Bays research can multiply this.">' +
+      ' t / trip</label>';
   }
 
   function bindSpacecraftPicker(root, ctx) {
     var el = root.querySelector('#calc-spacecraft-picker');
     if (!el) return;
     el.innerHTML = renderSpacecraftPicker(ctx);
-    var sel = el.querySelector('#calc-sc-select');
-    if (sel) {
-      sel.addEventListener('change', function () {
-        ctx.state.spacecraft = sel.value;
-        // Reset override to base whenever the user picks a different ship —
-        // their previous override applied to a different ship.
-        var s = ctx.scById[sel.value];
-        ctx.state.shipCapacity = s ? s.cargo_capacity : null;
-        saveState(ctx.state);
-        bindSpacecraftPicker(root, ctx);
-        rerenderTotals(root, ctx);
-      });
-    }
     var cap = el.querySelector('#calc-sc-cap');
     if (cap) {
       cap.addEventListener('input', function () {
@@ -907,16 +882,21 @@
     var operationalRows = [];
     if (workers > 0) {
       var shortage = Math.max(0, humansToShip - onboardCapacity);
-      var humansLabel = 'Humans ' + workers;
-      var detail = onboardCapacity + ' onboard' +
-        (onSiteHumans > 0 ? ', ' + onSiteHumans + ' on site' : '');
-      operationalRows.push({
-        rid: 'human',
-        name: humansLabel + ' (' + detail + ')',
-        amount: shortage > 0 ? '−' + shortage + ' short' : 'covered',
-        tip: 'Demand ' + workers + ' = facilities × workers_required (after crew-reduction research). ' +
-             'Onboard = Σ capsule capacity × count. On-site = your input (Humans row in cargo).',
-      });
+      // Humans gets bespoke HTML so the on-site count is an editable input.
+      var humansHtml = '<tr data-tip="' + escapeHtml(
+        'Demand = facilities × workers_required (after crew-reduction research). ' +
+        'Onboard = Σ capsule capacity × count. On-site = humans already at the destination.'
+      ) + '">' +
+        '<td colspan="2">' +
+        '<img class="calc-total-icon" src="' + escapeHtml(iconUrl('human')) + '" alt=""> ' +
+        'Humans ' + workers +
+        ' <span class="calc-trip-note">(' + onboardCapacity + ' onboard, ' +
+        '<input type="number" min="0" class="calc-onsite calc-onsite-inline" data-rid="human" value="' +
+        (onSiteHumans || '') + '" placeholder="0"> on site)</span>' +
+        '</td>' +
+        '<td class="calc-num">' + (shortage > 0 ? '−' + shortage + ' short' : 'covered') + '</td>' +
+      '</tr>';
+      operationalRows.push({ _html: humansHtml });
     }
     var powerNet = powerNetTotal(facilityPlaced, checked);
     if (powerNet !== 0) operationalRows.push({ rid: 'energy', name: 'Power (net)', amount: powerNet });
@@ -944,6 +924,7 @@
         '<td class="calc-num">' + r.amount.toLocaleString() + '</td></tr>';
     }
     function opRowHtml(r) {
+      if (r._html) return r._html;
       var tipAttr = r.tip ? ' data-tip="' + escapeHtml(r.tip) + '"' : '';
       var iconHtml = r.rid
         ? '<img class="calc-total-icon" src="' + escapeHtml(iconUrl(r.rid)) + '" alt=""> '
@@ -958,11 +939,10 @@
       var totalRow = '<tr class="calc-total-row"><td colspan="2"><strong>Total tons</strong></td>' +
         '<td class="calc-num"><strong>' + grand.toLocaleString() + '</strong></td></tr>';
       var trips = '';
-      var ship = ctx.scById && ctx.scById[ctx.state.spacecraft];
-      var cap = ctx.state.shipCapacity || (ship && ship.cargo_capacity) || 0;
-      if (ship && grand > 0 && cap > 0) {
+      var cap = ctx.state.shipCapacity || 0;
+      if (grand > 0 && cap > 0) {
         var n = Math.ceil(grand / cap);
-        trips = '<tr><td colspan="2">' + escapeHtml(ship.name) + ' trips ' +
+        trips = '<tr><td colspan="2">Trips ' +
           '<span class="calc-trip-note">(' + cap + ' t / trip)</span></td>' +
           '<td class="calc-num">' + n.toLocaleString() + '</td></tr>';
       }

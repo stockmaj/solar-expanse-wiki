@@ -2136,6 +2136,11 @@
       "cargo_capacity": 2.0
     },
     {
+      "id": "spacecraft_chem_mid2",
+      "name": "Selene",
+      "cargo_capacity": 5.0
+    },
+    {
       "id": "spacecraft_chem_mid",
       "name": "Centaur",
       "cargo_capacity": 10.0
@@ -2144,16 +2149,6 @@
       "id": "spacecraft_sail_small",
       "name": "Daedalus",
       "cargo_capacity": 20.0
-    },
-    {
-      "id": "spacecraft_chem_mid2",
-      "name": "Selene",
-      "cargo_capacity": 25.0
-    },
-    {
-      "id": "spacecraft_electric_small",
-      "name": "Hermes",
-      "cargo_capacity": 80.0
     },
     {
       "id": "spacecraft_sail_long",
@@ -2171,39 +2166,9 @@
       "cargo_capacity": 120.0
     },
     {
-      "id": "spacecraft_asteroid_puller",
-      "name": "Atlas",
-      "cargo_capacity": 150.0
-    },
-    {
-      "id": "spacecraft_fusion_large",
-      "name": "Zeus",
-      "cargo_capacity": 150.0
-    },
-    {
-      "id": "spacecraft_fusion_mid",
-      "name": "Sirius",
-      "cargo_capacity": 150.0
-    },
-    {
-      "id": "spacecraft_fusion_small",
-      "name": "Nike",
-      "cargo_capacity": 150.0
-    },
-    {
-      "id": "spacecraft_nuke_large",
-      "name": "Ariane",
-      "cargo_capacity": 150.0
-    },
-    {
-      "id": "spacecraft_nuke_mid",
-      "name": "Hephaistos",
-      "cargo_capacity": 150.0
-    },
-    {
-      "id": "spacecraft_nuke_small",
-      "name": "Prometheus",
-      "cargo_capacity": 150.0
+      "id": "spacecraft_electric_small",
+      "name": "Hermes",
+      "cargo_capacity": 300.0
     },
     {
       "id": "spacecraft_electric_mid",
@@ -2211,9 +2176,44 @@
       "cargo_capacity": 500.0
     },
     {
+      "id": "spacecraft_nuke_small",
+      "name": "Prometheus",
+      "cargo_capacity": 800.0
+    },
+    {
       "id": "spacecraft_nuke_nolv",
       "name": "Cronos",
       "cargo_capacity": 1000.0
+    },
+    {
+      "id": "spacecraft_nuke_mid",
+      "name": "Hephaistos",
+      "cargo_capacity": 1500.0
+    },
+    {
+      "id": "spacecraft_nuke_large",
+      "name": "Ariane",
+      "cargo_capacity": 2500.0
+    },
+    {
+      "id": "spacecraft_fusion_small",
+      "name": "Nike",
+      "cargo_capacity": 5000.0
+    },
+    {
+      "id": "spacecraft_asteroid_puller",
+      "name": "Atlas",
+      "cargo_capacity": 10000.0
+    },
+    {
+      "id": "spacecraft_fusion_mid",
+      "name": "Sirius",
+      "cargo_capacity": 10000.0
+    },
+    {
+      "id": "spacecraft_fusion_large",
+      "name": "Zeus",
+      "cargo_capacity": 20000.0
     }
   ]
 }

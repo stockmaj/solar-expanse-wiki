@@ -2202,12 +2202,12 @@ in this table. The names and corp rosters below are stable.*\n\n",
                 .completed_research
                 .iter()
                 .filter_map(|rid| {
-                    // Drop tree-structure category nodes — they aren't
-                    // player-visible research and were already filtered
-                    // out by the previous version of this page.
-                    if rid.starts_with("research_category_") {
-                        return None;
-                    }
+                    // Category-level nodes (research_category_*) ARE player-
+                    // facing — they're the in-game tech-tree branches like
+                    // "Nuclear Power" and "Nuclear Propulsion" that show
+                    // checkmarks in the research UI when a corp starts with
+                    // them.  Include them so e.g. NASA's nuclear edge is
+                    // visible in the Early Exploration comparison.
                     let nm = research_name
                         .get(rid.as_str())
                         .copied()

@@ -830,6 +830,11 @@ main hr {
 #calc-root .calc-onsite-cell {
   padding: 2px 4px;
 }
+#calc-root .calc-onsite-inline {
+  width: 50px;
+  padding: 0 4px;
+  font-size: 11px;
+}
 #calc-root .calc-capsule-info {
   color: var(--fg-muted);
   font-size: 11px;
