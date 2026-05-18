@@ -851,37 +851,26 @@
       };
     });
 
-    // Capsule rows — one per placed type, contributing module mass.
+    // Capsule rows — one per placed type, assumed fully loaded (capacity
+    // humans inside each). Mass = count × (module + capacity × 1 t/human).
     capsulePlaced.forEach(function (p) {
-      var totalMass = p.cap.mass * p.count;
+      var perLoaded = p.cap.mass + p.cap.capacity;
+      var totalMass = perLoaded * p.count;
       cargoRows.push({
         rid: 'human',
-        name: p.cap.name + ' ×' + p.count + ' (modules, empty)',
+        name: p.cap.name + ' ×' + p.count + ' (' + (p.cap.capacity * p.count) + ' humans)',
         needed: totalMass,
         onSite: 0,
         amount: totalMass,
         editable: false,
-        tip: p.count + ' × ' + p.cap.mass + 't = ' + totalMass + 't of module mass (humans counted separately)',
+        tip: p.count + ' × (' + p.cap.mass + 't module + ' + p.cap.capacity + 't crew) = ' + totalMass + 't',
       });
     });
 
-    // Humans cargo row — humans being shipped given demand, on-site, and seats.
     var workers = workerTotal(facilityPlaced, checked);
     var onSiteHumans = (ctx.state.onSite && ctx.state.onSite.human) || 0;
     var onboardCapacity = capsulePlaced.reduce(function (s, p) { return s + p.cap.capacity * p.count; }, 0);
     var humansToShip = Math.max(0, workers - onSiteHumans);
-    var humansShipped = Math.min(humansToShip, onboardCapacity);
-    if (humansShipped > 0) {
-      cargoRows.push({
-        rid: 'human',
-        name: 'Humans (in capsules)',
-        needed: humansShipped,
-        onSite: 0,
-        amount: humansShipped,
-        editable: false,
-        tip: humansShipped + ' humans × 1t each (capped at ' + onboardCapacity + ' seats from placed capsules)',
-      });
-    }
 
     cargoRows = cargoRows.filter(function (r) { return r.amount > 0 || r.editable; });
     // Sort: editable resource rows by amount desc, then capsule/human rows last.
