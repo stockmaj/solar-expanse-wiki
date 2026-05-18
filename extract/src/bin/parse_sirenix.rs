@@ -489,6 +489,55 @@ struct CrewTransport {
     is_locked: bool,
 }
 
+/// Spacecraft payload modules — the mining rigs / refiners / probes /
+/// telescopes / habitats / power plants the player straps onto a craft as
+/// cargo before launch (or builds in orbit). Drawn from `SpaceModuleDescriptor`
+/// entries with `module_*` or `id_SpaceModule_*` ids that aren't already
+/// surfaced as facilities (`build_*` prefix) or crew transports
+/// (`specialAbilityFacilityNew == "CrewTransport"`, ferried via the separate
+/// `parse_crew_transport` path).
+///
+/// Field sourcing notes:
+///   * `id` is the raw entry id — the player-facing display name comes from
+///     `locale.cargo` or a `module_*` / `id_SpaceModule_*` locale lookup at
+///     render time.
+///   * `space_module_type` is the broad category (Engine / PowerSupply /
+///     Utility / None) that drives section grouping on the wiki page.
+///   * `special_ability` is the role enum (Mining / Refiner / Probe /
+///     CrewCapacity / CrewTransport / EnergyProduction / ConstructionEquipment /
+///     InstallationModule / None). `module_power` is the only entry with a
+///     compound value (`"EnergyProduction, EnergyStorage"`); we keep that
+///     verbatim so the renderer can split if desired.
+///   * `special_ability_parameter` is the magnitude — mining rate t/day,
+///     crew capacity, energy production, etc. — interpretation depends on
+///     the ability.
+#[derive(Serialize, Debug, Default, PartialEq)]
+struct SpaceModule {
+    id: String,
+    mass: f64,
+    /// `specialAbilityFacilityNew` — the module's role. Empty when the dump
+    /// carries `"None"` or empty.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    special_ability: String,
+    /// `specialAbilityParameter` — role-dependent magnitude.
+    special_ability_parameter: f64,
+    /// Resources consumed at build time, parsed from `price.listResources`.
+    build_cost: Vec<ResourceCost>,
+    /// Days to build (from `timeToBuildInDays`).
+    build_time_days: f64,
+    /// Whether the module starts the campaign locked behind research /
+    /// contract unlocks. Sourced from `isLocked`.
+    is_locked: bool,
+    /// Can it be loaded into a launch vehicle as cargo? From `canBeLoadAsCargo`.
+    can_be_load_as_cargo: bool,
+    /// Can it be assembled directly on an orbital shipyard rather than
+    /// shipped up? From `buildOnOrbitSpaceModuleAllow`.
+    build_on_orbit_allowed: bool,
+    /// `spaceModuleType` enum: Engine / PowerSupply / Utility / None.
+    /// Drives section grouping on the wiki page.
+    space_module_type: String,
+}
+
 /// Per-celestial-body mining license fees, in dollars per tonne extracted.
 /// Sourced from each loaded `ObjectInfo.ResourceMiningLicenseFeePerT`
 /// dictionary, which is `[OdinSerialize]` and only populated at runtime —
@@ -582,6 +631,12 @@ struct Sirenix {
     facilities: Vec<Facility>,
     space_components: Vec<SpaceComponent>,
     crew_transports: Vec<CrewTransport>,
+    /// Spacecraft payload modules — mining rigs, refiners, probes,
+    /// telescopes, habitats, etc. Parsed from `SpaceModuleDescriptor`
+    /// entries with `module_*` / `id_SpaceModule_*` ids that aren't
+    /// already covered by the facilities or crew-transport paths.
+    #[serde(default)]
+    space_modules: Vec<SpaceModule>,
     resources: Vec<Resource>,
     contracts: Vec<Contract>,
     scenario_starts: Vec<ScenarioStart>,
@@ -757,11 +812,27 @@ fn collect_achievements(raw: &Value) -> Vec<Achievement> {
 
 fn parse_spacecraft(v: &Value) -> Option<Spacecraft> {
     let id = v.get("id")?.as_str()?.to_string();
-    if !id.starts_with("spacecraft_") {
+    // The dump uses two id namespaces for ships:
+    //   `spacecraft_*`     — the core campaign craft (Iris, Hermes, Zeus, …)
+    //   `id_Spacecraft_*`  — the late-game generation-ship hulls
+    //                        (InterstellarShip — Hephaistos generation ship)
+    // Both are real, player-buildable entries; accept either.
+    if !id.starts_with("spacecraft_") && !id.starts_with("id_Spacecraft_") {
         return None;
     }
-    let lower = id.to_ascii_lowercase();
-    if lower.contains("cheat") || lower.contains("test") {
+    // Test/cheat/fake markers can sit on either the runtime `id` (e.g.
+    // `spacecraft_testship`) or — for some `id_Spacecraft_*` entries — only
+    // on `$name` (e.g. `id_Spacecraft_InterstellarShipTestNotUsed` whose
+    // `id` is the clean-looking `id_Spacecraft_InterstellarShip2`). Match
+    // both.
+    let lower_id = id.to_ascii_lowercase();
+    let lower_name = v
+        .get("$name")
+        .and_then(|x| x.as_str())
+        .map(|s| s.to_ascii_lowercase())
+        .unwrap_or_default();
+    let is_marker = |s: &str| s.contains("cheat") || s.contains("test") || s.contains("fake");
+    if is_marker(&lower_id) || is_marker(&lower_name) {
         return None;
     }
 
@@ -1472,6 +1543,79 @@ fn parse_crew_transport(v: &Value) -> Option<CrewTransport> {
     let mass = lookup_f64(v, &["mass"]).unwrap_or(0.0);
     let is_locked = lookup_bool(v, &["isLocked"]).unwrap_or(false);
     Some(CrewTransport { id, capacity, mass, is_locked })
+}
+
+/// Parse a `SpaceModuleDescriptor` entry into a SpaceModule. Returns `None`
+/// for entries already handled by other parsers (facilities via `build_*`)
+/// or that aren't real player-facing modules (test fixtures whose `$name`
+/// or `id` carries a `cheat` / `test` / `fake` substring). Crew transports
+/// (`specialAbilityFacilityNew == "CrewTransport"`) are still surfaced here
+/// because the wiki rolls them onto the same space-modules page —
+/// `parse_crew_transport` is a parallel parser that produces a richer
+/// crew-specific shape, used separately for any caller that wants crew-only
+/// data.
+fn parse_space_module(v: &Value) -> Option<SpaceModule> {
+    let id = v.get("id")?.as_str()?.to_string();
+    // Three id namespaces appear in the SpaceModuleDescriptor pool:
+    //   `module_*`           — current-gen modules (mining, fuel, telescope, …)
+    //   `id_SpaceModule_*`   — alt namespace, mostly cargo-loadable variants
+    //   `build_*`            — orbital facilities (e.g. build_asteroid_engine_module)
+    //                          which the facility parser already surfaces.
+    // Accept the first two, reject the last so we don't double-count.
+    if !id.starts_with("module_") && !id.starts_with("id_SpaceModule_") {
+        return None;
+    }
+    // Test/cheat/fake markers can sit on either the runtime `id` or `$name`
+    // (e.g. `module_ThermoelectricTest`). Match both.
+    let lower_id = id.to_ascii_lowercase();
+    let lower_name = v
+        .get("$name")
+        .and_then(|x| x.as_str())
+        .map(|s| s.to_ascii_lowercase())
+        .unwrap_or_default();
+    let is_marker = |s: &str| s.contains("cheat") || s.contains("test") || s.contains("fake");
+    if is_marker(&lower_id) || is_marker(&lower_name) {
+        return None;
+    }
+
+    let space_module_type = v
+        .get("spaceModuleType")
+        .and_then(|x| x.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_default();
+    let special_ability_raw = v
+        .get("specialAbilityFacilityNew")
+        .and_then(|x| x.as_str())
+        .unwrap_or("");
+    // Collapse the placeholder `"None"` to empty so the renderer can skip
+    // the role column cleanly. Compound values like
+    // `"EnergyProduction, EnergyStorage"` (module_power) are kept verbatim.
+    let special_ability = if special_ability_raw == "None" {
+        String::new()
+    } else {
+        special_ability_raw.to_string()
+    };
+    let special_ability_parameter = lookup_f64(v, &["specialAbilityParameter"]).unwrap_or(0.0);
+    let mass = lookup_f64(v, &["mass"]).unwrap_or(0.0);
+    let is_locked = lookup_bool(v, &["isLocked"]).unwrap_or(false);
+    let can_be_load_as_cargo = lookup_bool(v, &["canBeLoadAsCargo"]).unwrap_or(false);
+    let build_on_orbit_allowed =
+        lookup_bool(v, &["buildOnOrbitSpaceModuleAllow"]).unwrap_or(false);
+    let build_time_days = lookup_f64(v, &["timeToBuildInDays"]).unwrap_or(0.0);
+    let build_cost = parse_build_cost(v.pointer("/price/listResources"));
+
+    Some(SpaceModule {
+        id,
+        mass,
+        special_ability,
+        special_ability_parameter,
+        build_cost,
+        build_time_days,
+        is_locked,
+        can_be_load_as_cargo,
+        build_on_orbit_allowed,
+        space_module_type,
+    })
 }
 
 fn parse_resource(v: &Value) -> Option<Resource> {
@@ -2517,6 +2661,22 @@ fn main() -> Result<()> {
         .unwrap_or_default();
     crew_transports.sort_by(|a, b| a.capacity.cmp(&b.capacity).then(a.id.cmp(&b.id)));
 
+    // Spacecraft payload modules (mining rigs / refiners / probes / habitats / power /
+    // crew compartments / telescopes). See `parse_space_module` for the dual id
+    // namespace (`module_*` and `id_SpaceModule_*`) and the filters that keep
+    // facility-flavored (`build_*`) and test-fixture entries out.
+    let mut space_modules: Vec<SpaceModule> = raw
+        .get("SpaceModuleDescriptor")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(parse_space_module).collect())
+        .unwrap_or_default();
+    space_modules.sort_by(|a, b| {
+        a.space_module_type
+            .cmp(&b.space_module_type)
+            .then(a.special_ability.cmp(&b.special_ability))
+            .then(a.id.cmp(&b.id))
+    });
+
     let mut resources: Vec<Resource> = raw
         .get("ResourceDefinition")
         .and_then(|v| v.as_array())
@@ -2630,6 +2790,7 @@ fn main() -> Result<()> {
         facilities,
         space_components,
         crew_transports,
+        space_modules,
         resources,
         contracts,
         scenario_starts,
@@ -2641,7 +2802,7 @@ fn main() -> Result<()> {
     };
     serde_json::to_writer_pretty(fs::File::create(&output)?, &out)?;
     eprintln!(
-        "wrote {} ({} spacecraft, {} LVs, {} research, {} facilities, {} components, {} crew transports, {} resources, {} contracts, {} scenarios, {} epochs, {} bodies w/ license fees, {} asteroid classes, {} exoplanet systems, {} achievements)",
+        "wrote {} ({} spacecraft, {} LVs, {} research, {} facilities, {} components, {} crew transports, {} space modules, {} resources, {} contracts, {} scenarios, {} epochs, {} bodies w/ license fees, {} asteroid classes, {} exoplanet systems, {} achievements)",
         output.display(),
         out.spacecraft.len(),
         out.launch_vehicles.len(),
@@ -2649,6 +2810,7 @@ fn main() -> Result<()> {
         out.facilities.len(),
         out.space_components.len(),
         out.crew_transports.len(),
+        out.space_modules.len(),
         out.resources.len(),
         out.contracts.len(),
         out.scenario_starts.len(),
@@ -2680,6 +2842,132 @@ mod tests {
         assert_eq!(ct.capacity, 5);
         assert_eq!(ct.mass, 5.0);
         assert!(!ct.is_locked);
+    }
+
+    /// Real `module_basemining` row from the dump — the mining-rig payload
+    /// that's most clearly a "space module" (not a facility, not a crew
+    /// transport). Parser should pull mass, build cost, time, and the
+    /// special-ability magnitude (mining rate per day).
+    #[test]
+    fn parses_module_basemining_into_space_module() {
+        let v = serde_json::json!({
+            "$name": "module_basemining",
+            "$type": "SpaceModuleDescriptor",
+            "id": "module_basemining",
+            "mass": 15,
+            "spaceModuleType": "Engine",
+            "specialAbilityFacilityNew": "Mining",
+            "specialAbilityParameter": 0.2,
+            "isLocked": false,
+            "canBeLoadAsCargo": true,
+            "buildOnOrbitSpaceModuleAllow": true,
+            "timeToBuildInDays": 30,
+            "price": {
+                "listResources": [
+                    { "resourceDefinitionIDSave": { "id": "id_resource_steel" }, "price": 75 },
+                    { "resourceDefinitionIDSave": { "id": "id_resource_chips" }, "price": 10 }
+                ],
+                "buildCost": 0
+            }
+        });
+        let m = parse_space_module(&v).expect("module_basemining should parse");
+        assert_eq!(m.id, "module_basemining");
+        assert_eq!(m.mass, 15.0);
+        assert_eq!(m.space_module_type, "Engine");
+        assert_eq!(m.special_ability, "Mining");
+        assert_eq!(m.special_ability_parameter, 0.2);
+        assert!(!m.is_locked);
+        assert!(m.can_be_load_as_cargo);
+        assert!(m.build_on_orbit_allowed);
+        assert_eq!(m.build_time_days, 30.0);
+        assert_eq!(m.build_cost.len(), 2);
+        assert!(m.build_cost.iter().any(|c| c.resource_id == "steel" && c.amount == 75.0));
+        assert!(m.build_cost.iter().any(|c| c.resource_id == "chips" && c.amount == 10.0));
+    }
+
+    /// `id_SpaceModule_ISRU` is a `PowerSupply` mining module — same role
+    /// as `module_basemining` but in the `id_SpaceModule_*` id namespace.
+    /// Verifies the parser accepts both id shapes.
+    #[test]
+    fn parses_id_spacemodule_isru_into_space_module() {
+        let v = serde_json::json!({
+            "$name": "id_SpaceModule_ISRU",
+            "$type": "SpaceModuleDescriptor",
+            "id": "id_SpaceModule_ISRU",
+            "mass": 0,
+            "spaceModuleType": "PowerSupply",
+            "specialAbilityFacilityNew": "Mining",
+            "specialAbilityParameter": 0.1,
+            "isLocked": false,
+            "canBeLoadAsCargo": true,
+            "buildOnOrbitSpaceModuleAllow": true,
+            "timeToBuildInDays": 7,
+            "price": { "listResources": [], "buildCost": 0 }
+        });
+        let m = parse_space_module(&v).expect("ISRU should parse");
+        assert_eq!(m.id, "id_SpaceModule_ISRU");
+        assert_eq!(m.space_module_type, "PowerSupply");
+        assert_eq!(m.special_ability, "Mining");
+        assert_eq!(m.special_ability_parameter, 0.1);
+        assert!(m.build_cost.is_empty());
+    }
+
+    /// The `module_power` entry uses a compound ability value
+    /// `"EnergyProduction, EnergyStorage"` — preserve it verbatim so the
+    /// renderer can choose how to split or label it.
+    #[test]
+    fn preserves_compound_special_ability() {
+        let v = serde_json::json!({
+            "id": "module_power",
+            "spaceModuleType": "PowerSupply",
+            "specialAbilityFacilityNew": "EnergyProduction, EnergyStorage",
+            "specialAbilityParameter": 2,
+            "isLocked": false
+        });
+        let m = parse_space_module(&v).expect("module_power should parse");
+        assert_eq!(m.special_ability, "EnergyProduction, EnergyStorage");
+        assert_eq!(m.special_ability_parameter, 2.0);
+    }
+
+    /// `build_asteroid_engine_module` is a `SpaceModuleDescriptor` but its
+    /// id starts with `build_` — the facilities parser already surfaces it
+    /// as an orbital facility. The space-module parser must skip it to
+    /// avoid double-counting.
+    #[test]
+    fn skips_build_prefix_modules() {
+        let v = serde_json::json!({
+            "id": "build_asteroid_engine_module",
+            "spaceModuleType": "Engine",
+            "specialAbilityFacilityNew": "None"
+        });
+        assert!(parse_space_module(&v).is_none(),
+            "build_* ids belong to the facility parser, not the space-module parser");
+    }
+
+    /// `module_ThermoelectricTest` is a leftover dev fixture flagged in its
+    /// `$name`. The cheat/test/fake filter should drop it.
+    #[test]
+    fn skips_test_marked_space_modules() {
+        let v = serde_json::json!({
+            "$name": "module_ThermoelectricTest",
+            "id": "module_ThermoelectricTest",
+            "spaceModuleType": "PowerSupply",
+            "specialAbilityFacilityNew": "ConstructionEquipment",
+            "isLocked": true
+        });
+        assert!(parse_space_module(&v).is_none(),
+            "Test-marked $name/id should be filtered out");
+    }
+
+    /// Anything without `module_*` or `id_SpaceModule_*` prefix is foreign
+    /// and shouldn't slip through the space-module path.
+    #[test]
+    fn rejects_unknown_prefix_space_modules() {
+        let v = serde_json::json!({
+            "id": "spacecraft_chem_small",
+            "spaceModuleType": "Engine"
+        });
+        assert!(parse_space_module(&v).is_none());
     }
 
     #[test]
@@ -2812,6 +3100,76 @@ mod tests {
     fn skips_entries_without_spacecraft_prefix() {
         let bogus = serde_json::json!({ "id": "foo_bar", "engineType": "chemical" });
         assert!(parse_spacecraft(&bogus).is_none());
+    }
+
+    /// The generation-ship hull lives under the `id_Spacecraft_` id namespace,
+    /// not the `spacecraft_` namespace used by the other 18 ships. Make sure
+    /// the parser accepts it so the wiki's spacecraft page surfaces it. Its
+    /// `$name` matches the id, the engine is fusion, and the hull carries the
+    /// usual cargo/fuel/build-cost block — the parser should pull all of that.
+    #[test]
+    fn parses_interstellar_ship_into_spacecraft() {
+        let v = serde_json::json!({
+            "$name": "id_Spacecraft_InterstellarShip",
+            "$type": "SpacecraftType",
+            "engineType": "fusion",
+            "mass": 5000,
+            "cargoCapacity": 150,
+            "fuelCapacity": 500,
+            "reusability": 1,
+            "needLaunchVehicleToGoToMoon": false,
+            "orbitSC": true,
+            "canByBuildByUser": false,
+            "costLaunch": 1000,
+            "timeToBuildInDays": 150,
+            "id": "id_Spacecraft_InterstellarShip",
+            "hull": {
+                "engine": {
+                    "spaceComponent": { "$ref": true, "type": "SpaceComponent", "name": "eng_fusionzeus" }
+                },
+                "cargoCapacityBase": 200000,
+                "priceBase": {
+                    "listResources": [
+                        { "resourceDefinitionIDSave": { "id": "id_resource_steel" }, "price": 500000 },
+                        { "resourceDefinitionIDSave": { "id": "id_resource_alloy" }, "price": 500000 },
+                        { "resourceDefinitionIDSave": { "id": "id_resource_chips" }, "price": 50000 }
+                    ],
+                    "buildCost": 1500
+                }
+            }
+        });
+        let sc = parse_spacecraft(&v).expect("InterstellarShip should parse");
+        assert_eq!(sc.id, "id_Spacecraft_InterstellarShip");
+        assert_eq!(sc.engine_type, "fusion");
+        assert_eq!(sc.engine_module.as_deref(), Some("eng_fusionzeus"));
+        assert_eq!(sc.mass, 5000.0);
+        // Hull cargoCapacityBase (200000) wins over the placeholder top-level
+        // cargoCapacity (150) — same rule as Hermes / Zeus.
+        assert_eq!(sc.cargo_capacity, 200000.0);
+        assert_eq!(sc.fuel_capacity, 500.0);
+        assert!(sc.built_in_orbit);
+        assert_eq!(sc.build_time_days, 150.0);
+        assert_eq!(sc.build_cost.len(), 3);
+        // Verify the build cost includes alloy (Exotic Alloys) — the key
+        // resource the generation ship is gated on.
+        assert!(sc.build_cost.iter().any(|c| c.resource_id == "alloy" && c.amount == 500_000.0));
+    }
+
+    /// The dump ships an `id_Spacecraft_InterstellarShip2` whose `$name` is
+    /// `id_Spacecraft_InterstellarShipTestNotUsed` — a leftover test fixture
+    /// the player can never build. The filter should drop it on the basis of
+    /// the `Test` substring in `$name`, even though the `id` itself looks
+    /// real.
+    #[test]
+    fn skips_interstellar_ship2_marked_test_in_name() {
+        let v = serde_json::json!({
+            "$name": "id_Spacecraft_InterstellarShipTestNotUsed",
+            "$type": "SpacecraftType",
+            "engineType": "fusion",
+            "id": "id_Spacecraft_InterstellarShip2"
+        });
+        assert!(parse_spacecraft(&v).is_none(),
+            "Test-marked $name should disqualify the entry even when id is clean");
     }
 
     fn albatross_fixture() -> Value {

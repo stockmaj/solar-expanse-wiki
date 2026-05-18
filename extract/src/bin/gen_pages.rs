@@ -139,6 +139,12 @@ struct Sirenix {
     facilities: Vec<FacilityStat>,
     #[serde(default)]
     space_components: Vec<SpaceComponentStat>,
+    /// Spacecraft payload modules (mining rigs / refiners / probes /
+    /// habitats / power plants / crew compartments / telescopes), parsed
+    /// from `SpaceModuleDescriptor` entries that don't already surface as
+    /// facilities. Rendered on the dedicated `/space-modules/` page.
+    #[serde(default)]
+    space_modules: Vec<SpaceModuleStat>,
     #[serde(default)]
     resources: Vec<ResourceStat>,
     #[serde(default)]
@@ -495,6 +501,33 @@ struct SpaceComponentStat {
     fuel_type: Option<String>,
     #[allow(dead_code)]
     is_locked: bool,
+}
+
+/// Mirror of `parse_sirenix::SpaceModule`. Drives the `/space-modules/`
+/// page that lists spacecraft payload modules — mining rigs, refiners,
+/// probes, telescopes, habitats, etc. — grouped by `space_module_type`.
+#[derive(Deserialize, Clone, Default)]
+struct SpaceModuleStat {
+    id: String,
+    mass: f64,
+    #[serde(default)]
+    special_ability: String,
+    #[serde(default)]
+    special_ability_parameter: f64,
+    #[serde(default)]
+    build_cost: Vec<ResourceCost>,
+    #[serde(default)]
+    build_time_days: f64,
+    #[serde(default)]
+    is_locked: bool,
+    #[allow(dead_code)]
+    #[serde(default)]
+    can_be_load_as_cargo: bool,
+    #[allow(dead_code)]
+    #[serde(default)]
+    build_on_orbit_allowed: bool,
+    #[serde(default)]
+    space_module_type: String,
 }
 
 #[derive(Deserialize, Clone)]
@@ -1792,7 +1825,215 @@ lift them to space.\n\n",
 - **Requires LV** says when the craft must ride an LV to reach orbit: *Earth only* means it can self-launch from Luna, Mars, and asteroids but still needs an LV from Earth's gravity well; *Any body* means it needs an LV from every planet/moon (most early chemical and electric craft); *Built in orbit* means it never sits on a surface so the column doesn't apply. Earth always forces an LV regardless of the underlying flag.\n\n\
 ## See also\n\n\
 - [Launch Vehicles](../launch-vehicles/) — surface-to-orbit lifters\n\
+- [Space Modules](../space-modules/) — mining rigs, refiners, probes, telescopes, habitats, and crew compartments that ride on these craft\n\
 - [Research](../research/) — propulsion tech tree\n",
+    );
+    out
+}
+
+/// Group a SpaceModule into a render-time category. `spaceModuleType`
+/// (Engine / PowerSupply / Utility / None) is the primary grouping
+/// (controls which orbital slot the module occupies on a ship), with a
+/// `CrewTransport` override so the three crew-compartment modules — which
+/// share `PowerSupply` as their slot — get their own player-recognizable
+/// section instead of being mixed in with mining/power equipment.
+fn space_module_section(m: &SpaceModuleStat) -> &'static str {
+    if m.special_ability == "CrewTransport" {
+        return "Crew";
+    }
+    match m.space_module_type.as_str() {
+        "Engine" => "Engine",
+        "PowerSupply" => "Power Supply",
+        "Utility" => "Utility",
+        _ => "Other",
+    }
+}
+
+fn space_module_section_order(label: &str) -> u8 {
+    match label {
+        "Engine" => 0,
+        "Power Supply" => 1,
+        "Utility" => 2,
+        "Crew" => 3,
+        _ => 4,
+    }
+}
+
+/// Map a `specialAbilityFacilityNew` enum to a player-friendly role label
+/// plus a magnitude suffix appropriate to that role.  Empty enum collapses
+/// to "—".  Compound values like `"EnergyProduction, EnergyStorage"`
+/// (module_power) keep both terms joined for clarity.
+fn fmt_space_module_role(ability: &str, magnitude: f64) -> String {
+    if ability.is_empty() {
+        return "—".to_string();
+    }
+    // Translate Sirenix enum names into player-recognizable terms.
+    let labels: Vec<String> = ability
+        .split(',')
+        .map(|tok| tok.trim())
+        .filter(|tok| !tok.is_empty())
+        .map(|tok| match tok {
+            "Mining" => "Mining".to_string(),
+            "Refiner" => "Refining".to_string(),
+            "Probe" => "Probe".to_string(),
+            "InstallationModule" => "Installation".to_string(),
+            "CrewCapacity" => "Crew capacity".to_string(),
+            "CrewTransport" => "Crew transport".to_string(),
+            "EnergyProduction" => "Energy production".to_string(),
+            "EnergyStorage" => "Energy storage".to_string(),
+            "ConstructionEquipment" => "Construction".to_string(),
+            "ConstructShip" => "Ship construction".to_string(),
+            other => other.to_string(),
+        })
+        .collect();
+    let role = labels.join(" + ");
+    if magnitude > 0.0 {
+        format!("{role} ({})", fmt_amount(magnitude))
+    } else {
+        role
+    }
+}
+
+fn page_space_modules(locale: &Locale, sirenix: &Sirenix) -> String {
+    // Player-facing names live under `locale.cargo` (the `module_*` /
+    // `id_SpaceModule_*` translation keys all land in that bucket via the
+    // `cargo_` collector — see parse_locale.rs). Memory rule: never expose
+    // internal ids, so entries without a locale name are dropped.
+    let cargo_name: BTreeMap<&str, &str> = locale
+        .cargo
+        .iter()
+        .map(|c| (c.id.as_str(), c.name.as_str()))
+        .collect();
+    let cargo_desc: BTreeMap<&str, &str> = locale
+        .cargo
+        .iter()
+        .map(|c| (c.id.as_str(), c.description.as_str()))
+        .collect();
+    let resource_name: BTreeMap<&str, &str> = locale
+        .resources
+        .iter()
+        .map(|r| (r.id.as_str(), r.name.as_str()))
+        .collect();
+
+    // Decide which modules render. Drop:
+    //   * entries without a locale name (we'd be forced to leak the id)
+    //   * locked entries with no real data — "real data" means an actual
+    //     gameplay role (specialAbility), a numeric parameter, or a build
+    //     cost. Mass alone is not informative; modules like
+    //     `module_contractitem` carry a token mass and a locked flag with
+    //     no other content and shouldn't surface as buildable equipment.
+    let keep = |m: &SpaceModuleStat| -> bool {
+        let name = cargo_name.get(m.id.as_str()).copied().unwrap_or("");
+        if name.is_empty() {
+            return false;
+        }
+        let has_data = !m.special_ability.is_empty()
+            || m.special_ability_parameter > 0.0
+            || !m.build_cost.is_empty();
+        if m.is_locked && !has_data {
+            return false;
+        }
+        true
+    };
+
+    let mut by_section: BTreeMap<&'static str, Vec<&SpaceModuleStat>> = BTreeMap::new();
+    for m in &sirenix.space_modules {
+        if !keep(m) {
+            continue;
+        }
+        by_section.entry(space_module_section(m)).or_default().push(m);
+    }
+
+    let mut out = String::from(
+        "# Space Modules\n\n\
+Spacecraft payload — mining rigs, refiners, probes, telescopes, habitats, power\n\
+plants, and crew compartments that ride on (or alongside) interplanetary craft.\n\
+Most are loaded as cargo on a launch vehicle and deployed at the destination;\n\
+a few are assembled directly in an orbital shipyard.\n\n",
+    );
+
+    let header = [
+        "Module",
+        "Mass (t)",
+        "Role",
+        "Cargo",
+        "Build cost",
+        "Time (d)",
+        "Description",
+    ];
+    let header_tips: [Option<&str>; 7] = [
+        None,
+        Some("Dry mass in tonnes"),
+        Some("Module role and its magnitude (mining rate per day, crew capacity, energy production, …)"),
+        Some("Whether the module can be loaded into a launch vehicle as cargo"),
+        Some("Resources required to construct"),
+        Some("Build time in days"),
+        None,
+    ];
+
+    // Order: Engine → Power Supply → Utility → Crew → Other.
+    let mut sections: Vec<(&'static str, Vec<&SpaceModuleStat>)> = by_section.into_iter().collect();
+    sections.sort_by_key(|(label, _)| space_module_section_order(label));
+
+    for (label, mut modules) in sections {
+        // Within a section: role label, then magnitude desc, then id for stability.
+        modules.sort_by(|a, b| {
+            a.special_ability
+                .cmp(&b.special_ability)
+                .then(
+                    b.special_ability_parameter
+                        .partial_cmp(&a.special_ability_parameter)
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+                .then(a.id.cmp(&b.id))
+        });
+        let rows: Vec<Vec<String>> = modules
+            .iter()
+            .map(|m| {
+                let name = cargo_name.get(m.id.as_str()).copied().unwrap_or("");
+                let display = smart_title_case(name);
+                let desc = cargo_desc.get(m.id.as_str()).copied().unwrap_or("");
+                let role = fmt_space_module_role(&m.special_ability, m.special_ability_parameter);
+                let cargo_cell = if m.can_be_load_as_cargo { "Yes" } else { "No" };
+                let cost = fmt_build_cost(&m.build_cost, &resource_name);
+                let time = if m.build_time_days > 0.0 {
+                    fmt_amount(m.build_time_days)
+                } else {
+                    "—".into()
+                };
+                let mass_cell = if m.mass > 0.0 { fmt_amount(m.mass) } else { "—".into() };
+                let locked_prefix = if m.is_locked {
+                    "<sub>Locked at start</sub><br>"
+                } else {
+                    ""
+                };
+                let desc_cell = format!("{locked_prefix}{}", escape_cell(desc));
+                vec![
+                    format!("**{}**", escape_cell(&display)),
+                    mass_cell,
+                    role,
+                    cargo_cell.to_string(),
+                    cost,
+                    time,
+                    desc_cell,
+                ]
+            })
+            .collect();
+        out.push_str(&format!("## {label}\n\n"));
+        out.push_str(&md_table_with_tips(&header, &header_tips, &rows));
+        out.push('\n');
+    }
+
+    out.push_str(
+        "## Reading the table\n\n\
+- **Mass** is the module's dry mass in tonnes — included in the carrier launch vehicle's payload budget.\n\
+- **Role** is what the module does on station — mining a resource at the listed rate, refining one resource into another, transporting a fixed crew count, etc. The number in parentheses is the role-specific magnitude (mining rate per day, crew capacity, energy production).\n\
+- **Cargo** indicates whether the module can ride to orbit inside a launch vehicle's cargo bay. Modules that say *No* must be assembled directly in an orbital shipyard.\n\
+- **Build cost / Time** are the resources and days required to build the module — either on the surface (most cargo-loadable modules) or in orbit.\n\n\
+## See also\n\n\
+- [Spacecraft](../spacecraft/) — the craft these modules ride on\n\
+- [Launch Vehicles](../launch-vehicles/) — surface-to-orbit lifters\n\
+- [Facilities](../facilities/) — ground and surface-installed structures\n",
     );
     out
 }
@@ -5538,7 +5779,8 @@ the names, descriptions, and stat tables here match exactly what you see in-game
 | --- | --- |\n\
 | **[Celestial Bodies](celestial-bodies/)** | The Sun, planets, moons, asteroids, comets, and exoplanet systems. |\n\
 | [Exoplanets](exoplanets/) | Trappist-1, Kepler-90, Tau Ceti, and Proxima Centauri — the four destination systems reachable via a generation ship. |\n\
-| [Spacecraft](spacecraft/) | Interplanetary craft — Iris, Selene, Stratos, Hermes, Centaur, Athena, Prometheus, Hephaistos, Ariane, Cronos, Nike, Sirius, Zeus. |\n\
+| [Spacecraft](spacecraft/) | Interplanetary craft — Iris, Selene, Stratos, Hermes, Centaur, Athena, Prometheus, Hephaistos, Ariane, Cronos, Nike, Sirius, Zeus, and the Hephaistos generation ship. |\n\
+| [Space Modules](space-modules/) | Spacecraft payload — mining rigs, refiners, probes, telescopes, habitats, power plants, and crew compartments. |\n\
 | [Launch Vehicles](launch-vehicles/) | Surface-to-orbit lifters — Albatross, Pelican, Magpie, Condor, Teratorn. |\n\
 | [Facilities](facilities/) | Ground buildings and orbital modules — power, mining, refining, habitats, life support, etc. |\n\
 | [Research](research/) | Tech tree — chemical, electric, nuclear, fusion propulsion, life support, materials, computing. |\n\
@@ -7282,6 +7524,212 @@ mod tests {
         assert_eq!(
             *lv_cell, "—",
             "spawned-not-built craft should dash the LV column; row:\n{row}"
+        );
+    }
+
+    /// Helper for building a SpaceModuleStat without spelling out every field.
+    fn make_space_module(
+        id: &str,
+        module_type: &str,
+        ability: &str,
+        parameter: f64,
+        is_locked: bool,
+    ) -> SpaceModuleStat {
+        SpaceModuleStat {
+            id: id.into(),
+            mass: 10.0,
+            special_ability: ability.into(),
+            special_ability_parameter: parameter,
+            build_cost: vec![],
+            build_time_days: 30.0,
+            is_locked,
+            can_be_load_as_cargo: true,
+            build_on_orbit_allowed: true,
+            space_module_type: module_type.into(),
+        }
+    }
+
+    /// A locale fixture pre-seeded with cargo and `module_*` name entries so
+    /// the space-modules page can resolve player-facing names without falling
+    /// back to raw ids.
+    fn space_modules_fixture_locale() -> Locale {
+        let mut locale = nav_fixture_locale();
+        // `module_basemining` — Mining Engine module.
+        locale.cargo.push(NameDesc {
+            id: "module_basemining".into(),
+            name: "MINING MODULE".into(),
+            description: "Mobile equipment for local mining.".into(),
+        });
+        // `module_fuel` — Refiner module.
+        locale.cargo.push(NameDesc {
+            id: "module_fuel".into(),
+            name: "Mobile Refinery".into(),
+            description: "Processes Water into Fuel.".into(),
+        });
+        // `module_crew_compartment` — CrewTransport module.
+        locale.cargo.push(NameDesc {
+            id: "module_crew_compartment".into(),
+            name: "CREW COMPARTMENT TYPE-S".into(),
+            description: "Transports 5 humans.".into(),
+        });
+        // `id_SpaceModule_ISRU` — Mining PowerSupply module.
+        locale.cargo.push(NameDesc {
+            id: "id_SpaceModule_ISRU".into(),
+            name: "Mining Equipment".into(),
+            description: String::new(),
+        });
+        locale
+    }
+
+    /// The space-modules page should emit one table per category — Engine,
+    /// Power Supply, Utility, Crew — and only include modules with a
+    /// player-facing locale name.
+    #[test]
+    fn space_modules_page_groups_by_category() {
+        let locale = space_modules_fixture_locale();
+        let sirenix = Sirenix {
+            space_modules: vec![
+                make_space_module("module_basemining", "Engine", "Mining", 0.2, false),
+                make_space_module("module_fuel", "Engine", "Refiner", 0.0, false),
+                make_space_module("id_SpaceModule_ISRU", "PowerSupply", "Mining", 0.1, false),
+                make_space_module("module_crew_compartment", "PowerSupply", "CrewTransport", 5.0, false),
+            ],
+            ..Default::default()
+        };
+        let page = page_space_modules(&locale, &sirenix);
+        // Each category section header should be present.
+        assert!(page.contains("## Engine"), "Engine section header missing:\n{page}");
+        assert!(page.contains("## Power Supply") || page.contains("## PowerSupply"),
+            "Power Supply section header missing:\n{page}");
+        assert!(page.contains("## Crew"), "Crew section header missing:\n{page}");
+        // Each module's player-facing name should appear once (the renderer
+        // title-cases the ALL-CAPS locale strings via smart_title_case).
+        assert!(page.contains("Mining Module"), "module_basemining name missing:\n{page}");
+        assert!(page.contains("Mobile Refinery"), "module_fuel name missing");
+        assert!(page.contains("Mining Equipment"), "id_SpaceModule_ISRU name missing");
+        assert!(page.contains("Crew Compartment Type-s") || page.contains("Crew Compartment Type-S"),
+            "crew module name missing:\n{page}");
+        // Player-recognizable info only — internal ids must not leak (memory rule).
+        assert!(!page.contains("module_basemining"),
+            "internal id 'module_basemining' must not appear in player-facing markup");
+        assert!(!page.contains("id_SpaceModule_ISRU"),
+            "internal id 'id_SpaceModule_ISRU' must not appear in player-facing markup");
+    }
+
+    /// Locked modules with no meaningful stats (`module_ThermoelectricTest` /
+    /// `module_contractitem`-style entries) should be dropped — but locked
+    /// modules with real data (e.g. `module_metalmining` which is locked but
+    /// has a real mining parameter and build cost) should still render.
+    #[test]
+    fn space_modules_page_drops_locked_modules_without_data() {
+        let mut locale = space_modules_fixture_locale();
+        locale.cargo.push(NameDesc {
+            id: "module_contractitem".into(),
+            name: "Nuclear Device".into(),
+            description: "Specialized package.".into(),
+        });
+        locale.cargo.push(NameDesc {
+            id: "module_metalmining".into(),
+            name: "Metal Mining Module".into(),
+            description: "Mines metals.".into(),
+        });
+        let empty_locked = SpaceModuleStat {
+            id: "module_contractitem".into(),
+            mass: 5.0,
+            special_ability: String::new(),
+            special_ability_parameter: 0.0,
+            build_cost: vec![],
+            build_time_days: 10.0,
+            is_locked: true,
+            can_be_load_as_cargo: true,
+            build_on_orbit_allowed: false,
+            space_module_type: String::new(),
+        };
+        let useful_locked = make_space_module(
+            "module_metalmining",
+            "Engine",
+            "Mining",
+            0.31,
+            /* locked */ true,
+        );
+        let sirenix = Sirenix {
+            space_modules: vec![empty_locked, useful_locked],
+            ..Default::default()
+        };
+        let page = page_space_modules(&locale, &sirenix);
+        assert!(
+            !page.contains("Nuclear Device"),
+            "locked module with no stats should be filtered out"
+        );
+        assert!(
+            page.contains("Metal Mining Module"),
+            "locked module with a real mining parameter should still render"
+        );
+    }
+
+    /// Every section table should have a Module / Mass / Role / Cost / Time
+    /// shape — verified by checking the header row appears for the
+    /// rendered section.
+    #[test]
+    fn space_modules_page_table_has_expected_columns() {
+        let locale = space_modules_fixture_locale();
+        let sirenix = Sirenix {
+            space_modules: vec![
+                make_space_module("module_basemining", "Engine", "Mining", 0.2, false),
+            ],
+            ..Default::default()
+        };
+        let page = page_space_modules(&locale, &sirenix);
+        // Pull the row line for the module to inspect its cells.
+        let row = page
+            .lines()
+            .find(|l| l.contains("Mining Module"))
+            .expect("module row present");
+        // Header should contain Module, Mass, Role, etc.
+        assert!(page.contains("| Module |") || page.contains("Module</span>") ||
+                page.contains(">Module<"),
+            "table should expose a Module column:\n{page}");
+        assert!(row.contains("Mining"),
+            "row should expose the role name:\n{row}");
+    }
+
+    /// `id_Spacecraft_InterstellarShip` is a real player-buildable hull
+    /// (Hephaistos generation ship) that lives in a separate id namespace
+    /// from `spacecraft_*`. With the locale name in place and an engine_type
+    /// of `fusion`, it should land under the "Fusion Propulsion" section of
+    /// the spacecraft page.
+    #[test]
+    fn spacecraft_page_includes_interstellar_ship_under_fusion() {
+        let mut locale = nav_fixture_locale();
+        locale.spacecraft.push(NameDesc {
+            id: "id_Spacecraft_InterstellarShip".into(),
+            name: "Interstellar Ship".into(),
+            description: "Generation ship.".into(),
+        });
+        let mut isr = make_sc_stat("id_Spacecraft_InterstellarShip", /* built_in_orbit */ true);
+        isr.engine_type = "fusion".into();
+        isr.mass = 5000.0;
+        isr.cargo_capacity = 200_000.0;
+        isr.fuel_capacity = 500.0;
+        isr.build_cost = vec![
+            ResourceCost { resource_id: "alloy".into(), amount: 500_000.0 },
+            ResourceCost { resource_id: "chips".into(), amount: 50_000.0 },
+        ];
+        let sirenix = Sirenix {
+            spacecraft: vec![isr],
+            ..Default::default()
+        };
+        let page = page_spacecraft(&locale, &sirenix);
+        assert!(
+            page.contains("Interstellar Ship"),
+            "spacecraft page should render the InterstellarShip row:\n{page}"
+        );
+        // Look for the fusion section heading appearing before the ship's row.
+        let fusion_idx = page.find("## Fusion Propulsion").expect("fusion section present");
+        let row_idx = page.find("Interstellar Ship").expect("ship row present");
+        assert!(
+            fusion_idx < row_idx,
+            "InterstellarShip should appear under the Fusion Propulsion section"
         );
     }
 
@@ -10765,6 +11213,7 @@ fn main() -> Result<()> {
     write_file(&wiki_root, "celestial-bodies/launch-windows.md", &page_launch_windows(&ctx))?;
     write_file(&wiki_root, "celestial-bodies/scenario-state.md", &page_scenario_state(&sirenix))?;
     write_file(&wiki_root, "spacecraft/README.md", &page_spacecraft(&locale, &sirenix))?;
+    write_file(&wiki_root, "space-modules/README.md", &page_space_modules(&locale, &sirenix))?;
     write_file(&wiki_root, "launch-vehicles/README.md", &page_launch_vehicles(&locale, &sirenix))?;
     write_file(&wiki_root, "facilities/README.md", &page_facilities(&locale, &sirenix))?;
     write_file(&wiki_root, "corporations/README.md", &page_corporations(&locale, &sirenix))?;

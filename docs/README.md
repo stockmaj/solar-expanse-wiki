@@ -12,7 +12,8 @@ the names, descriptions, and stat tables here match exactly what you see in-game
 | --- | --- |
 | **[Celestial Bodies](celestial-bodies/)** | The Sun, planets, moons, asteroids, comets, and exoplanet systems. |
 | [Exoplanets](exoplanets/) | Trappist-1, Kepler-90, Tau Ceti, and Proxima Centauri — the four destination systems reachable via a generation ship. |
-| [Spacecraft](spacecraft/) | Interplanetary craft — Iris, Selene, Stratos, Hermes, Centaur, Athena, Prometheus, Hephaistos, Ariane, Cronos, Nike, Sirius, Zeus. |
+| [Spacecraft](spacecraft/) | Interplanetary craft — Iris, Selene, Stratos, Hermes, Centaur, Athena, Prometheus, Hephaistos, Ariane, Cronos, Nike, Sirius, Zeus, and the Hephaistos generation ship. |
+| [Space Modules](space-modules/) | Spacecraft payload — mining rigs, refiners, probes, telescopes, habitats, power plants, and crew compartments. |
 | [Launch Vehicles](launch-vehicles/) | Surface-to-orbit lifters — Albatross, Pelican, Magpie, Condor, Teratorn. |
 | [Facilities](facilities/) | Ground buildings and orbital modules — power, mining, refining, habitats, life support, etc. |
 | [Research](research/) | Tech tree — chemical, electric, nuclear, fusion propulsion, life support, materials, computing. |

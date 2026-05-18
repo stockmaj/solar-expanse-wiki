@@ -318,6 +318,51 @@ mod tests {
         assert_eq!(r.len(), 2);
     }
 
+    /// Spacecraft payload modules live under two locale prefixes:
+    /// `module_*` (current-gen modules) and `id_SpaceModule_*` (alt
+    /// namespace). Both must land in the `cargo` Vec so the space-modules
+    /// page can resolve player-facing names without leaking internal ids.
+    #[test]
+    fn cargo_includes_module_and_id_spacemodule_prefixes() {
+        let keys = load(
+            "cargo_attach,Attach Cargo\n\
+             cargo_attach_Description,Strap-on cargo.\n\
+             module_basemining,MINING MODULE\n\
+             module_basemining_Description,Mobile equipment.\n\
+             id_SpaceModule_ISRU,Mining Equipment\n",
+        );
+        let mut out = pair_name_description(&keys, "cargo_");
+        out.extend(pair_name_description(&keys, "module_"));
+        out.extend(pair_name_description(&keys, "id_SpaceModule_"));
+        assert!(out.iter().any(|e| e.id == "cargo_attach"));
+        let mining = out.iter().find(|e| e.id == "module_basemining").expect("module_basemining present");
+        assert_eq!(mining.name, "MINING MODULE");
+        assert_eq!(mining.description, "Mobile equipment.");
+        let isru = out.iter().find(|e| e.id == "id_SpaceModule_ISRU").expect("ISRU present");
+        assert_eq!(isru.name, "Mining Equipment");
+    }
+
+    /// `id_Spacecraft_InterstellarShip` lives under a separate locale prefix
+    /// from the `spacecraft_*` family. Both should land in the same
+    /// `spacecraft` Vec so renderers can resolve the InterstellarShip name
+    /// through the usual id-to-name map.
+    #[test]
+    fn spacecraft_includes_id_spacecraft_prefix_entries() {
+        let keys = load(
+            "spacecraft_iris,Iris\n\
+             spacecraft_iris_Description,Probe.\n\
+             id_Spacecraft_InterstellarShip,Interstellar Ship\n\
+             id_Spacecraft_InterstellarShip_Description,Generation ship.\n",
+        );
+        // Mirror main()'s assembly: spacecraft_* + id_Spacecraft_*.
+        let mut entries = pair_name_description(&keys, "spacecraft_");
+        entries.extend(pair_name_description(&keys, "id_Spacecraft_"));
+        assert!(entries.iter().any(|e| e.id == "spacecraft_iris"));
+        let isr = entries.iter().find(|e| e.id == "id_Spacecraft_InterstellarShip").expect("interstellar ship locale present");
+        assert_eq!(isr.name, "Interstellar Ship");
+        assert_eq!(isr.description, "Generation ship.");
+    }
+
     #[test]
     fn habitability_scales_collects_temperature_ladder() {
         let keys = load(
@@ -343,7 +388,15 @@ fn main() -> Result<()> {
         source: input.display().to_string(),
         total_keys: keys.len(),
         celestial_bodies: celestial_bodies(&keys),
-        spacecraft: pair_name_description(&keys, "spacecraft_"),
+        spacecraft: {
+            // Two prefixes carry spacecraft locale entries:
+            //   `spacecraft_*`     — the core campaign craft (Iris, Hermes, Zeus, …)
+            //   `id_Spacecraft_*`  — the late-game generation-ship hulls
+            //                        (InterstellarShip — Hephaistos generation ship)
+            let mut out = pair_name_description(&keys, "spacecraft_");
+            out.extend(pair_name_description(&keys, "id_Spacecraft_"));
+            out
+        },
         launch_vehicles: {
             // Two prefixes carry launch-vehicle locale entries:
             //   `lv_*`             — late-game / specialty rockets (Albatross, Pelican, Magpie, Condor, Teratorn)
@@ -352,7 +405,18 @@ fn main() -> Result<()> {
             out.extend(pair_name_description(&keys, "id_Rocket_"));
             out
         },
-        cargo: pair_name_description(&keys, "cargo_"),
+        cargo: {
+            // Three prefixes carry spacecraft-payload locale entries:
+            //   `cargo_*`          — hull / fuselage variants (cargo_small, cargo_attach, …)
+            //   `module_*`         — current-gen modules (mining, fuel, telescope, habitat, …)
+            //   `id_SpaceModule_*` — alt namespace, mostly cargo-loadable variants (ISRU, Probe, …)
+            // Combining them lets the space-modules page resolve player-facing
+            // names for every module the dump emits regardless of id shape.
+            let mut out = pair_name_description(&keys, "cargo_");
+            out.extend(pair_name_description(&keys, "module_"));
+            out.extend(pair_name_description(&keys, "id_SpaceModule_"));
+            out
+        },
         research: research(&keys),
         corporations: corporations(&keys),
         contracts: contracts(&keys),

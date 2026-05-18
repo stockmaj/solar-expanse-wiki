@@ -58,11 +58,12 @@
 
         {%- comment -%} ---- Fleet ---- {%- endcomment -%}
         {%- assign fleet_active = false -%}
-        {%- if u contains '/spacecraft' or u contains '/launch-vehicles' -%}{%- assign fleet_active = true -%}{%- endif -%}
+        {%- if u contains '/spacecraft' or u contains '/launch-vehicles' or u contains '/space-modules' -%}{%- assign fleet_active = true -%}{%- endif -%}
         <div class="nav-group{% if fleet_active %} active{% endif %}">
           <button class="nav-trigger" type="button" aria-haspopup="true" aria-expanded="false">Fleet<span class="nav-caret" aria-hidden="true">▾</span></button>
           <div class="nav-dropdown" role="menu">
             <a href="{{ '/spacecraft/' | relative_url }}"{% if u contains '/spacecraft' %} class="active"{% endif %}>Spacecraft</a>
+            <a href="{{ '/space-modules/' | relative_url }}"{% if u contains '/space-modules' %} class="active"{% endif %}>Space Modules</a>
             <a href="{{ '/launch-vehicles/' | relative_url }}"{% if u contains '/launch-vehicles' %} class="active"{% endif %}>Launch Vehicles</a>
           </div>
         </div>
