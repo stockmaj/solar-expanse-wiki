@@ -111,6 +111,34 @@ struct Sirenix {
     /// resources page falls back to em-dashes in that case.
     #[serde(default)]
     license_fees: Vec<BodyLicenseFeeStat>,
+    /// Per-asteroid-class mining roll tables (Carbon / Dark / Helium-3 /
+    /// Metal / Stone). Empty when the dump predates the parser change that
+    /// reads `ObjectSubType[]`; the asteroid taxonomy page renders an
+    /// empty body in that case.
+    #[serde(default)]
+    asteroid_classes: Vec<AsteroidClassStat>,
+}
+
+/// Mirror of `parse_sirenix::AsteroidClass`. One asteroid class (Carbon,
+/// Dark, Helium-3, Metal, Stone) and its tiered resource roll table.
+#[derive(Deserialize, Clone, Default)]
+struct AsteroidClassStat {
+    name: String,
+    #[serde(default)]
+    tiers: Vec<AsteroidTierStat>,
+}
+
+#[derive(Deserialize, Clone, Default)]
+struct AsteroidTierStat {
+    category: String,
+    #[serde(default)]
+    rolls: Vec<AsteroidRollStat>,
+}
+
+#[derive(Deserialize, Clone, Default)]
+struct AsteroidRollStat {
+    resource_id: String,
+    probability: f64,
 }
 
 #[derive(Deserialize, Clone, Default)]
@@ -674,8 +702,81 @@ Co-orbital with Jupiter at the L4 (Greeks) and L5 (Trojans) Lagrange points.\n\n
 Procedural and named bodies that appear in scenarios beyond the canonical roster.\n\n\
 {other}\n\
 ## See also\n\n\
+- [Asteroid Taxonomy](../asteroid-taxonomy/) — per-class mining roll probabilities (what each class yields when you mine)\n\
 - [Comets](comets.md)\n\
 - [Celestial Bodies overview](README.md)\n"
+    )
+}
+
+/// Render an asteroid-class' raw name (the bit after `ObjectSubType.Asteroid`)
+/// into a player-facing label.  Only `Helium3` needs a non-trivial transform
+/// (→ `Helium-3`); the others (Carbon, Dark, Metal, Stone) pass through.
+fn asteroid_class_display(name: &str) -> String {
+    match name {
+        "Helium3" => "Helium-3".to_string(),
+        other => other.to_string(),
+    }
+}
+
+/// Format a 0.0–1.0 probability as a percentage with no trailing decimal noise.
+/// `1.0` → `100%`, `0.45` → `45%`, `0.105` → `10.5%`.
+fn fmt_probability(p: f64) -> String {
+    let pct = p * 100.0;
+    if (pct - pct.round()).abs() < 1e-6 {
+        format!("{}%", pct.round() as i64)
+    } else {
+        // One decimal is enough for everything the dump has emitted.
+        format!("{:.1}%", pct)
+    }
+}
+
+/// Per-class mining roll tables sourced from `ObjectSubType[]` in the
+/// Sirenix dump.  This is a taxonomy page — it answers "if I land on a
+/// Carbon-class asteroid and mine a deposit, what might I get?" — not a
+/// per-asteroid annotation (per-asteroid class isn't part of the saved
+/// data we currently parse).
+fn page_asteroid_taxonomy(locale: &Locale, sirenix: &Sirenix) -> String {
+    let res_name: BTreeMap<&str, &str> = locale
+        .resources
+        .iter()
+        .map(|r| (r.id.as_str(), r.name.as_str()))
+        .collect();
+
+    let mut classes: Vec<&AsteroidClassStat> = sirenix.asteroid_classes.iter().collect();
+    classes.sort_by(|a, b| a.name.cmp(&b.name));
+
+    let mut sections = String::new();
+    for class in classes {
+        let label = asteroid_class_display(&class.name);
+        sections.push_str(&format!("## {label} Asteroid\n\n"));
+        let mut rows: Vec<Vec<String>> = Vec::new();
+        for tier in class.tiers.iter().filter(|t| !t.rolls.is_empty()) {
+            for roll in &tier.rolls {
+                let resource_label = res_name
+                    .get(roll.resource_id.as_str())
+                    .copied()
+                    .unwrap_or(roll.resource_id.as_str());
+                rows.push(vec![
+                    tier.category.clone(),
+                    resource_label.to_string(),
+                    fmt_probability(roll.probability),
+                ]);
+            }
+        }
+        sections.push_str(&md_table(&["Tier", "Resource", "Probability"], &rows));
+        sections.push('\n');
+    }
+
+    format!(
+        "# Asteroid Taxonomy\n\n\
+Each asteroid has a class — Carbon, Dark, Helium-3, Metal, or Stone.\n\
+When you mine a deposit on an asteroid, the resource you actually extract\n\
+is rolled from the table below, grouped by the deposit's quality tier\n\
+(High, Mid, or Low).  Probabilities within each tier sum to 100%.\n\n\
+{sections}\
+## See also\n\n\
+- [Asteroids](../celestial-bodies/asteroids.md) — list of named asteroids in the game\n\
+- [Resources](../resources/) — what each mined resource is used for\n"
     )
 }
 
@@ -4114,6 +4215,7 @@ the names, descriptions, and stat tables here match exactly what you see in-game
 | [Missions](missions/) | Mission planning — Plan Mission walk-through, mission types, launch-window pointer. |\n\
 | [Contracts](contracts/) | Story and freelance contracts — the in-game Contracts tab — that drive progression. |\n\
 | [Resources](resources/) | The 20+ resource types — water, metals, fissiles, He-3, supplies, exotic alloys. |\n\
+| [Asteroid Taxonomy](asteroid-taxonomy/) | The five asteroid classes (Carbon, Dark, Helium-3, Metal, Stone) and the per-class resource roll table the game uses when you mine a deposit. |\n\
 | [Corporations](corporations/) | Playable starting factions — SoleX, NASA, ESA, CNSA, Roscosmos. |\n\n\
 ## How to use this wiki\n\n\
 Every page is plain Markdown. Jekyll renders the site on GitHub Pages, with a\n\
@@ -7162,6 +7264,180 @@ mod tests {
             "contracts page must link to ../missions/:\n{page}"
         );
     }
+
+    // ── Asteroid taxonomy page ────────────────────────────────────────────
+    fn asteroid_taxonomy_locale() -> Locale {
+        let mut locale = nav_fixture_locale();
+        // Mirror the in-game locale: id_resource_volatile renders as
+        // "Carbon" (yes, the volatiles resource is player-facing-named
+        // Carbon — see locale.json).
+        locale.resources.push(ResourceEntry {
+            id: "volatile".into(),
+            name: "Carbon".into(),
+        });
+        locale.resources.push(ResourceEntry {
+            id: "metal".into(),
+            name: "Metals".into(),
+        });
+        locale.resources.push(ResourceEntry {
+            id: "water".into(),
+            name: "Water".into(),
+        });
+        locale.resources.push(ResourceEntry {
+            id: "silicon".into(),
+            name: "Silicon".into(),
+        });
+        locale
+    }
+
+    fn carbon_class_stat() -> AsteroidClassStat {
+        AsteroidClassStat {
+            name: "Carbon".into(),
+            tiers: vec![
+                AsteroidTierStat {
+                    category: "High".into(),
+                    rolls: vec![AsteroidRollStat {
+                        resource_id: "volatile".into(),
+                        probability: 1.0,
+                    }],
+                },
+                AsteroidTierStat {
+                    category: "Low".into(),
+                    rolls: vec![
+                        AsteroidRollStat {
+                            resource_id: "metal".into(),
+                            probability: 0.45,
+                        },
+                        AsteroidRollStat {
+                            resource_id: "water".into(),
+                            probability: 0.45,
+                        },
+                        AsteroidRollStat {
+                            resource_id: "silicon".into(),
+                            probability: 0.10,
+                        },
+                    ],
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn asteroid_taxonomy_page_renders_carbon_high_volatiles_at_100_percent() {
+        let locale = asteroid_taxonomy_locale();
+        let sirenix = Sirenix {
+            asteroid_classes: vec![carbon_class_stat()],
+            ..Default::default()
+        };
+        let page = page_asteroid_taxonomy(&locale, &sirenix);
+        assert!(
+            page.contains("# Asteroid Taxonomy"),
+            "page should start with the H1 heading:\n{page}"
+        );
+        assert!(
+            page.contains("## Carbon Asteroid"),
+            "page should have a section heading per class:\n{page}"
+        );
+        // The High tier row should resolve `volatile` → "Carbon" via the locale
+        // and format 1.0 as "100%".
+        assert!(
+            page.contains("| High | Carbon | 100% |"),
+            "High tier row should show Carbon at 100%:\n{page}"
+        );
+    }
+
+    #[test]
+    fn asteroid_taxonomy_page_renders_low_tier_with_three_rolls() {
+        let locale = asteroid_taxonomy_locale();
+        let sirenix = Sirenix {
+            asteroid_classes: vec![carbon_class_stat()],
+            ..Default::default()
+        };
+        let page = page_asteroid_taxonomy(&locale, &sirenix);
+        // 0.45 → "45%", 0.10 → "10%".
+        assert!(
+            page.contains("| Low | Metals | 45% |"),
+            "Low tier should list Metals at 45%:\n{page}"
+        );
+        assert!(
+            page.contains("| Low | Water | 45% |"),
+            "Low tier should list Water at 45%:\n{page}"
+        );
+        assert!(
+            page.contains("| Low | Silicon | 10% |"),
+            "Low tier should list Silicon at 10%:\n{page}"
+        );
+    }
+
+    #[test]
+    fn asteroid_taxonomy_page_skips_empty_tiers() {
+        // Carbon class has no Mid tier — the page must not emit a row
+        // for it (the parser already filters empty tiers; the renderer
+        // just trusts the input list).
+        let locale = asteroid_taxonomy_locale();
+        let sirenix = Sirenix {
+            asteroid_classes: vec![carbon_class_stat()],
+            ..Default::default()
+        };
+        let page = page_asteroid_taxonomy(&locale, &sirenix);
+        assert!(
+            !page.contains("| Mid |"),
+            "Carbon class has no Mid tier — page must not emit a Mid row:\n{page}"
+        );
+    }
+
+    #[test]
+    fn asteroid_taxonomy_page_lists_each_class_alphabetically() {
+        // Multiple classes should each get their own H2 section.
+        let locale = asteroid_taxonomy_locale();
+        let dark = AsteroidClassStat {
+            name: "Dark".into(),
+            tiers: vec![AsteroidTierStat {
+                category: "High".into(),
+                rolls: vec![AsteroidRollStat {
+                    resource_id: "water".into(),
+                    probability: 1.0,
+                }],
+            }],
+        };
+        let sirenix = Sirenix {
+            asteroid_classes: vec![carbon_class_stat(), dark],
+            ..Default::default()
+        };
+        let page = page_asteroid_taxonomy(&locale, &sirenix);
+        let carbon_idx = page.find("## Carbon Asteroid").expect("Carbon section");
+        let dark_idx = page.find("## Dark Asteroid").expect("Dark section");
+        assert!(
+            carbon_idx < dark_idx,
+            "classes should be listed alphabetically:\n{page}"
+        );
+    }
+
+    #[test]
+    fn asteroid_taxonomy_page_renames_helium3_display_label() {
+        // "Helium3" → "Helium-3" for the H2 heading (matches the locale's
+        // resource label).
+        let locale = asteroid_taxonomy_locale();
+        let h3 = AsteroidClassStat {
+            name: "Helium3".into(),
+            tiers: vec![AsteroidTierStat {
+                category: "Low".into(),
+                rolls: vec![AsteroidRollStat {
+                    resource_id: "hel3".into(),
+                    probability: 1.0,
+                }],
+            }],
+        };
+        let sirenix = Sirenix {
+            asteroid_classes: vec![h3],
+            ..Default::default()
+        };
+        let page = page_asteroid_taxonomy(&locale, &sirenix);
+        assert!(
+            page.contains("## Helium-3 Asteroid"),
+            "Helium3 class should render as Helium-3 Asteroid:\n{page}"
+        );
+    }
 }
 
 fn main() -> Result<()> {
@@ -7206,6 +7482,11 @@ fn main() -> Result<()> {
     write_file(&wiki_root, "contracts/README.md", &page_contracts(&locale, &sirenix))?;
     write_file(&wiki_root, "research/README.md", &page_research(&locale, &sirenix))?;
     write_file(&wiki_root, "missions/README.md", &page_missions(&locale, &sirenix))?;
+    write_file(
+        &wiki_root,
+        "asteroid-taxonomy/README.md",
+        &page_asteroid_taxonomy(&locale, &sirenix),
+    )?;
 
     // Site metadata for the footer (Jekyll auto-loads _data/*.yml).
     let now = std::time::SystemTime::now()
