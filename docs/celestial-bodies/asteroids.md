@@ -85,5 +85,6 @@ Procedural and named bodies that appear in scenarios beyond the canonical roster
 
 ## See also
 
+- [Asteroid Taxonomy](../asteroid-taxonomy/) — per-class mining roll probabilities (what each class yields when you mine)
 - [Comets](comets.md)
 - [Celestial Bodies overview](README.md)

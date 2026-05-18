@@ -334,6 +334,36 @@ struct BodyLicenseFee {
     fees_per_t: std::collections::BTreeMap<String, f64>,
 }
 
+/// One asteroid class (Carbon / Dark / Helium-3 / Metal / Stone), describing
+/// the resource roll table used when the player mines a deposit on an
+/// asteroid of this class. Sourced from `ObjectSubType[]` entries whose
+/// id matches `ObjectSubType.Asteroid*` in the Sirenix dump.
+#[derive(Serialize, Debug, Default, PartialEq, Clone)]
+struct AsteroidClass {
+    /// Cleaned id, e.g. "Carbon" from "ObjectSubType.AsteroidCarbon".
+    name: String,
+    /// One entry per category tier (High / Mid / Low). Each carries the
+    /// list of possible resources and the per-resource roll probabilities
+    /// (summing to ~1.0 within the tier). Empty buckets are dropped.
+    tiers: Vec<AsteroidTier>,
+}
+
+#[derive(Serialize, Debug, Default, PartialEq, Clone)]
+struct AsteroidTier {
+    /// "High" / "Mid" / "Low".
+    category: String,
+    rolls: Vec<AsteroidRoll>,
+}
+
+#[derive(Serialize, Debug, Default, PartialEq, Clone)]
+struct AsteroidRoll {
+    /// Bare resource id (matches `Resource.id` — `id_resource_` prefix
+    /// stripped and lowercased).  Joins with the locale's resource table
+    /// for player-facing names.
+    resource_id: String,
+    probability: f64,
+}
+
 #[derive(Serialize)]
 struct Sirenix {
     spacecraft: Vec<Spacecraft>,
@@ -350,6 +380,11 @@ struct Sirenix {
     /// BepInEx mod's `ObjectInfo` walk; otherwise one entry per body in
     /// the loaded scene, sorted by `body_name`.
     license_fees: Vec<BodyLicenseFee>,
+    /// Per-asteroid-class mining roll tables (Carbon / Dark / Helium-3 /
+    /// Metal / Stone). Sourced from `ObjectSubType[]` entries with an
+    /// `ObjectSubType.Asteroid*` id; empty if the dump has no such entries.
+    #[serde(default)]
+    asteroid_classes: Vec<AsteroidClass>,
 }
 
 fn parse_spacecraft(v: &Value) -> Option<Spacecraft> {
@@ -931,6 +966,82 @@ fn parse_body_license_fee(v: &Value) -> Option<BodyLicenseFee> {
     Some(BodyLicenseFee {
         body_name,
         fees_per_t,
+    })
+}
+
+/// Parse a single `ObjectSubType` entry into an asteroid class roll table.
+/// Filters to entries whose id starts with `ObjectSubType.Asteroid` — that
+/// prefix is the marker for the five asteroid classes (Carbon, Dark,
+/// Helium3, Metal, Stone). Returns `None` for anything else, including
+/// blank-id entries (the dump emits placeholder ObjectSubType rows with
+/// empty ids).
+///
+/// The shape in the dump is `miningFactors[][]` — an array of *buckets*,
+/// each holding a list of `{Category, probability, ResourceDefinition.name}`
+/// rolls. The `Category` field on each roll ("High" / "Mid" / "Low") is the
+/// quality tier of the resulting deposit, NOT the bucket index — AsteroidMetal
+/// for instance has its High roll in bucket[1], not bucket[0]. We group
+/// strictly by `Category`.  Empty buckets are dropped; tiers are emitted in
+/// a stable High → Mid → Low order regardless of dump bucket order.
+fn parse_asteroid_class(v: &Value) -> Option<AsteroidClass> {
+    let id = v.get("id")?.as_str()?;
+    let name = id.strip_prefix("ObjectSubType.Asteroid")?;
+    if name.is_empty() {
+        return None;
+    }
+
+    let mut by_category: std::collections::BTreeMap<String, Vec<AsteroidRoll>> =
+        std::collections::BTreeMap::new();
+
+    for bucket in v
+        .get("miningFactors")
+        .and_then(|x| x.as_array())
+        .into_iter()
+        .flatten()
+    {
+        let Some(entries) = bucket.as_array() else { continue };
+        for entry in entries {
+            let Some(category) = entry.get("Category").and_then(|x| x.as_str()) else {
+                continue;
+            };
+            let Some(rid) = entry
+                .pointer("/ResourceDefinition/name")
+                .and_then(|x| x.as_str())
+            else {
+                continue;
+            };
+            let probability = entry
+                .get("probability")
+                .and_then(|x| x.as_f64())
+                .unwrap_or(0.0);
+            by_category
+                .entry(category.to_string())
+                .or_default()
+                .push(AsteroidRoll {
+                    resource_id: normalize_resource_id(rid),
+                    probability,
+                });
+        }
+    }
+
+    // Emit tiers in canonical High → Mid → Low order, dropping any others
+    // (defensive — the dump has only ever shown those three values).
+    let order = ["High", "Mid", "Low"];
+    let mut tiers: Vec<AsteroidTier> = Vec::new();
+    for cat in order.iter() {
+        if let Some(rolls) = by_category.remove(*cat) {
+            if !rolls.is_empty() {
+                tiers.push(AsteroidTier {
+                    category: (*cat).to_string(),
+                    rolls,
+                });
+            }
+        }
+    }
+
+    Some(AsteroidClass {
+        name: name.to_string(),
+        tiers,
     })
 }
 
@@ -1669,6 +1780,18 @@ fn main() -> Result<()> {
         .unwrap_or_default();
     license_fees.sort_by(|a, b| a.body_name.cmp(&b.body_name));
 
+    // Asteroid taxonomy: per-class mining roll tables (Carbon, Dark,
+    // Helium3, Metal, Stone). The dump's `ObjectSubType[]` array also
+    // contains placeholder rows with empty ids; `parse_asteroid_class`
+    // filters those out, so a missing key here yields an empty vec, not
+    // an error.
+    let mut asteroid_classes: Vec<AsteroidClass> = raw
+        .get("ObjectSubType")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(parse_asteroid_class).collect())
+        .unwrap_or_default();
+    asteroid_classes.sort_by(|a, b| a.name.cmp(&b.name));
+
     let out = Sirenix {
         spacecraft,
         launch_vehicles,
@@ -1681,10 +1804,11 @@ fn main() -> Result<()> {
         scenario_starts,
         epochs,
         license_fees,
+        asteroid_classes,
     };
     serde_json::to_writer_pretty(fs::File::create(&output)?, &out)?;
     eprintln!(
-        "wrote {} ({} spacecraft, {} LVs, {} research, {} facilities, {} components, {} crew transports, {} resources, {} contracts, {} scenarios, {} epochs, {} bodies w/ license fees)",
+        "wrote {} ({} spacecraft, {} LVs, {} research, {} facilities, {} components, {} crew transports, {} resources, {} contracts, {} scenarios, {} epochs, {} bodies w/ license fees, {} asteroid classes)",
         output.display(),
         out.spacecraft.len(),
         out.launch_vehicles.len(),
@@ -1697,6 +1821,7 @@ fn main() -> Result<()> {
         out.scenario_starts.len(),
         out.epochs.len(),
         out.license_fees.len(),
+        out.asteroid_classes.len(),
     );
     Ok(())
 }
@@ -2901,5 +3026,179 @@ mod tests {
             c.date_time_string_start.as_deref(),
             Some("2080-01-01 00:00:00")
         );
+    }
+
+    // ── Asteroid taxonomy parsing ────────────────────────────────────────────
+    // ObjectSubType[] entries with an id starting with `ObjectSubType.Asteroid`
+    // carry `miningFactors[]` — an array of buckets, each a list of
+    // `{Category, probability, ResourceDefinition.name}` rolls.  The Category
+    // values seen in the dump are "High", "Mid", "Low"; buckets without
+    // entries (e.g. AsteroidMetal has no High bucket in slot 0) are skipped
+    // entirely.  We key tiers by the `Category` field, not bucket index, so
+    // we don't have to assume a fixed slot order.
+    fn carbon_asteroid_fixture() -> Value {
+        serde_json::json!({
+            "id": "ObjectSubType.AsteroidCarbon",
+            "miningFactors": [
+                [
+                    {
+                        "Category": "High",
+                        "probability": 1.0,
+                        "ResourceDefinition": { "name": "id_resource_volatile" }
+                    }
+                ],
+                [],
+                [
+                    {
+                        "Category": "Low",
+                        "probability": 0.45,
+                        "ResourceDefinition": { "name": "id_resource_metal" }
+                    },
+                    {
+                        "Category": "Low",
+                        "probability": 0.45,
+                        "ResourceDefinition": { "name": "id_resource_water" }
+                    },
+                    {
+                        "Category": "Low",
+                        "probability": 0.10,
+                        "ResourceDefinition": { "name": "id_resource_silicon" }
+                    }
+                ]
+            ]
+        })
+    }
+
+    #[test]
+    fn parses_carbon_asteroid_class() {
+        let class = parse_asteroid_class(&carbon_asteroid_fixture())
+            .expect("AsteroidCarbon should parse");
+        assert_eq!(class.name, "Carbon");
+        // Two non-empty tiers: High and Low. The empty Mid bucket is dropped.
+        assert_eq!(class.tiers.len(), 2);
+        let high = class.tiers.iter().find(|t| t.category == "High").expect("High tier");
+        assert_eq!(high.rolls.len(), 1);
+        assert_eq!(high.rolls[0].resource_id, "volatile");
+        assert!((high.rolls[0].probability - 1.0).abs() < 1e-9);
+        let low = class.tiers.iter().find(|t| t.category == "Low").expect("Low tier");
+        assert_eq!(low.rolls.len(), 3);
+        let metal = low.rolls.iter().find(|r| r.resource_id == "metal").expect("metal roll");
+        assert!((metal.probability - 0.45).abs() < 1e-9);
+        let silicon = low.rolls.iter().find(|r| r.resource_id == "silicon").expect("silicon roll");
+        assert!((silicon.probability - 0.10).abs() < 1e-9);
+    }
+
+    #[test]
+    fn parses_metal_asteroid_with_empty_first_bucket() {
+        // AsteroidMetal has an empty bucket[0]; its High tier lives in
+        // bucket[1].  The parser must NOT key tier categories by bucket
+        // index — it must use the `Category` field on each roll.
+        let v = serde_json::json!({
+            "id": "ObjectSubType.AsteroidMetal",
+            "miningFactors": [
+                [],
+                [
+                    {
+                        "Category": "High",
+                        "probability": 1.0,
+                        "ResourceDefinition": { "name": "id_resource_raremetal" }
+                    }
+                ],
+                [
+                    {
+                        "Category": "Low",
+                        "probability": 0.65,
+                        "ResourceDefinition": { "name": "id_resource_metal" }
+                    },
+                    {
+                        "Category": "Low",
+                        "probability": 0.30,
+                        "ResourceDefinition": { "name": "id_resource_uran" }
+                    },
+                    {
+                        "Category": "Low",
+                        "probability": 0.05,
+                        "ResourceDefinition": { "name": "id_resource_water" }
+                    }
+                ]
+            ]
+        });
+        let class = parse_asteroid_class(&v).expect("AsteroidMetal should parse");
+        assert_eq!(class.name, "Metal");
+        assert_eq!(class.tiers.len(), 2);
+        let high = class.tiers.iter().find(|t| t.category == "High").expect("High tier");
+        assert_eq!(high.rolls.len(), 1);
+        assert_eq!(high.rolls[0].resource_id, "raremetal");
+    }
+
+    #[test]
+    fn parses_helium3_asteroid_lowercases_resource_id() {
+        // The raw dump emits id_resource_HEL3 in mixed case; the same id
+        // appears lowercased everywhere else (resources page, refiner I/O).
+        // `parse_asteroid_class` must run the resource id through the same
+        // normalize_resource_id() used by parse_facility so cross-page joins
+        // line up.
+        let v = serde_json::json!({
+            "id": "ObjectSubType.AsteroidHelium3",
+            "miningFactors": [
+                [],
+                [],
+                [
+                    {
+                        "Category": "Low",
+                        "probability": 1.0,
+                        "ResourceDefinition": { "name": "id_resource_HEL3" }
+                    }
+                ]
+            ]
+        });
+        let class = parse_asteroid_class(&v).expect("AsteroidHelium3 should parse");
+        assert_eq!(class.name, "Helium3");
+        let low = class.tiers.iter().find(|t| t.category == "Low").expect("Low tier");
+        assert_eq!(low.rolls[0].resource_id, "hel3");
+    }
+
+    #[test]
+    fn rejects_non_asteroid_object_subtypes() {
+        // Empty-id entries and non-Asteroid prefixes must be skipped.
+        let blank = serde_json::json!({"id": "", "miningFactors": []});
+        assert!(parse_asteroid_class(&blank).is_none());
+        let other = serde_json::json!({"id": "ObjectSubType.Comet", "miningFactors": []});
+        assert!(parse_asteroid_class(&other).is_none());
+    }
+
+    #[test]
+    fn tier_order_is_high_mid_low() {
+        // The renderer wants a consistent High → Mid → Low order regardless
+        // of bucket order in the dump.
+        let v = serde_json::json!({
+            "id": "ObjectSubType.AsteroidStone",
+            "miningFactors": [
+                [
+                    {
+                        "Category": "Low",
+                        "probability": 1.0,
+                        "ResourceDefinition": { "name": "id_resource_metal" }
+                    }
+                ],
+                [
+                    {
+                        "Category": "Mid",
+                        "probability": 1.0,
+                        "ResourceDefinition": { "name": "id_resource_silicon" }
+                    }
+                ],
+                [
+                    {
+                        "Category": "High",
+                        "probability": 1.0,
+                        "ResourceDefinition": { "name": "id_resource_water" }
+                    }
+                ]
+            ]
+        });
+        let class = parse_asteroid_class(&v).expect("parses");
+        let cats: Vec<&str> = class.tiers.iter().map(|t| t.category.as_str()).collect();
+        assert_eq!(cats, vec!["High", "Mid", "Low"]);
     }
 }
