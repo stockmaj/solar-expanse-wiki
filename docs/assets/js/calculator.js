@@ -98,6 +98,7 @@
       p: state.placed,
       c: state.checked,
       sc: state.spacecraft,
+      cap: state.shipCapacity,
       os: state.onSite,
     };
     return btoa(JSON.stringify(payload))
@@ -113,6 +114,7 @@
         placed: payload.p || {},
         checked: payload.c || {},
         spacecraft: payload.sc || null,
+        shipCapacity: payload.cap || null,
         onSite: payload.os || {},
       };
     } catch (e) { return null; }
@@ -188,16 +190,17 @@
   function loadState() {
     try {
       var raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return { placed: {}, checked: {}, spacecraft: null, onSite: {} };
+      if (!raw) return { placed: {}, checked: {}, spacecraft: null, shipCapacity: null, onSite: {} };
       var s = JSON.parse(raw);
       return {
         placed: (s && s.placed) || {},
         checked: (s && s.checked) || {},
         spacecraft: (s && s.spacecraft) || null,
+        shipCapacity: (s && s.shipCapacity) || null,
         onSite: (s && s.onSite) || {},
       };
     } catch (e) {
-      return { placed: {}, checked: {}, spacecraft: null, onSite: {} };
+      return { placed: {}, checked: {}, spacecraft: null, shipCapacity: null, onSite: {} };
     }
   }
 
@@ -336,6 +339,10 @@
       ctx.state.spacecraft = (data.spacecraft || [])[0] ? data.spacecraft[0].id : null;
       saveState(ctx.state);
     }
+    if (!ctx.state.shipCapacity && scById[ctx.state.spacecraft]) {
+      ctx.state.shipCapacity = scById[ctx.state.spacecraft].cargo_capacity;
+      saveState(ctx.state);
+    }
     ctx.scById = scById;
 
     bindReductions(root, ctx);
@@ -375,15 +382,17 @@
   function renderSpacecraftPicker(ctx) {
     var ships = ctx.data.spacecraft || [];
     if (!ships.length) return '';
+    var cap = ctx.state.shipCapacity || '';
     return '<label>Spacecraft: ' +
       '<select id="calc-sc-select">' +
       ships.map(function (s) {
         var sel = s.id === ctx.state.spacecraft ? ' selected' : '';
         return '<option value="' + escapeHtml(s.id) + '"' + sel + '>' +
-          escapeHtml(s.name) + ' — ' + s.cargo_capacity + ' t / trip' +
+          escapeHtml(s.name) + ' (base ' + s.cargo_capacity + ' t)' +
           '</option>';
       }).join('') +
-      '</select></label>';
+      '</select></label> ' +
+      '<label>Cargo: <input type="number" min="1" id="calc-sc-cap" value="' + cap + '" placeholder="t / trip" data-tip="In-game capacity (after cargo-bay modules and Expanded Cargo Bays research).">  t / trip</label>';
   }
 
   function bindSpacecraftPicker(root, ctx) {
@@ -394,6 +403,20 @@
     if (sel) {
       sel.addEventListener('change', function () {
         ctx.state.spacecraft = sel.value;
+        // Reset override to base whenever the user picks a different ship —
+        // their previous override applied to a different ship.
+        var s = ctx.scById[sel.value];
+        ctx.state.shipCapacity = s ? s.cargo_capacity : null;
+        saveState(ctx.state);
+        bindSpacecraftPicker(root, ctx);
+        rerenderTotals(root, ctx);
+      });
+    }
+    var cap = el.querySelector('#calc-sc-cap');
+    if (cap) {
+      cap.addEventListener('input', function () {
+        var v = parseFloat(cap.value);
+        ctx.state.shipCapacity = (isNaN(v) || v <= 0) ? null : v;
         saveState(ctx.state);
         rerenderTotals(root, ctx);
       });
@@ -936,10 +959,11 @@
         '<td class="calc-num"><strong>' + grand.toLocaleString() + '</strong></td></tr>';
       var trips = '';
       var ship = ctx.scById && ctx.scById[ctx.state.spacecraft];
-      if (ship && grand > 0) {
-        var n = Math.ceil(grand / ship.cargo_capacity);
+      var cap = ctx.state.shipCapacity || (ship && ship.cargo_capacity) || 0;
+      if (ship && grand > 0 && cap > 0) {
+        var n = Math.ceil(grand / cap);
         trips = '<tr><td colspan="2">' + escapeHtml(ship.name) + ' trips ' +
-          '<span class="calc-trip-note">(' + ship.cargo_capacity + ' t / trip)</span></td>' +
+          '<span class="calc-trip-note">(' + cap + ' t / trip)</span></td>' +
           '<td class="calc-num">' + n.toLocaleString() + '</td></tr>';
       }
       html += '<thead><tr><th class="calc-section">Cargo (to ship)</th><th class="calc-section calc-num">On site</th><th class="calc-section calc-num">Tons</th></tr></thead>' +

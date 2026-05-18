@@ -791,7 +791,8 @@ main hr {
 #calc-root .calc-crew-picker:empty {
   margin: 0;
 }
-#calc-root .calc-crew-picker select {
+#calc-root .calc-crew-picker select,
+#calc-root .calc-crew-picker input[type="number"] {
   background: var(--code-bg);
   color: var(--fg);
   border: 1px solid var(--rule);
@@ -800,6 +801,10 @@ main hr {
   font: inherit;
   font-size: 12px;
   margin-left: 4px;
+}
+#calc-root .calc-crew-picker input[type="number"] {
+  width: 70px;
+  text-align: right;
 }
 #calc-root .calc-onsite {
   width: 60px;
