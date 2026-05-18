@@ -7,9 +7,9 @@ using System.Text;
 using BepInEx;
 using Data.ScriptableObject;
 using Game.Info;
-using HarmonyLib;
 using Manager;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace SolarExpanseWikiDumper
 {
@@ -24,119 +24,66 @@ namespace SolarExpanseWikiDumper
         internal const string MarkerFileName = "sirenix-dump.flag";
 
         internal static BepInEx.Logging.ManualLogSource Log;
+        private static bool dumped;
 
+        // Plugin.Update / Plugin.Start aren't ticked by Unity in this BepInEx setup
+        // (verified: only Awake + OnEnable fire on BaseUnityPlugin and on a fresh
+        // MonoBehaviour we spawn on a DontDestroyOnLoad GameObject). Instead, we
+        // subscribe to the static SceneManager.sceneLoaded event in Awake — that
+        // event is driven by Unity's scene-load pipeline, independent of our
+        // GameObject's lifecycle, and fires every time a scene finishes loading.
+        // When the gameplay scene loads, the ObjectInfo MonoBehaviours and the
+        // AllScriptableObjectManager singleton are all present, so we can run the
+        // dump directly from the handler.
         private void Awake()
         {
             Log = Logger;
             var marker = Path.Combine(Application.streamingAssetsPath, MarkerFileName);
             if (File.Exists(marker))
             {
-                Log.LogInfo($"Marker present at {marker}; dumper will not run.  Delete it to re-dump.");
+                Log.LogInfo($"Marker present at {marker}; dumper will not run. Delete it to re-dump.");
                 return;
             }
-            // Plugin.Update() isn't ticked by Unity in this BepInEx setup, so spawn a
-            // dedicated MonoBehaviour on a persistent GameObject to drive the poll.
-            var go = new GameObject("SolarExpanseWikiDumperPoller");
-            UnityEngine.Object.DontDestroyOnLoad(go);
-            var comp = go.AddComponent<DumperPoller>();
-            Log.LogInfo("DumperPoller component spawned on persistent GameObject; waiting for ObjectInfoManager + AllScriptableObjectManager.");
-            Log.LogInfo($"DumperPoller component spawned. goActive={go.activeInHierarchy} compNull={(comp == null)} compEnabled={(comp != null && comp.enabled)}");
-        }
-    }
-
-    // Poll every ~0.5s for the managers to be live and ObjectInfo list populated.
-    // We previously hooked ObjectInfoManager.SetAllObjectInfos via Harmony, but the
-    // postfix never fired on the game's actual load path (likely inlined or hit a
-    // mismatched overload), so we switched to a guaranteed-coverage Update poll.
-    // ObjectInfoManager is MonoBehaviourSingleton<ObjectInfoManager>; its
-    // allObjectInfos list only gets populated once SolarLoader.CreateSolarSystem
-    // calls SetAllObjectInfos, so its non-empty count is our "scene ready" signal.
-    //
-    // Lives on its own persistent GameObject (created in Plugin.Awake) because
-    // Plugin.Update() was never being ticked by Unity in BepInEx 5.4.23.5 — the
-    // BepInEx-Manager host GameObject apparently doesn't tick plugin BaseUnityPlugin
-    // instances in this build.
-    internal class DumperPoller : MonoBehaviour
-    {
-        private bool dumped;
-        private float nextCheckTime;
-        private float nextStatusLog;
-        private bool firstUpdateLogged;
-
-        private void Awake()
-        {
-            Plugin.Log.LogInfo("DumperPoller.Awake fired.");
+            SceneManager.sceneLoaded += OnSceneLoaded;
+            Log.LogInfo("Subscribed to SceneManager.sceneLoaded. Waiting for the gameplay scene to load.");
         }
 
-        private void OnEnable()
+        private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
-            Plugin.Log.LogInfo($"DumperPoller.OnEnable fired. gameObject.activeInHierarchy={gameObject.activeInHierarchy} enabled={enabled}");
-        }
-
-        private void Start()
-        {
-            Plugin.Log.LogInfo("DumperPoller.Start fired.");
-        }
-
-        private void Update()
-        {
-            if (!firstUpdateLogged)
-            {
-                firstUpdateLogged = true;
-                Plugin.Log.LogInfo("DumperPoller.Update() is being called by Unity.");
-            }
+            Log.LogInfo($"sceneLoaded: name='{scene.name}' mode={mode} dumped={dumped}");
             if (dumped) return;
 
-            // Throttled state log — once every 3 seconds, regardless of which check fails.
-            // Runs OUTSIDE the 0.5s poll throttle so we can see what's silently returning early.
-            if (Time.unscaledTime >= nextStatusLog)
-            {
-                nextStatusLog = Time.unscaledTime + 3f;
-                var oimPeek = MonoBehaviourSingleton<ObjectInfoManager>.Instance;
-                var asoMgrPeek = SerializedMonoBehaviourSingleton<AllScriptableObjectManager>.Instance
-                                ?? UnityEngine.Object.FindObjectOfType<AllScriptableObjectManager>();
-                int allCount = -1;
-                bool fieldFound = false;
-                if (oimPeek != null)
-                {
-                    var allFieldPeek = typeof(ObjectInfoManager).GetField(
-                        "allObjectInfos", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-                    fieldFound = allFieldPeek != null;
-                    var allPeek = allFieldPeek?.GetValue(oimPeek) as System.Collections.ICollection;
-                    allCount = allPeek != null ? allPeek.Count : -1;
-                }
-                Plugin.Log.LogInfo($"poll state: oim={(oimPeek == null ? "null" : "present")} fieldFound={fieldFound} allObjectInfos.count={allCount} aso={(asoMgrPeek == null ? "null" : "present")}");
-            }
-
-            if (Time.unscaledTime < nextCheckTime) return;
-            nextCheckTime = Time.unscaledTime + 0.5f;
-
+            // Gameplay-ready predicate: ObjectInfoManager exists AND its allObjectInfos
+            // list is populated (SolarLoader.CreateSolarSystem calls SetAllObjectInfos
+            // during gameplay-scene load). If we're not ready yet, just return —
+            // sceneLoaded will fire again for the next scene.
             var oim = MonoBehaviourSingleton<ObjectInfoManager>.Instance;
-            if (oim == null) return;
-
-            // allObjectInfos accessor name might shift between versions; reflect for safety.
+            if (oim == null) { Log.LogInfo("  ObjectInfoManager.Instance is null; will wait for a later scene."); return; }
             var allField = typeof(ObjectInfoManager).GetField(
                 "allObjectInfos", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
             var all = allField?.GetValue(oim) as System.Collections.ICollection;
-            if (all == null || all.Count == 0) return;
-
+            if (all == null || all.Count == 0)
+            {
+                Log.LogInfo($"  allObjectInfos.count={(all == null ? -1 : all.Count)}; will wait for a later scene.");
+                return;
+            }
             var asoMgr = SerializedMonoBehaviourSingleton<AllScriptableObjectManager>.Instance
                          ?? UnityEngine.Object.FindObjectOfType<AllScriptableObjectManager>();
-            if (asoMgr == null) return;
+            if (asoMgr == null) { Log.LogInfo("  AllScriptableObjectManager not available; will wait."); return; }
 
             dumped = true;
             var dir = Application.streamingAssetsPath;
             try
             {
-                Plugin.Log.LogInfo($"Update poll: ObjectInfoManager has {all.Count} bodies and AllScriptableObjectManager is ready — running dump.");
+                Log.LogInfo($"  ready: ObjectInfoManager has {all.Count} bodies. Running dump.");
                 var json = Dumper.Dump(asoMgr);
-                File.WriteAllText(Path.Combine(dir, Plugin.OutputFileName), json);
-                File.WriteAllText(Path.Combine(dir, Plugin.MarkerFileName), DateTime.UtcNow.ToString("O"));
-                Plugin.Log.LogInfo($"Wrote {json.Length:N0} characters to {Plugin.OutputFileName}");
+                File.WriteAllText(Path.Combine(dir, OutputFileName), json);
+                File.WriteAllText(Path.Combine(dir, MarkerFileName), DateTime.UtcNow.ToString("O"));
+                Log.LogInfo($"Wrote {json.Length:N0} characters to {OutputFileName}");
             }
             catch (Exception ex)
             {
-                Plugin.Log.LogError($"Dump failed: {ex}");
+                Log.LogError($"Dump failed: {ex}");
             }
         }
     }
