@@ -201,6 +201,8 @@ namespace SolarExpanseWikiDumper
                     writer.StartObject();
                     writer.Key("name");
                     writer.String(oi.gameObject ? oi.gameObject.name : oi.name);
+                    writer.Key("id");
+                    writer.Raw(oi.id.ToString(System.Globalization.CultureInfo.InvariantCulture));
                     writer.Key("resourceMiningLicenseFeePerT");
                     writer.StartObject();
                     foreach (var kv in oi.ResourceMiningLicenseFeePerT)
@@ -212,6 +214,69 @@ namespace SolarExpanseWikiDumper
                         writer.Raw(kv.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
                     }
                     writer.EndObject();
+
+                    // Per-company live facility lists for this body.  ObjectsInfoData
+                    // is populated at runtime; one entry per company that has any
+                    // data on this body.  We skip companies whose ListFacility is
+                    // empty (noise) and omit the array entirely if no company on
+                    // this body has any facilities.
+                    var ods = oi.ObjectsInfoData;
+                    if (ods != null && ods.Count > 0)
+                    {
+                        // Pre-scan: only emit objectsInfoData if at least one
+                        // company has facilities on this body.
+                        bool anyFacilities = false;
+                        foreach (var od in ods)
+                        {
+                            if (od == null) continue;
+                            var facs = od.ListFacility;
+                            if (facs != null && facs.Count > 0) { anyFacilities = true; break; }
+                        }
+                        if (anyFacilities)
+                        {
+                            writer.Key("objectsInfoData");
+                            writer.StartArray();
+                            foreach (var od in ods)
+                            {
+                                if (od == null) continue;
+                                var facs = od.ListFacility;
+                                if (facs == null || facs.Count == 0) continue;
+                                writer.StartObject();
+                                // Company.ID is a public property that returns Definition.ID
+                                // (the same id space used everywhere else for companies).
+                                string companyId = null;
+                                try { companyId = od.company?.ID; }
+                                catch (Exception) { /* fall through */ }
+                                if (string.IsNullOrEmpty(companyId))
+                                {
+                                    var co = od.company as UnityEngine.Object;
+                                    if (co != null) companyId = co.name;
+                                }
+                                writer.Key("company");
+                                writer.String(companyId ?? "");
+                                writer.Key("facilities");
+                                writer.StartArray();
+                                foreach (var f in facs)
+                                {
+                                    if (f == null) continue;
+                                    writer.StartObject();
+                                    var fbd = f.facilityDescriptor;
+                                    string buildId = (fbd as MyIDScriptableObject)?.ID
+                                                     ?? (fbd as UnityEngine.Object)?.name
+                                                     ?? "";
+                                    writer.Key("id");
+                                    writer.String(buildId);
+                                    writer.Key("quantity");
+                                    writer.Raw(f.Quantity.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                                    writer.EndObject();
+                                }
+                                writer.EndArray();
+                                writer.EndObject();
+                            }
+                            writer.EndArray();
+                        }
+                    }
+
                     writer.EndObject();
                 }
                 writer.EndArray();
