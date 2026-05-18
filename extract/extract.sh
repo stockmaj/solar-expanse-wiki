@@ -121,6 +121,11 @@ run_pipeline() {
     log "parse-sirenix"
     "$bindir/parse-sirenix" "$CACHE/sirenix-dump.json" "$CACHE/sirenix.json"
 
+    log "parse-terraformation-config"
+    "$bindir/parse-terraformation-config" \
+        "$CACHE/project/ExportedProject/Assets/MonoBehaviour/TerraformationConfig.asset" \
+        "$CACHE/terraformation.json"
+
     log "extract-icons"
     "$bindir/extract-icons" "$CACHE/project/ExportedProject" "$WIKI_ROOT/docs/images/resources"
 
@@ -134,7 +139,7 @@ run_pipeline() {
     log "game version: $game_version"
 
     log "gen-pages"
-    "$bindir/gen-pages" "$CACHE/locale.json" "$CACHE/stats.json" "$CACHE/sirenix.json" "$WIKI_ROOT/docs" "$game_version"
+    "$bindir/gen-pages" "$CACHE/locale.json" "$CACHE/stats.json" "$CACHE/sirenix.json" "$CACHE/terraformation.json" "$WIKI_ROOT/docs" "$game_version"
 
     log "done"
 }

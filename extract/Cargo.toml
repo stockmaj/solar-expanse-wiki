@@ -37,6 +37,10 @@ path = "src/bin/extract_icons.rs"
 name = "gen-calculator-data"
 path = "src/bin/gen_calculator_data.rs"
 
+[[bin]]
+name = "parse-terraformation-config"
+path = "src/bin/parse_terraformation_config.rs"
+
 [profile.release]
 lto = true
 codegen-units = 1
