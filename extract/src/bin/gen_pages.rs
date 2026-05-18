@@ -314,6 +314,19 @@ struct LaunchVehicleStat {
     maintenance_cost_per_day: f64,
     #[serde(default)]
     fuel_type_on_start: Option<String>,
+    /// Per-body gravity gate from `canBuildParameter.terraformParameterCanBuild`
+    /// — the rocket can only launch from bodies whose surface gravity falls
+    /// in `[min_g, max_g]` (units: g). `None` for every LV except Al-Ice in
+    /// the shipped dump.
+    #[serde(default)]
+    gravity_gate: Option<GravityGateStat>,
+}
+
+/// Mirror of `parse_sirenix::GravityGate`. Bounds in g, Earth = 1 G.
+#[derive(Deserialize, Clone)]
+struct GravityGateStat {
+    min_g: f64,
+    max_g: f64,
 }
 
 #[derive(Deserialize, Clone)]
@@ -1423,6 +1436,21 @@ lift them to space.\n\n",
 }
 
 
+/// Format the per-rocket gravity gate as a player-facing cell.
+///   * `None` → `Any` (no restriction).
+///   * `Some` with `min_g == 0` → `≤ {max} G` (single ceiling — the common shape).
+///   * `Some` with `min_g > 0`  → `{min} – {max} G` (defensive: not seen in the
+///     shipped dump but the parser supports it via gate intersection).
+/// Numeric formatting trims trailing zeros via `fmt_amount`, which matches the
+/// payload / time cells one column over.
+fn fmt_max_g(gate: Option<&GravityGateStat>) -> String {
+    match gate {
+        None => "Any".to_string(),
+        Some(g) if g.min_g <= 0.0 => format!("≤ {} G", fmt_amount(g.max_g)),
+        Some(g) => format!("{} – {} G", fmt_amount(g.min_g), fmt_amount(g.max_g)),
+    }
+}
+
 fn page_launch_vehicles(locale: &Locale, sirenix: &Sirenix) -> String {
     let id_to_name: BTreeMap<&str, &str> = locale
         .launch_vehicles
@@ -1474,6 +1502,7 @@ fn page_launch_vehicles(locale: &Locale, sirenix: &Sirenix) -> String {
             fmt_amount(lv.max_payload),
             fmt_reusability(lv.reusability).into(),
             if lv.can_send_human { "Yes" } else { "No" }.into(),
+            fmt_max_g(lv.gravity_gate.as_ref()),
             fmt_build_cost(&lv.build_cost, &resource_name),
             fmt_amount(lv.build_time_days),
             fmt_abbrev(lv.launch_cost),
@@ -1486,6 +1515,7 @@ fn page_launch_vehicles(locale: &Locale, sirenix: &Sirenix) -> String {
         "Payload (t)",
         "Reusable",
         "Crew",
+        "Max G",
         "Build cost",
         "Time (d)",
         "Launch",
@@ -1497,6 +1527,7 @@ fn page_launch_vehicles(locale: &Locale, sirenix: &Sirenix) -> String {
         Some("Max payload to low orbit, in tonnes"),
         Some("Survives reentry and can fly again (Yes / Partial / No)"),
         Some("Crew-rated for human passengers"),
+        Some("Maximum surface gravity this rocket can launch from. Earth ≈ 1 G, Mars ≈ 0.38 G, Luna ≈ 0.16 G, Jupiter ≈ 2.5 G."),
         Some("Resources required to construct"),
         Some("Build time in days"),
         Some("Cash fee paid on every launch"),
@@ -1649,6 +1680,7 @@ Three propulsion families are unlocked across the tech tree:\n\n\
 - **Max Payload** is the heaviest load (in tonnes) the vehicle can carry to low orbit.\n\
 - **Reusable** — *Yes* means the vehicle survives reentry and can fly again; *No* means each launch consumes the vehicle.\n\
 - **Crew Rated** — whether the vehicle can carry humans, not just cargo.\n\
+- **Max G** is the surface-gravity envelope the rocket can launch from. `Any` means no restriction; `≤ 1.8 G` means the rocket only ignites on bodies with surface gravity at or below 1.8 g (Earth ≈ 1 G, Mars ≈ 0.38 G, Luna ≈ 0.16 G, Jupiter ≈ 2.5 G). Only the Al-Ice rockets carry a gate in the shipped data — everything else launches from anywhere.\n\
 - **Launch cost** is the cash fee paid every launch; **Maintenance** is the daily upkeep cost while idle on the pad.\n\n\
 ## Alternative launch methods\n\n\
 The game also models several non-rocket launch systems unlocked through\n\
@@ -6038,6 +6070,129 @@ mod tests {
         assert!(
             alt.contains("../facilities/#facility-launch-massdriver"),
             "missing cross-page link to facilities/#facility-launch-massdriver: {alt}"
+        );
+    }
+
+    // ---------- Launch-vehicles page: Max G column ----------
+
+    /// Minimal LaunchVehicleStat builder for tests. Mirrors the `facility_stat`
+    /// fixture: zero/empty defaults that callers customise per-test.
+    fn launch_vehicle_stat(id: &str) -> LaunchVehicleStat {
+        LaunchVehicleStat {
+            id: id.into(),
+            max_payload: 0.0,
+            max_fuel_load: 0.0,
+            exhaust_velocity: 0.0,
+            reusability: 0.0,
+            can_send_human: false,
+            is_locked: false,
+            build_cost: vec![],
+            build_time_days: 0.0,
+            launch_cost: 0.0,
+            maintenance_cost_per_day: 0.0,
+            fuel_type_on_start: None,
+            gravity_gate: None,
+        }
+    }
+
+    fn max_g_fixture_locale() -> Locale {
+        Locale {
+            celestial_bodies: vec![],
+            spacecraft: vec![],
+            launch_vehicles: vec![
+                NameDesc {
+                    id: "id_Rocket_RocketType5".into(),
+                    name: "Al-Ice Rocket".into(),
+                    description: String::new(),
+                },
+                NameDesc {
+                    id: "id_Rocket_RocketType1".into(),
+                    name: "Sparrow".into(),
+                    description: String::new(),
+                },
+            ],
+            research: vec![],
+            corporations: vec![],
+            contracts: vec![],
+            resources: vec![],
+            facilities: vec![],
+            habitability_scales: BTreeMap::new(),
+            cargo: vec![],
+        }
+    }
+
+    #[test]
+    fn launch_vehicles_page_renders_max_g_column_header() {
+        // The chemical-rockets table should expose a "Max G" header column with
+        // the canonical tooltip — even when no rocket carries a gate.
+        let locale = max_g_fixture_locale();
+        let sparrow = launch_vehicle_stat("id_Rocket_RocketType1");
+        let sirenix = Sirenix {
+            launch_vehicles: vec![sparrow],
+            ..Default::default()
+        };
+        let page = page_launch_vehicles(&locale, &sirenix);
+        assert!(
+            page.contains("Max G"),
+            "launch-vehicles page is missing a Max G column header:\n{page}"
+        );
+        assert!(
+            page.contains("Maximum surface gravity this rocket can launch from"),
+            "Max G column tooltip missing:\n{page}"
+        );
+    }
+
+    #[test]
+    fn launch_vehicles_page_renders_max_g_for_al_ice() {
+        // Al-Ice rocket carries a Gravity 0..1.8 gate -> the cell should render
+        // "≤ 1.8 G" (min == 0 collapses to a single ceiling). The Sparrow row
+        // has no gate, so its Max G cell should render "Any".
+        let locale = max_g_fixture_locale();
+        let mut al_ice = launch_vehicle_stat("id_Rocket_RocketType5");
+        al_ice.gravity_gate = Some(GravityGateStat { min_g: 0.0, max_g: 1.8 });
+        let sparrow = launch_vehicle_stat("id_Rocket_RocketType1");
+        let sirenix = Sirenix {
+            launch_vehicles: vec![al_ice, sparrow],
+            ..Default::default()
+        };
+        let page = page_launch_vehicles(&locale, &sirenix);
+        let al_ice_row = page
+            .lines()
+            .find(|l| l.contains("**Al-Ice Rocket**"))
+            .expect("Al-Ice row present");
+        assert!(
+            al_ice_row.contains("≤ 1.8 G"),
+            "Al-Ice row should render Max G as '≤ 1.8 G': {al_ice_row}"
+        );
+        let sparrow_row = page
+            .lines()
+            .find(|l| l.contains("**Sparrow**"))
+            .expect("Sparrow row present");
+        assert!(
+            sparrow_row.contains("Any"),
+            "Sparrow row (no gate) should render Max G as 'Any': {sparrow_row}"
+        );
+    }
+
+    #[test]
+    fn launch_vehicles_page_renders_max_g_range_when_min_nonzero() {
+        // Defensive: a gate with min > 0 should render as "{min} – {max} G",
+        // not collapsed to the ceiling.
+        let locale = max_g_fixture_locale();
+        let mut al_ice = launch_vehicle_stat("id_Rocket_RocketType5");
+        al_ice.gravity_gate = Some(GravityGateStat { min_g: 0.5, max_g: 1.5 });
+        let sirenix = Sirenix {
+            launch_vehicles: vec![al_ice],
+            ..Default::default()
+        };
+        let page = page_launch_vehicles(&locale, &sirenix);
+        let row = page
+            .lines()
+            .find(|l| l.contains("**Al-Ice Rocket**"))
+            .expect("Al-Ice row present");
+        assert!(
+            row.contains("0.5 – 1.5 G"),
+            "row with min=0.5 max=1.5 should render '0.5 – 1.5 G': {row}"
         );
     }
 

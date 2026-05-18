@@ -45,6 +45,22 @@ struct LaunchVehicle {
     // `None` for entries where the field is unset in the dump.  Used to
     // categorize the launch-vehicles page into chemical vs. nuclear tables.
     fuel_type_on_start: Option<String>,
+    /// Per-body gravity gate. When set, the rocket can only launch from bodies
+    /// whose surface gravity falls in `[min_g, max_g]` (units: g, where Earth
+    /// = 1 G). Surfaced from `canBuildParameter.terraformParameterCanBuild.list[]`
+    /// entries with `terraformParameterSettingsCanBuild == "Gravity"`. Only the
+    /// Al-Ice rockets (`id_Rocket_RocketType5` / `RocketType6`) carry one in the
+    /// shipped dump, with a 0..1.8 envelope.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    gravity_gate: Option<GravityGate>,
+}
+
+/// Surface-gravity envelope a rocket can launch from. Values are in g (Earth =
+/// 1 G, Mars ≈ 0.38 G, Luna ≈ 0.16 G, Jupiter ≈ 2.5 G).
+#[derive(Serialize, Debug, Default, PartialEq, Clone)]
+struct GravityGate {
+    min_g: f64,
+    max_g: f64,
 }
 
 #[derive(Serialize, Debug, Default, PartialEq)]
@@ -367,6 +383,41 @@ fn parse_launch_vehicle(v: &Value) -> Option<LaunchVehicle> {
         .pointer("/fuelTypeOnStart/name")
         .and_then(|x| x.as_str())
         .map(|s| s.to_string());
+
+    // canBuildParameter.terraformParameterCanBuild.list[] carries per-body
+    // build/launch gates — habitability-range envelopes the body must satisfy.
+    // For LVs only Gravity entries are surfaced (Al-Ice rockets carry a
+    // 0..1.8 G cap). Other parameters (Pressure / Temperature / …) are
+    // ignored here on purpose — they don't appear on launch vehicles in the
+    // shipped dump and adding them speculatively risks lying about envelopes
+    // the game might interpret differently for LVs vs. facilities.
+    // If multiple Gravity entries appear we take the intersection (max of
+    // mins, min of maxes) as the effective gate.
+    let mut gravity_gate: Option<GravityGate> = None;
+    if let Some(list) = v
+        .pointer("/canBuildParameter/terraformParameterCanBuild/list")
+        .and_then(|x| x.as_array())
+    {
+        for entry in list {
+            let param = entry
+                .get("terraformParameterSettingsCanBuild")
+                .and_then(|x| x.as_str())
+                .unwrap_or("");
+            if param != "Gravity" {
+                continue;
+            }
+            let min = entry.get("min").and_then(|x| x.as_f64()).unwrap_or(0.0);
+            let max = entry.get("max").and_then(|x| x.as_f64()).unwrap_or(0.0);
+            gravity_gate = Some(match gravity_gate {
+                None => GravityGate { min_g: min, max_g: max },
+                Some(g) => GravityGate {
+                    min_g: g.min_g.max(min),
+                    max_g: g.max_g.min(max),
+                },
+            });
+        }
+    }
+
     Some(LaunchVehicle {
         id,
         max_payload: f(&["maxPayload"]),
@@ -380,6 +431,7 @@ fn parse_launch_vehicle(v: &Value) -> Option<LaunchVehicle> {
         launch_cost: f(&["costLaunch"]),
         maintenance_cost_per_day: f(&["maintenanceCostPerDay"]),
         fuel_type_on_start,
+        gravity_gate,
     })
 }
 
@@ -1762,6 +1814,78 @@ mod tests {
         // Missing field stays None (some dump entries have fuelTypeOnStart=null).
         let bare = serde_json::json!({"id": "lv_chem_seadragon"});
         assert!(parse_launch_vehicle(&bare).unwrap().fuel_type_on_start.is_none());
+    }
+
+    #[test]
+    fn parses_gravity_gate_from_can_build_parameter() {
+        // Real shape from the Sirenix dump for id_Rocket_RocketType5 / RocketType6
+        // (Al-Ice rockets): a single Gravity 0..1.8 gate restricting launch to
+        // bodies with surface gravity at or below 1.8 g.
+        let v = serde_json::json!({
+            "id": "id_Rocket_RocketType5",
+            "canBuildParameter": {
+                "terraformParameterCanBuild": {
+                    "list": [
+                        {
+                            "terraformParameterSettingsCanBuild": "Gravity",
+                            "min": 0,
+                            "max": 1.8
+                        }
+                    ]
+                }
+            }
+        });
+        let lv = parse_launch_vehicle(&v).expect("parses");
+        let gate = lv.gravity_gate.expect("gravity_gate populated");
+        assert_eq!(gate.min_g, 0.0);
+        assert_eq!(gate.max_g, 1.8);
+    }
+
+    #[test]
+    fn launch_vehicle_without_gravity_gate_has_none() {
+        // Most LVs don't carry a canBuildParameter at all; gravity_gate stays None.
+        let v = serde_json::json!({ "id": "lv_chem_seadragon" });
+        let lv = parse_launch_vehicle(&v).expect("parses");
+        assert!(lv.gravity_gate.is_none());
+    }
+
+    #[test]
+    fn launch_vehicle_ignores_non_gravity_can_build_entries() {
+        // If the list carries e.g. a Pressure gate (we don't surface those for
+        // LVs), gravity_gate stays None.
+        let v = serde_json::json!({
+            "id": "lv_chem_seadragon",
+            "canBuildParameter": {
+                "terraformParameterCanBuild": {
+                    "list": [
+                        { "terraformParameterSettingsCanBuild": "Pressure", "min": 0.0001, "max": 2 }
+                    ]
+                }
+            }
+        });
+        let lv = parse_launch_vehicle(&v).expect("parses");
+        assert!(lv.gravity_gate.is_none());
+    }
+
+    #[test]
+    fn launch_vehicle_intersects_multiple_gravity_gates() {
+        // Defensive: if multiple Gravity entries appear, take the tightest
+        // (intersection of all [min, max] ranges).
+        let v = serde_json::json!({
+            "id": "lv_synth",
+            "canBuildParameter": {
+                "terraformParameterCanBuild": {
+                    "list": [
+                        { "terraformParameterSettingsCanBuild": "Gravity", "min": 0.0, "max": 2.0 },
+                        { "terraformParameterSettingsCanBuild": "Gravity", "min": 0.5, "max": 1.5 }
+                    ]
+                }
+            }
+        });
+        let lv = parse_launch_vehicle(&v).expect("parses");
+        let gate = lv.gravity_gate.expect("gravity_gate populated");
+        assert_eq!(gate.min_g, 0.5);
+        assert_eq!(gate.max_g, 1.5);
     }
 
     #[test]
