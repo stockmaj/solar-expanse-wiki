@@ -177,6 +177,102 @@ struct CorpStart {
     starting_facilities: Vec<(String, u32)>,
 }
 
+/// Initial habitability snapshot for one celestial body at scenario load.
+/// Pulled from the `habitabilityParameters` sub-node inside each
+/// `ObjectInfoSaves[]` entry of a `StartGameData` save: every body in the
+/// loaded scene gets one entry per scenario (Early Exploration / The
+/// Expansion / Colonization / Race Beyond).
+///
+/// The four scenarios capture the campaign timeline at increasing dates, so
+/// the values drift across them as bodies are terraformed, mined, or
+/// otherwise altered.  Use these to compare conditions across the four
+/// pre-built starts.
+///
+/// Unit conventions observed in production dumps (units inferred from the
+/// values for the well-known planets, since the dump itself doesn't carry
+/// them):
+///   * `temperature` — degrees Celsius. Earth sits at ~2.4 °C, Mars at
+///     ~-63 °C, the Moon at ~40 °C (sub-solar mean).
+///   * `pressure` — Earth atmospheres. Earth ≈ 0.99, Mars ≈ 0.006.
+///   * `gravity` — m/s² (NOT Earth-relative). Earth ≈ 9.79, Mars ≈ 3.71,
+///     the Moon ≈ 1.62.
+///   * `water`, `composition`, `albedo` — dimensionless 0–1.
+///   * `radiation`, `magneticFieldVisualization` — game-specific scale
+///     (Earth ≈ 1 radiation, 40 magnetic; the Moon ≈ 12 radiation, 2.5
+///     magnetic).
+///   * `internalFlux` — heat flux (Earth = 0.08).
+///   * `heatCapacityRock`, `totalHeatCapacity`, `temperatureSwings` — raw
+///     simulation units.
+///   * `mirrorsStrength`, `shadesStrength` — player-driven terraforming
+///     deltas; usually 0 at scenario start.
+///   * `extremeVolcanism`, `environmentalToxicity`, `cryoVolcanism`,
+///     `hydroCarbonLakes` — game-specific scalars (all bodies ship with
+///     1.0 in the current data; included for completeness in case a
+///     future patch starts differentiating them).
+#[derive(Serialize, Debug, Default, PartialEq, Clone)]
+struct ScenarioBodyHabitability {
+    /// Body display name when resolvable via the `PlanetarySystemDescriptor`
+    /// id → name map; falls back to the stringified numeric id otherwise.
+    body_name: String,
+    /// Raw `IDObjectInfo.id` integer from the dump.  Stable across scenarios
+    /// for a given body in the Sol-Realistic system.
+    body_id: i32,
+    /// Temperature in degrees Celsius (in-game UI units; NOT Kelvin).
+    #[serde(default)]
+    temperature: f64,
+    /// Atmospheric composition score, 0–1.
+    #[serde(default)]
+    composition: f64,
+    /// Pressure in atmospheres (Earth ≈ 1.0).
+    #[serde(default)]
+    pressure: f64,
+    /// Surface gravity in Earth gravities (Earth ≈ 1.0).
+    #[serde(default)]
+    gravity: f64,
+    /// Water level, 0–1.
+    #[serde(default)]
+    water: f64,
+    /// Radiation level, 0–1+ (higher = worse).
+    #[serde(default)]
+    radiation: f64,
+    /// Magnetic field strength, 0–1.
+    #[serde(default)]
+    magnetic_field: f64,
+    /// Surface reflectivity, 0–1.
+    #[serde(default)]
+    albedo: f64,
+    /// Internal heat flux from the body's interior.
+    #[serde(default)]
+    internal_flux: f64,
+    /// Crustal heat capacity (raw simulation units).
+    #[serde(default)]
+    heat_capacity_rock: f64,
+    /// Total heat capacity including atmosphere.
+    #[serde(default)]
+    total_heat_capacity: f64,
+    /// Day-night temperature swing magnitude.
+    #[serde(default)]
+    temperature_swings: f64,
+    /// Player mirror-installation strength delta on this body.
+    #[serde(default)]
+    mirrors_strength: f64,
+    /// Player shade-installation strength delta on this body.
+    #[serde(default)]
+    shades_strength: f64,
+    /// Volcanism hazard flag (0/1).
+    #[serde(default)]
+    extreme_volcanism: f64,
+    /// Toxic-atmosphere hazard flag (0/1).
+    #[serde(default)]
+    environmental_toxicity: f64,
+    /// Cryovolcanism hazard flag (0/1).
+    #[serde(default)]
+    cryo_volcanism: f64,
+    /// Hydrocarbon lakes flag (0/1).
+    #[serde(default)]
+    hydro_carbon_lakes: f64,
+}
+
 /// One pre-built save scenario, listing every playable corp's starting state.
 /// `scenario_id` is the `StartGameEpoch_*` id resolved via
 /// `PlanetarySystem_Realistic.mapEpochToToStartData` — NOT the (sometimes
@@ -185,6 +281,13 @@ struct CorpStart {
 struct ScenarioStart {
     scenario_id: String, // e.g. "StartGameEpoch_EarlyExploration", "StartGameEpoch_TheExpansion", "StartGameEpoch_Colonization", "StartGameEpoch_RaceBeyond"
     corp_starts: Vec<CorpStart>,
+    /// Per-body habitability snapshot at scenario start. One entry per
+    /// `ObjectInfoSaves[]` element in the StartGameData; sorted by `body_id`
+    /// for deterministic output. Empty for older dumps that don't carry the
+    /// `habitabilityParameters` sub-node (testStartGAme is one such — it's
+    /// the Early Exploration save and its bodies are at default values).
+    #[serde(default)]
+    body_habitability: Vec<ScenarioBodyHabitability>,
 }
 
 #[derive(Serialize, Debug, Default, PartialEq)]
@@ -1057,6 +1160,17 @@ fn parse_scenario_start(
     entry: &Value,
     routing: &std::collections::HashMap<String, String>,
 ) -> Option<ScenarioStart> {
+    parse_scenario_start_with_body_names(entry, routing, &std::collections::HashMap::new())
+}
+
+/// Same as `parse_scenario_start`, but also fills each body_habitability
+/// entry's `body_name` from the supplied id → display-name resolver. Pass an
+/// empty map to fall back to the numeric body id stringified.
+fn parse_scenario_start_with_body_names(
+    entry: &Value,
+    routing: &std::collections::HashMap<String, String>,
+    body_names: &std::collections::HashMap<i32, String>,
+) -> Option<ScenarioStart> {
     let save_name = entry.get("$name").and_then(|v| v.as_str())?;
     let epoch_id = routing.get(save_name)?.clone();
 
@@ -1116,9 +1230,14 @@ fn parse_scenario_start(
     corp_starts.retain(|c| c.company_id != "WorldGovernment");
     corp_starts.sort_by(|a, b| a.company_id.cmp(&b.company_id));
 
+    // Per-body starting habitability — one entry per `ObjectInfoSaves[]`
+    // element. Sorted by body_id for deterministic output.
+    let body_habitability = collect_body_habitability(nodes, body_names);
+
     Some(ScenarioStart {
         scenario_id: epoch_id,
         corp_starts,
+        body_habitability,
     })
 }
 
@@ -1236,6 +1355,277 @@ fn collect_starting_facilities(nodes: &[Value]) -> std::collections::HashMap<Str
         out.insert(corp, v);
     }
     out
+}
+
+/// Walk the SerializationNodes stream and pull out a per-body habitability
+/// snapshot — one entry per `ObjectInfoSaves[]` element.
+///
+/// The stream shape we're matching looks like:
+/// ```text
+/// ObjectInfoSaves StartOfNode
+///   StartOfArray <count>
+///     StartOfNode <ObjectInfoSave>
+///       IDObjectInfo StartOfNode
+///         id Integer <body_id>          ← body id we capture
+///       EndOfNode
+///       ...
+///       habitabilityParameters StartOfNode
+///         temperature   FloatingPoint <val>
+///         composition   FloatingPoint <val>
+///         pressure      FloatingPoint <val>
+///         ...
+///       EndOfNode
+///     EndOfNode
+///     ...
+///   EndOfArray
+/// EndOfNode
+/// ```
+///
+/// We track three pieces of state as we walk:
+///   * `in_obj_save_at` — depth at which the current ObjectInfoSave opened
+///     (None outside any ObjectInfoSave), so we can scope id capture to its
+///     direct `IDObjectInfo` child rather than other random `id` Integers
+///     nested deeper.
+///   * `in_id_for_object_info_at` — depth at which the current IDObjectInfo
+///     opened, so we capture the right `id`.
+///   * `in_habit_at` — depth at which the current `habitabilityParameters`
+///     opened, so we only capture FloatingPoint fields that sit directly
+///     inside the habitabilityParameters scope (depth == in_habit_at + 1).
+///
+/// Bodies whose `habitabilityParameters` block is missing (some scenarios'
+/// minor bodies) are dropped — emitting them with all-zero values would
+/// be noise. Sorted by body_id for stable downstream rendering.
+fn collect_body_habitability(
+    nodes: &[Value],
+    body_names: &std::collections::HashMap<i32, String>,
+) -> Vec<ScenarioBodyHabitability> {
+    let mut out: Vec<ScenarioBodyHabitability> = Vec::new();
+
+    let mut depth: i32 = 0;
+    // Each ObjectInfoSave we're currently inside (just one in practice, but
+    // tracking a stack keeps the logic robust). Carries the open depth plus
+    // the in-progress entry once we've captured its body id.
+    let mut obj_stack: Vec<(i32, Option<ScenarioBodyHabitability>)> = Vec::new();
+    // Depth at which the current ObjectInfoSave's IDObjectInfo sub-node
+    // opened. None when we're not inside an IDObjectInfo scope.
+    let mut in_id_for_object_info_at: Option<i32> = None;
+    // Depth at which the current habitabilityParameters sub-node opened.
+    let mut in_habit_at: Option<i32> = None;
+    // Whether we've already seen `habitabilityParameters` for the topmost
+    // ObjectInfoSave — guards against re-capturing if some future dump
+    // version emits a second habitability block (it doesn't currently).
+    let mut habit_filled = false;
+
+    for n in nodes {
+        let e = entry_of(n);
+        let nm = name_of(n);
+        let data = data_of(n);
+
+        // ObjectInfoSave entries are array items, so their Name is empty and
+        // the Data field's type suffix carries the class name.
+        let after_pipe = data.find('|').map(|i| &data[i + 1..]).unwrap_or(data);
+        let is_object_info_save = e == "StartOfNode"
+            && nm.is_empty()
+            && after_pipe.starts_with("Manager.SaveGameData+ObjectInfoSave");
+
+        if is_object_info_save {
+            obj_stack.push((depth, None));
+            habit_filled = false;
+        }
+
+        // Open IDObjectInfo (must be a direct child of the current ObjectInfoSave).
+        if let Some(&(obj_depth, _)) = obj_stack.last() {
+            if e == "StartOfNode" && nm == "IDObjectInfo" && depth == obj_depth + 1 {
+                in_id_for_object_info_at = Some(depth);
+            }
+        }
+        // Capture body id from `id Integer <n>` inside the open IDObjectInfo.
+        if in_id_for_object_info_at.is_some()
+            && e == "Integer"
+            && nm == "id"
+        {
+            if let Ok(body_id) = data.parse::<i32>() {
+                if let Some(top) = obj_stack.last_mut() {
+                    if top.1.is_none() {
+                        let body_name = body_names
+                            .get(&body_id)
+                            .cloned()
+                            .unwrap_or_else(|| body_id.to_string());
+                        top.1 = Some(ScenarioBodyHabitability {
+                            body_id,
+                            body_name,
+                            ..Default::default()
+                        });
+                    }
+                }
+            }
+        }
+
+        // Open habitabilityParameters (must be a direct child of the
+        // current ObjectInfoSave, depth == obj_depth + 1).
+        if let Some(&(obj_depth, _)) = obj_stack.last() {
+            if e == "StartOfNode"
+                && nm == "habitabilityParameters"
+                && depth == obj_depth + 1
+                && !habit_filled
+            {
+                in_habit_at = Some(depth);
+            }
+        }
+
+        // Capture floating-point fields that sit DIRECTLY inside the
+        // habitabilityParameters block (depth == in_habit_at + 1). Nested
+        // wrapper nodes (temperatureWithAtmosphereOld is a Nullable double
+        // wrapper at depth +1, with the actual FloatingPoint at +2) are
+        // skipped by the depth check.
+        if let Some(hd) = in_habit_at {
+            if e == "FloatingPoint" && depth == hd + 1 {
+                if let Ok(v) = data.parse::<f64>() {
+                    if let Some(top) = obj_stack.last_mut() {
+                        if let Some(b) = top.1.as_mut() {
+                            match nm {
+                                "temperature" => b.temperature = v,
+                                "composition" => b.composition = v,
+                                "pressure" => b.pressure = v,
+                                "gravity" => b.gravity = v,
+                                "water" => b.water = v,
+                                "radiation" => b.radiation = v,
+                                "magneticFieldVisualization" => b.magnetic_field = v,
+                                "albedo" => b.albedo = v,
+                                "internalFlux" => b.internal_flux = v,
+                                "heatCapacityRock" => b.heat_capacity_rock = v,
+                                "totalHeatCapacity" => b.total_heat_capacity = v,
+                                "temperatureSwings" => b.temperature_swings = v,
+                                "mirrorsStrength" => b.mirrors_strength = v,
+                                "shadesStrength" => b.shades_strength = v,
+                                "extremeVolcanism" => b.extreme_volcanism = v,
+                                "environmentalToxicity" => b.environmental_toxicity = v,
+                                "cryoVolcanism" => b.cryo_volcanism = v,
+                                "hydroCarbonLakes" => b.hydro_carbon_lakes = v,
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Depth bookkeeping — must run after field captures, before
+        // close-handling so the open-depth checks above see the pre-update
+        // depth.
+        if e == "StartOfNode" || e == "StartOfArray" {
+            depth += 1;
+        } else if e == "EndOfNode" || e == "EndOfArray" {
+            // Close inner scopes when we return to or below their open depth.
+            if let Some(hd) = in_habit_at {
+                if depth == hd {
+                    in_habit_at = None;
+                    habit_filled = true;
+                }
+            }
+            if let Some(idod) = in_id_for_object_info_at {
+                if depth == idod {
+                    in_id_for_object_info_at = None;
+                }
+            }
+            depth -= 1;
+            // Close the topmost ObjectInfoSave when we return to its open
+            // depth — i.e., the matching EndOfNode for the save itself.
+            if let Some(&(obj_depth, _)) = obj_stack.last() {
+                if depth == obj_depth {
+                    let (_, entry) = obj_stack.pop().unwrap();
+                    if let Some(body) = entry {
+                        // Only surface bodies whose habitabilityParameters
+                        // block was actually present — habit_filled signals
+                        // we walked through (and out of) it. Bodies without
+                        // a habitabilityParameters sub-node (old-style
+                        // saves, debug placeholders) are dropped.
+                        if habit_filled {
+                            out.push(body);
+                        }
+                    }
+                    habit_filled = false;
+                }
+            }
+        }
+    }
+
+    out.sort_by_key(|b| b.body_id);
+    out
+}
+
+/// Build the `body_id` → display-name map used by `collect_body_habitability`.
+///
+/// The PlanetarySystem_Dummy descriptor's `solarSystemData.tabObjectInfoData`
+/// list is the only place in the dump that carries a complete planet/moon
+/// id-to-name mapping (the Realistic descriptor's list is empty — it gets
+/// populated at runtime). Each entry has:
+///   * `objectInfoId` — the `IDObjectInfo.id` integer used elsewhere.
+///   * `idTranslation` — a localization key like
+///     `"CelestialBodiesNames.Earth"`; we strip the `CelestialBodiesNames.`
+///     prefix to get the plain body name ("Earth").
+///   * `customName` — overrides idTranslation when non-empty.
+///
+/// Asteroids and exotic bodies aren't in this list, so the resolver returns
+/// `None` for them and the caller falls back to the numeric id.
+fn build_body_name_map(
+    descriptors: &Value,
+) -> std::collections::HashMap<i32, String> {
+    let mut map = std::collections::HashMap::new();
+    let arr = match descriptors.as_array() {
+        Some(a) => a,
+        None => return map,
+    };
+    // Prefer Dummy (the most complete list); fall back to others if Dummy
+    // is missing entirely. Within each descriptor's list, later entries
+    // override earlier ones — harmless in practice since ids are unique.
+    let prefer_order = |name: &str| -> u8 {
+        match name {
+            "PlanetarySystem_Dummy" => 0,
+            "PlanetarySystem_Realistic" => 1,
+            _ => 2,
+        }
+    };
+    let mut ordered: Vec<&Value> = arr.iter().collect();
+    ordered.sort_by_key(|d| {
+        prefer_order(d.get("$name").and_then(|v| v.as_str()).unwrap_or(""))
+    });
+    for d in ordered {
+        let tab = match d
+            .pointer("/solarSystemData/tabObjectInfoData")
+            .and_then(|v| v.as_array())
+        {
+            Some(t) => t,
+            None => continue,
+        };
+        for row in tab {
+            let id = match row.get("objectInfoId").and_then(|v| v.as_i64()) {
+                Some(i) => i as i32,
+                None => continue,
+            };
+            let custom = row
+                .get("customName")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let name = if !custom.is_empty() {
+                custom.to_string()
+            } else {
+                let raw = row
+                    .get("idTranslation")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                raw.strip_prefix("CelestialBodiesNames.")
+                    .unwrap_or(raw)
+                    .to_string()
+            };
+            if name.is_empty() {
+                continue;
+            }
+            // Only insert if absent so the preferred-descriptor row wins.
+            map.entry(id).or_insert(name);
+        }
+    }
+    map
 }
 
 fn name_of(n: &Value) -> &str {
@@ -1471,12 +1861,22 @@ fn main() -> Result<()> {
         .get("PlanetarySystemDescriptor")
         .and_then(build_scenario_routing)
         .unwrap_or_default();
+    // The Dummy descriptor's tabObjectInfoData carries the only complete
+    // body-id → display-name mapping in the dump.  Empty map is fine — the
+    // parser falls back to stringified numeric ids for any unmapped body
+    // (asteroids and other exotic bodies aren't in the list either way).
+    let body_name_map = raw
+        .get("PlanetarySystemDescriptor")
+        .map(build_body_name_map)
+        .unwrap_or_default();
     let mut scenario_starts: Vec<ScenarioStart> = raw
         .get("StartGameData")
         .and_then(|v| v.as_array())
         .map(|arr| {
             arr.iter()
-                .filter_map(|e| parse_scenario_start(e, &scenario_routing))
+                .filter_map(|e| {
+                    parse_scenario_start_with_body_names(e, &scenario_routing, &body_name_map)
+                })
                 .collect()
         })
         .unwrap_or_default();
@@ -2540,5 +2940,294 @@ mod tests {
             c.date_time_string_start.as_deref(),
             Some("2080-01-01 00:00:00")
         );
+    }
+
+    /// Fixture mirroring the real dump's `ObjectInfoSaves[]` region inside a
+    /// StartGameData's `serializationData.SerializationNodes` stream. Each
+    /// `ObjectInfoSave` carries an `IDObjectInfo.id` (Integer) and a
+    /// `habitabilityParameters` sub-node with the body's start-of-scenario
+    /// environmental state.
+    ///
+    /// This fixture builds two bodies: id=66 (Earth-like values) and id=59
+    /// (Mars-like values), so the test can assert both shape and ordering.
+    fn body_habitability_fixture() -> Value {
+        let node = |name: &str, entry: &str, data: &str| {
+            serde_json::json!({"Name": name, "Entry": entry, "Data": data})
+        };
+        // Helper for the habitabilityParameters sub-node — the field order
+        // mirrors what the real dump emits (TerraformationConfig+HabitabilityParametersNew).
+        let habit = |temp: &str,
+                     pressure: &str,
+                     gravity: &str,
+                     water: &str,
+                     radiation: &str,
+                     albedo: &str|
+         -> Vec<Value> {
+            vec![
+                node(
+                    "habitabilityParameters",
+                    "StartOfNode",
+                    "X|Data.ScriptableObject.Terraformation.TerraformationConfig+HabitabilityParametersNew, Assembly-CSharp",
+                ),
+                node("temperature", "FloatingPoint", temp),
+                node("composition", "FloatingPoint", "0"),
+                node("pressure", "FloatingPoint", pressure),
+                node("gravity", "FloatingPoint", gravity),
+                node("water", "FloatingPoint", water),
+                node("radiation", "FloatingPoint", radiation),
+                node("magneticFieldVisualization", "FloatingPoint", "0"),
+                node("albedo", "FloatingPoint", albedo),
+                node("internalFlux", "FloatingPoint", "0"),
+                node("heatCapacityRock", "FloatingPoint", "0"),
+                // The optional `temperatureWithAtmosphereOld` Nullable double
+                // appears as a wrapper node; include the empty form for
+                // realism.
+                node(
+                    "temperatureWithAtmosphereOld",
+                    "StartOfNode",
+                    "System.Nullable`1[[System.Double, mscorlib]], mscorlib",
+                ),
+                node("", "Null", ""),
+                node("", "EndOfNode", ""),
+                node("saturationPressureForBoilingOld", "Null", ""),
+                node("totalHeatCapacity", "FloatingPoint", "0"),
+                node("prevTotalHeatCapacity", "FloatingPoint", "0"),
+                node("temperatureSwings", "FloatingPoint", "0"),
+                node("mirrorsStrength", "FloatingPoint", "0"),
+                node("shadesStrength", "FloatingPoint", "0"),
+                node("extremeVolcanism", "FloatingPoint", "0"),
+                node("environmentalToxicity", "FloatingPoint", "0"),
+                node("cryoVolcanism", "FloatingPoint", "0"),
+                node("hydroCarbonLakes", "FloatingPoint", "0"),
+                node("", "EndOfNode", ""),
+            ]
+        };
+        let mut nodes: Vec<Value> = vec![
+            // Minimal companyDataSave so the outer parse_scenario_start
+            // doesn't bail before reaching ObjectInfoSaves.
+            node("companyDataSave", "StartOfNode", "0|List`1[CompanyDataSave]"),
+            node("", "StartOfArray", "1"),
+            node("", "StartOfNode", "1|CompanyDataSave"),
+            node("companyID", "StartOfNode", "2|CompanyIDSave"),
+            node("id", "String", "NASA"),
+            node("", "EndOfNode", ""),
+            node("money", "FloatingPoint", "10000000"),
+            node("", "EndOfNode", ""),
+            node("", "EndOfArray", ""),
+            node("", "EndOfNode", ""),
+            // ObjectInfoSaves: two bodies.
+            node(
+                "ObjectInfoSaves",
+                "StartOfNode",
+                "3|List`1[Manager.SaveGameData+ObjectInfoSave]",
+            ),
+            node("", "StartOfArray", "2"),
+            // Body #1 — id=66 (Earth-like)
+            node("", "StartOfNode", "4|Manager.SaveGameData+ObjectInfoSave"),
+            node("IDObjectInfo", "StartOfNode", "5|Game.Info.IdForObjectInfo"),
+            node("id", "Integer", "66"),
+            node("", "EndOfNode", ""),
+            node("isInGameDestroy", "Boolean", "false"),
+            node("idImpactFrom", "Integer", "-1"),
+            node("customName", "Null", ""),
+        ];
+        // Earth-like habitability (15 °C, 1 atm, 1 g, 0.71 water, 0 radiation, 0.3 albedo)
+        nodes.extend(habit("15", "1", "1", "0.71", "0", "0.3"));
+        nodes.push(node("", "EndOfNode", "")); // close ObjectInfoSave #1
+        // Body #2 — id=59 (Mars-like)
+        nodes.push(node("", "StartOfNode", "6|Manager.SaveGameData+ObjectInfoSave"));
+        nodes.push(node("IDObjectInfo", "StartOfNode", "7|Game.Info.IdForObjectInfo"));
+        nodes.push(node("id", "Integer", "59"));
+        nodes.push(node("", "EndOfNode", ""));
+        nodes.push(node("isInGameDestroy", "Boolean", "false"));
+        nodes.push(node("idImpactFrom", "Integer", "-1"));
+        nodes.push(node("customName", "Null", ""));
+        // Mars-like: -63 °C, 0.006 atm, 0.38 g, 0 water, 1.2 radiation, 0.25 albedo
+        nodes.extend(habit("-63", "0.006", "0.38", "0", "1.2", "0.25"));
+        nodes.push(node("", "EndOfNode", "")); // close ObjectInfoSave #2
+        nodes.push(node("", "EndOfArray", ""));
+        nodes.push(node("", "EndOfNode", "")); // close ObjectInfoSaves
+        serde_json::json!({
+            "$name": "StartGameColonization",
+            "id": "StartGameColonization",
+            "serializationData": {
+                "SerializationNodes": nodes,
+            }
+        })
+    }
+
+    #[test]
+    fn parses_body_habitability_for_two_bodies() {
+        // The Colonization save has 150 ObjectInfoSaves; this fixture exercises
+        // two of them to keep the assertions readable while covering the
+        // multi-body case.
+        let mut routing = std::collections::HashMap::new();
+        routing.insert(
+            "StartGameColonization".to_string(),
+            "StartGameEpoch_Colonization".to_string(),
+        );
+        let s = parse_scenario_start(&body_habitability_fixture(), &routing)
+            .expect("colonization should parse");
+        // Sorted by body_id so the order is deterministic regardless of dump
+        // ordering.
+        assert_eq!(s.body_habitability.len(), 2);
+        assert_eq!(s.body_habitability[0].body_id, 59);
+        assert_eq!(s.body_habitability[1].body_id, 66);
+
+        // Mars-like body (id=59)
+        let mars = &s.body_habitability[0];
+        assert_eq!(mars.temperature, -63.0);
+        assert_eq!(mars.pressure, 0.006);
+        assert_eq!(mars.gravity, 0.38);
+        assert_eq!(mars.radiation, 1.2);
+        assert_eq!(mars.water, 0.0);
+        assert_eq!(mars.albedo, 0.25);
+
+        // Earth-like body (id=66)
+        let earth = &s.body_habitability[1];
+        assert_eq!(earth.temperature, 15.0);
+        assert_eq!(earth.pressure, 1.0);
+        assert_eq!(earth.gravity, 1.0);
+        assert_eq!(earth.water, 0.71);
+        assert_eq!(earth.radiation, 0.0);
+        assert_eq!(earth.albedo, 0.3);
+    }
+
+    #[test]
+    fn body_habitability_with_resolver_uses_friendly_name() {
+        // build_body_name_map is fed by the PlanetarySystemDescriptor's
+        // tabObjectInfoData (id → idTranslation). The renderer hands the
+        // resolved name to body_habitability via post-processing in the
+        // parser.
+        let mut routing = std::collections::HashMap::new();
+        routing.insert(
+            "StartGameColonization".to_string(),
+            "StartGameEpoch_Colonization".to_string(),
+        );
+        let mut name_for: std::collections::HashMap<i32, String> =
+            std::collections::HashMap::new();
+        name_for.insert(66, "Earth".to_string());
+        name_for.insert(59, "Mars".to_string());
+        let s = parse_scenario_start_with_body_names(
+            &body_habitability_fixture(),
+            &routing,
+            &name_for,
+        )
+        .expect("colonization should parse");
+        let mars = s.body_habitability.iter().find(|b| b.body_id == 59).unwrap();
+        assert_eq!(mars.body_name, "Mars");
+        let earth = s.body_habitability.iter().find(|b| b.body_id == 66).unwrap();
+        assert_eq!(earth.body_name, "Earth");
+    }
+
+    #[test]
+    fn body_habitability_falls_back_to_numeric_id_when_name_missing() {
+        // Asteroids and other small bodies aren't in tabObjectInfoData (the
+        // Dummy descriptor only carries the 34 planets+moons). We still want
+        // them in the output, but with a numeric-id body_name.
+        let mut routing = std::collections::HashMap::new();
+        routing.insert(
+            "StartGameColonization".to_string(),
+            "StartGameEpoch_Colonization".to_string(),
+        );
+        let name_for: std::collections::HashMap<i32, String> =
+            std::collections::HashMap::new();
+        let s = parse_scenario_start_with_body_names(
+            &body_habitability_fixture(),
+            &routing,
+            &name_for,
+        )
+        .expect("colonization should parse");
+        // With no resolver, body_name falls back to the numeric id as a string.
+        assert_eq!(s.body_habitability[0].body_name, "59");
+        assert_eq!(s.body_habitability[1].body_name, "66");
+    }
+
+    #[test]
+    fn builds_body_name_map_from_planetary_system_descriptors() {
+        // The PlanetarySystem_Dummy descriptor's tabObjectInfoData is the only
+        // place in the dump that carries a complete planet/moon id→name
+        // mapping. Each entry has `objectInfoId` (the int id) and
+        // `idTranslation` (a "CelestialBodiesNames.Earth" key we strip down
+        // to "Earth"). customName takes precedence if set.
+        let descriptors = serde_json::json!([
+            {
+                "$name": "PlanetarySystem_Realistic",
+                "solarSystemData": { "tabObjectInfoData": [] }
+            },
+            {
+                "$name": "PlanetarySystem_Dummy",
+                "solarSystemData": {
+                    "tabObjectInfoData": [
+                        { "objectInfoId": 66, "idTranslation": "CelestialBodiesNames.Earth", "customName": "" },
+                        { "objectInfoId": 59, "idTranslation": "CelestialBodiesNames.Mars", "customName": "" },
+                        // customName wins if present.
+                        { "objectInfoId": 999, "idTranslation": "CelestialBodiesNames.Old", "customName": "Custom" },
+                    ]
+                }
+            }
+        ]);
+        let map = build_body_name_map(&descriptors);
+        assert_eq!(map.get(&66).map(|s| s.as_str()), Some("Earth"));
+        assert_eq!(map.get(&59).map(|s| s.as_str()), Some("Mars"));
+        assert_eq!(map.get(&999).map(|s| s.as_str()), Some("Custom"));
+    }
+
+    #[test]
+    fn parses_dropped_habit_fields_default_to_zero() {
+        // Older / minimal dumps may have a habitabilityParameters node with
+        // only a subset of the fields populated. The struct's #[serde(default)]
+        // already handles that on the JSON side; the parser must mirror it
+        // by leaving the f64 fields at 0.0 when the corresponding
+        // FloatingPoint node is absent.
+        let node = |name: &str, entry: &str, data: &str| {
+            serde_json::json!({"Name": name, "Entry": entry, "Data": data})
+        };
+        let nodes: Vec<Value> = vec![
+            node("companyDataSave", "StartOfNode", "0|List`1[CompanyDataSave]"),
+            node("", "StartOfArray", "0"),
+            node("", "EndOfArray", ""),
+            node("", "EndOfNode", ""),
+            node(
+                "ObjectInfoSaves",
+                "StartOfNode",
+                "1|List`1[Manager.SaveGameData+ObjectInfoSave]",
+            ),
+            node("", "StartOfArray", "1"),
+            node("", "StartOfNode", "2|Manager.SaveGameData+ObjectInfoSave"),
+            node("IDObjectInfo", "StartOfNode", "3|Game.Info.IdForObjectInfo"),
+            node("id", "Integer", "1234"),
+            node("", "EndOfNode", ""),
+            // Minimal habitabilityParameters: temperature only.
+            node(
+                "habitabilityParameters",
+                "StartOfNode",
+                "4|HabitabilityParametersNew",
+            ),
+            node("temperature", "FloatingPoint", "42"),
+            node("", "EndOfNode", ""),
+            node("", "EndOfNode", ""),
+            node("", "EndOfArray", ""),
+            node("", "EndOfNode", ""),
+        ];
+        let fixture = serde_json::json!({
+            "$name": "StartGameColonization",
+            "serializationData": {"SerializationNodes": nodes}
+        });
+        let mut routing = std::collections::HashMap::new();
+        routing.insert(
+            "StartGameColonization".to_string(),
+            "StartGameEpoch_Colonization".to_string(),
+        );
+        let s = parse_scenario_start(&fixture, &routing).expect("parses");
+        assert_eq!(s.body_habitability.len(), 1);
+        let b = &s.body_habitability[0];
+        assert_eq!(b.body_id, 1234);
+        assert_eq!(b.temperature, 42.0);
+        // All other fields should be zero (untouched defaults).
+        assert_eq!(b.pressure, 0.0);
+        assert_eq!(b.gravity, 0.0);
+        assert_eq!(b.water, 0.0);
+        assert_eq!(b.radiation, 0.0);
     }
 }
