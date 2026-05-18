@@ -302,7 +302,7 @@
           '<input type="search" class="calc-filter" placeholder="Filter facilities…" id="calc-facility-filter">' +
           '<div class="calc-facility-list" id="calc-facility-list"></div>' +
         '</div>' +
-        '<div class="calc-pane calc-pane-mid">' +
+        '<div class="calc-pane calc-pane-mid" id="calc-placed-drop">' +
           '<div class="calc-pane-header">' +
             '<h3>Placed</h3>' +
             '<button type="button" class="calc-save" id="calc-save">Save…</button>' +
@@ -310,7 +310,7 @@
             '<button type="button" class="calc-reset" id="calc-reset">Reset</button>' +
           '</div>' +
           '<div class="calc-saved" id="calc-saved"></div>' +
-          '<div class="calc-placed-list" id="calc-placed-list" data-drop="1"></div>' +
+          '<div class="calc-placed-list" id="calc-placed-list"></div>' +
         '</div>' +
         '<div class="calc-pane calc-pane-right">' +
           '<div class="calc-pane-header"><h3>Resources needed</h3></div>' +
@@ -687,7 +687,7 @@
   }
 
   function bindPlaced(root, ctx) {
-    var dropEl = root.querySelector('#calc-placed-list');
+    var dropEl = root.querySelector('#calc-placed-drop');
 
     dropEl.addEventListener('dragover', function (ev) {
       ev.preventDefault();
