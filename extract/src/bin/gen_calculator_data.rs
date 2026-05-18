@@ -851,11 +851,11 @@ mod tests {
 
         assert_eq!(data.crew_transports.len(), 2);
         assert_eq!(data.crew_transports[0].id, "module_crew_compartment");
-        assert_eq!(data.crew_transports[0].name, "Module Crew Compartment");
+        assert_eq!(data.crew_transports[0].name, "Crew Small");
         assert_eq!(data.crew_transports[0].capacity, 5);
         assert_eq!(data.crew_transports[0].mass, 5.0);
         assert!(!data.crew_transports[0].is_locked);
-        assert_eq!(data.crew_transports[1].name, "Module Crew Large");
+        assert_eq!(data.crew_transports[1].name, "Crew Large");
         assert!(data.crew_transports[1].is_locked);
     }
 
