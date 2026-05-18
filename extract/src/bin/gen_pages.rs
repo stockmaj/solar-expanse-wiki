@@ -156,6 +156,13 @@ struct ContractStat {
     /// `MM/DD/YYYY` from the dump; rendered as just `YYYY` on the table.
     #[serde(default)]
     date_start_active: Option<String>,
+    /// Future-dated "this contract isn't even visible until year YYYY"
+    /// timestamp from `dateTimeStringStart` in the dump (format
+    /// `YYYY-MM-DD HH:MM:SS`).  Distinct from `date_start_active`.  Used
+    /// together with `is_locked` to drive the Order column for date-locked
+    /// contracts (e.g. Exoplanet Search → 2080 → Order 2080).
+    #[serde(default)]
+    date_time_string_start: Option<String>,
     /// Years the contract stays offerable before it disappears. `0` means
     /// "never expires" → rendered as "—".
     #[serde(default)]
@@ -1704,40 +1711,24 @@ its own completed research, funding, and fleet. Difficulty further\n\
 scales starting money and ongoing costs.\n\n",
     );
 
-    // ── Epoch / Timeline ──────────────────────────────────────────────────
-    // Renders the five `StartGameEpoch` entries from the Sirenix dump as a
-    // small lookup table: human-facing epoch name, in-game start year, and
-    // the corp roster the player may choose at that epoch. Corp lists are
-    // alphabetised so the column reads consistently across rows.
-    if !sirenix.epochs.is_empty() {
-        // Only render epochs that actually ship for Sol-system play — the
-        // ones routed via PlanetarySystem_Realistic.mapEpochToToStartData
-        // (= the same epochs that appear in scenario_starts).  Prelude is
-        // defined in the dump but only mapped under PlanetarySystem_JSON
-        // (a dev system), so the game's New Game menu doesn't show it.
+    // Build the "Scenarios" reference table — emitted later in the page,
+    // after the Corporations-at-a-glance block.  Word choice note: the
+    // dropdown above is labelled "Scenario", so the rest of the page uses
+    // "Scenario" too (rather than the internal `StartGameEpoch` term).
+    let scenarios_section: String = if sirenix.epochs.is_empty() {
+        String::new()
+    } else {
         let playable_epochs: std::collections::BTreeSet<&str> = sirenix
             .scenario_starts
             .iter()
             .map(|s| s.scenario_id.as_str())
             .collect();
-        out.push_str("## Epoch / Timeline\n\n");
-        out.push_str(
-            "Solar Expanse's New Game menu offers four start epochs in Sol-system play —\n\
-Early Exploration, The Expansion, Colonization Era, and Race Beyond — each\n\
-with its own roster of playable corporations, all driving the comparison\n\
-table above.\n\n\
-*The shipped data files carry start-year values that don't match what the\n\
-game UI currently shows (start years drift with patches), so they're not\n\
-in this table. The names and corp rosters below are stable.*\n\n",
-        );
         let epoch_rows: Vec<Vec<String>> = sirenix
             .epochs
             .iter()
             .filter(|e| playable_epochs.contains(e.id.as_str()))
             .map(|e| {
                 let name = epoch_display_name(&e.id);
-                let year = extract_epoch_year(&e.start_date_string)
-                    .unwrap_or_else(|| "—".to_string());
                 let mut corps = e.possible_player_companies.clone();
                 corps.sort();
                 corps.dedup();
@@ -1746,20 +1737,30 @@ in this table. The names and corp rosters below are stable.*\n\n",
                 } else {
                     corps.join(", ")
                 };
-                let _ = year; // shipped value unreliable; see prose above
                 vec![
                     format!("**{}**", name),
                     escape_cell(&corp_cell),
                 ]
             })
             .collect();
-        let epoch_table = md_table(
-            &["Epoch", "Playable corporations"],
-            &epoch_rows,
+        let mut section = String::new();
+        section.push_str("## Scenarios\n\n");
+        section.push_str(
+            "Solar Expanse's New Game menu offers four start scenarios in Sol-system play —\n\
+Early Exploration, The Expansion, Colonization Era, and Race Beyond — each\n\
+with its own roster of playable corporations, all driving the comparison\n\
+table above.\n\n\
+*The shipped data files carry start-year values that don't match what the\n\
+game UI currently shows (start years drift with patches), so they're not\n\
+in this table. The names and corp rosters below are stable.*\n\n",
         );
-        out.push_str(&epoch_table);
-        out.push_str("\n");
-    }
+        section.push_str(&md_table(
+            &["Scenario", "Playable corporations"],
+            &epoch_rows,
+        ));
+        section.push('\n');
+        section
+    };
 
     // Difficulty also modifies upkeep and supply usage, which the
     // comparison table doesn't surface — keep that as a one-line note so
@@ -1966,6 +1967,11 @@ in this table. The names and corp rosters below are stable.*\n\n",
         }
     }
 
+    // Scenarios reference table — comes after the per-corp flavor section
+    // so the interactive Comparison + Corporations-at-a-glance content
+    // appears first, with the scenario lookup tucked underneath.
+    out.push_str(&scenarios_section);
+
     out.push_str("## See also\n\n- [Research](../research/) — full tech tree across all branches\n");
     out
 }
@@ -2123,7 +2129,7 @@ fn page_resources(locale: &Locale, sirenix: &Sirenix) -> String {
         &[
             "Resource",
             "Type",
-            "License (Earth)",
+            "Market base ($/t)",
             "Producers",
             "Consumers",
             "Description",
@@ -2131,7 +2137,7 @@ fn page_resources(locale: &Locale, sirenix: &Sirenix) -> String {
         &[
             None,
             Some("Normal (physical), Energy (real-time power), or Human (colonists)"),
-            Some("Earth licensing fee per tonne extracted — the static, meaningful price (market clearing price floats around this value as supply and demand move)"),
+            Some("Base clearing price used as the market price anchor — actual mining license fees vary per planet and are not exposed in static game data"),
             Some("Facilities whose structured production data lists this resource as an output"),
             Some("Facilities whose structured production data lists this resource as an input"),
             None,
@@ -2148,7 +2154,7 @@ types exist:\n\n\
 - **Human** — colonists; produced over time by habitats and consumed by jobs.\n\n\
 {table}\n\
 ## Reading the table\n\n\
-- **Base market price** is the starting clearing price on the marketplace; supply and demand move it from there.\n\
+- **Market base ($/t)** is `ResourceDefinition.marketClearingPriceBase` — the starting clearing-price anchor used by the global market; supply and demand move actual prices around it. It is NOT the per-planet mining license fee. Real license fees live on each celestial body's `ObjectInfo.ResourceMiningLicenseFeePerT` and are populated procedurally per planet at scenario load, so they vary by world and aren't extractable from static game data; check the in-game tooltip on each resource deposit for the exact license fee.\n\
 - **Producers** and **Consumers** are pulled from each facility's structured production data (`refinerData`, `energyProductionData`, `resourcesToMine`, `byproducts`) — not from tooltip text — so refineries don't get mis-credited as producing their inputs. Per-day rates aren't extractable from the static descriptors; the in-game tooltip remains the source of truth for rate numbers.\n"
     )
 }
@@ -2691,6 +2697,208 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
         }
     }
 
+    // -----------------------------------------------------------------
+    // Path A — Date-locked contracts use their year as Order.
+    //
+    // A contract with BOTH `is_locked == true` AND a non-empty
+    // `date_time_string_start` (format `YYYY-MM-DD HH:MM:SS`, e.g.
+    // `2080-01-01 00:00:00`) is not offerable until the in-game date catches
+    // up.  We override its depth with the *year* extracted from that string
+    // (so Exoplanet Search → Order 2080).  Descendants reachable through
+    // `unlock_rewards` get +1, +2, +3 from their parent.
+    //
+    // The propagation is folded into the same fixed-point pass below — we
+    // just seed the override here and let `depth[child] >= max_parent + 1`
+    // do the rest.
+    fn extract_year(s: &str) -> Option<u32> {
+        // Take the first 4 chars, parse as u32.  Format is always
+        // `YYYY-MM-DD HH:MM:SS` in the dump.
+        let year_str: String = s.chars().take(4).collect();
+        year_str.parse::<u32>().ok()
+    }
+    for c in &sirenix.contracts {
+        if !entry_ids.contains(c.id.as_str()) {
+            continue;
+        }
+        if !c.is_locked {
+            continue;
+        }
+        let Some(ts) = c.date_time_string_start.as_deref() else {
+            continue;
+        };
+        let Some(year) = extract_year(ts) else { continue };
+        let cur = depth.get(c.id.as_str()).copied().unwrap_or(0);
+        if year > cur {
+            depth.insert(c.id.as_str(), year);
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Path B — objective-driven depth floors.
+    //
+    // A contract whose objectives gate it via research / facilities / resources
+    // / spacecraft should inherit a depth ≥ depth(gating-research) + 1 even
+    // when its `unlock_rewards` chain leaves it at depth 0.  Without this fix,
+    // contracts like Improve Launch Methods (gated by `research_launch_magrail`)
+    // and Space Laboratories (gated by `build_lab` which is unlocked by a
+    // research node) sit at Order 0 alongside true starting contracts.
+    //
+    // Rules:
+    // - `MakeResearch` + `productItem.name = research_X`  → depth ≥ depth(research_X)+1
+    // - `BuildFacility` + `productItem.name = build_X`    → depth ≥ depth(research that unlocks build_X)+1
+    // - `Possession` + `productItem.name = build_X`       → same as BuildFacility
+    // - `Deliver` + `productItem.name = id_resource_X`    → depth ≥ depth(research for first facility producing X)+1
+    // - `Possession` with no `productItem`                → depth ≥ depth(research_sc_iris)+1 (the first spacecraft research)
+    //
+    // Build the helper maps: facility-id → research that unlocks it, and
+    // resource-id → first research that unlocks a producer of that resource.
+    let mut research_unlocking_facility: BTreeMap<&str, &str> = BTreeMap::new();
+    for r in &sirenix.research {
+        if r.action == "UnlockFacility" {
+            if let Some(target) = r.unlock_target.as_deref() {
+                research_unlocking_facility.entry(target).or_insert(r.id.as_str());
+            }
+        }
+    }
+    // For each resource id, find the research depth of the earliest (lowest-
+    // depth) research node that unlocks a facility producing that resource.
+    let mut research_for_resource: BTreeMap<&str, u32> = BTreeMap::new();
+    for f in &sirenix.facilities {
+        for p in &f.produces {
+            // Find the research that unlocks this facility.
+            // Facility ids in the produces map are bare ("lab"), but the
+            // `unlock_target` from research uses the "build_<id>" form, so we
+            // try both.
+            let candidates = [f.id.as_str(), &*format!("build_{}", f.id)];
+            for cand in &candidates {
+                if let Some(rid) = research_unlocking_facility.get(*cand) {
+                    let rd = research_depth.get(*rid).copied().unwrap_or(0);
+                    let entry = research_for_resource
+                        .entry(p.resource_id.as_str())
+                        .or_insert(rd);
+                    if rd < *entry {
+                        *entry = rd;
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    // Compute the objective-gate depth floor for each rendered contract.
+    let mut objective_gate: BTreeMap<&str, u32> = BTreeMap::new();
+    let iris_research_depth: u32 = research_depth
+        .get("research_sc_iris")
+        .copied()
+        .unwrap_or(0);
+    // Universal floor for objective-gated contracts whose target resolves to
+    // no research dependency.  In production, several starting facilities
+    // (build_lab, build_fuel, etc.) have `research_prereq: null` and similarly
+    // their input resources have no research-gated producers.  But the player
+    // still needs basic spacecraft + economy to satisfy "Have 5 labs" or
+    // "Deliver 100 fuel" — so any contract whose objectives are unlocked-by-
+    // economy at all gets floored to `depth(research_sc_iris) + 1`.
+    let iris_floor: u32 = iris_research_depth + 1;
+    for c in &entries {
+        let mut floor: u32 = 0;
+        for o in &c.objectives {
+            let bump = match (o.kind.as_str(), o.target.as_deref()) {
+                ("MakeResearch", Some(t)) if t.starts_with("research_") => {
+                    research_depth.get(t).copied().map(|d| d + 1)
+                }
+                ("BuildFacility", Some(t)) | ("Possession", Some(t))
+                    if t.starts_with("build_") =>
+                {
+                    let research_bump = research_unlocking_facility
+                        .get(t)
+                        .and_then(|r| research_depth.get(r).copied())
+                        .map(|d| d + 1);
+                    // Fall back to the iris floor when the facility is a
+                    // starter (no research_prereq) — the contract still needs
+                    // working spacecraft + economy to satisfy.
+                    Some(research_bump.unwrap_or(iris_floor))
+                }
+                ("Deliver", Some(t)) if t.starts_with("id_resource_") => {
+                    let bare = t.strip_prefix("id_resource_").unwrap_or(t);
+                    let research_bump = research_for_resource
+                        .get(bare)
+                        .copied()
+                        .map(|d| d + 1);
+                    // Resources produced only by starter facilities still
+                    // require the player to be flying — apply the iris floor.
+                    Some(research_bump.unwrap_or(iris_floor))
+                }
+                ("Possession", None) => {
+                    // Generic possession with no specific product — fall back
+                    // to Iris (first spacecraft research) as the floor.
+                    Some(iris_floor)
+                }
+                _ => None,
+            };
+            if let Some(b) = bump {
+                if b > floor {
+                    floor = b;
+                }
+            }
+        }
+        if floor > 0 {
+            objective_gate.insert(c.id.as_str(), floor);
+        }
+    }
+    // Apply the floor.
+    for c in &entries {
+        let id = c.id.as_str();
+        if let Some(&floor) = objective_gate.get(id) {
+            let cur = depth.get(id).copied().unwrap_or(0);
+            if floor > cur {
+                depth.insert(id, floor);
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Re-propagate forward: descendants of any contract whose depth was just
+    // bumped (by Path A or Path B) need their depth pushed forward too.
+    // Note: for Path A, we *also* want the year-based override to act like a
+    // parent, so descendants increment from the override value.  The existing
+    // propagation formula (depth[child] >= depth[parent] + 1) handles that
+    // naturally because we wrote the override into `depth` directly.
+    loop {
+        let mut changed = false;
+        for c in &entries {
+            let id = c.id.as_str();
+            let cur = depth.get(id).copied().unwrap_or(0);
+            let mut max_parent = 0u32;
+            let mut has_parent = false;
+            if let Some(parents) = unlocked_by.get(id) {
+                for p in parents {
+                    has_parent = true;
+                    let pd = depth.get(*p).copied().unwrap_or(0);
+                    if pd > max_parent {
+                        max_parent = pd;
+                    }
+                }
+            }
+            if let Some(rs) = research_unlockers_of_contract.get(id) {
+                for r in rs {
+                    has_parent = true;
+                    let rd = research_depth.get(*r).copied().unwrap_or(0);
+                    if rd > max_parent {
+                        max_parent = rd;
+                    }
+                }
+            }
+            let need = if has_parent { max_parent + 1 } else { cur };
+            if need > cur {
+                depth.insert(id, need);
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+
     // Display order: chain-DFS traversal so each campaign chain reads
     // top-to-bottom as a progression instead of getting flattened by depth.
     //
@@ -2920,28 +3128,35 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
             // Prereq column — which contracts must complete before this one
             // is offered.  Built from the reverse-rewards lookup.  Filter the
             // same way `entries` is filtered: drop tutorial/_test contracts
-            // and any source with an empty locale display name.
-            let prereq_cell = match unlocked_by.get(c.id.as_str()) {
-                None => "—".to_string(),
-                Some(srcs) => {
-                    let pretty_links: Vec<String> = srcs
-                        .iter()
-                        .filter(|src| !src.contains("_test"))
-                        .filter_map(|src| {
-                            let pretty = contract_name.get(src).copied().unwrap_or("");
-                            if pretty.is_empty() {
-                                None
-                            } else {
-                                Some(link_same_page("contract", src, &escape_cell(pretty)))
-                            }
-                        })
-                        .collect();
-                    if pretty_links.is_empty() {
-                        "—".to_string()
-                    } else {
-                        pretty_links.join("<br>")
+            // and any source with an empty locale display name.  Date-locked
+            // contracts (isLocked + dateTimeStringStart) also get a
+            // `Year ≥ YYYY` line so the time-gate is visible in-row, not
+            // just hidden behind the Order column.
+            let mut prereq_parts: Vec<String> = Vec::new();
+            if c.is_locked {
+                if let Some(ts) = c.date_time_string_start.as_deref() {
+                    let year_str: String = ts.chars().take(4).collect();
+                    if year_str.len() == 4 && year_str.chars().all(|ch| ch.is_ascii_digit()) {
+                        prereq_parts.push(format!("*Year ≥ {year_str}*"));
                     }
                 }
+            }
+            if let Some(srcs) = unlocked_by.get(c.id.as_str()) {
+                for src in srcs {
+                    if src.contains("_test") {
+                        continue;
+                    }
+                    let pretty = contract_name.get(src).copied().unwrap_or("");
+                    if pretty.is_empty() {
+                        continue;
+                    }
+                    prereq_parts.push(link_same_page("contract", src, &escape_cell(pretty)));
+                }
+            }
+            let prereq_cell = if prereq_parts.is_empty() {
+                "—".to_string()
+            } else {
+                prereq_parts.join("<br>")
             };
 
             let order_cell = depth.get(c.id.as_str()).copied().unwrap_or(0).to_string();
@@ -4068,6 +4283,7 @@ mod tests {
             launch_vehicle_grants: vec![],
             resource_grants: vec![],
             date_start_active: None,
+            date_time_string_start: None,
             years_to_expire: 0.0,
             objective_layers: vec![],
             has_layer_none_objective: false,
@@ -4091,6 +4307,7 @@ mod tests {
             launch_vehicle_grants: vec![],
             resource_grants: vec![],
             date_start_active: None,
+            date_time_string_start: None,
             years_to_expire: 0.0,
             objective_layers,
             has_layer_none_objective: false,
@@ -4621,19 +4838,49 @@ mod tests {
             .lines()
             .find(|l| l.contains("resource-alloy"))
             .expect("Alloy row present:\n");
-        // Resource | Type | License | Producers | Consumers | Description
+        // Resource | Type | Market base | Producers | Consumers | Description
         let cells: Vec<&str> = alloy_row.split('|').collect();
         // Pipe-split rows have leading + trailing empty cells: ["", " Resource ", ..., ""].
         // With six data columns we expect 8 entries.
         assert_eq!(
             cells.len(),
             8,
-            "row should have six columns (Resource, Type, License, Producers, Consumers, Description):\n{alloy_row}"
+            "row should have six columns (Resource, Type, Market base, Producers, Consumers, Description):\n{alloy_row}"
         );
         let consumers_cell = cells[5].trim();
         assert_eq!(
             consumers_cell, "—",
             "Consumers cell should render an em-dash when nothing consumes the resource:\n{alloy_row}"
+        );
+    }
+
+    #[test]
+    fn resources_page_market_base_column_replaces_license_earth() {
+        // The original "License (Earth)" column was wrong: it rendered
+        // `marketClearingPriceBase`, which is the global market clearing
+        // price anchor, not Earth's per-resource license fee.  Actual
+        // license fees live on each `ObjectInfo.ResourceMiningLicenseFeePerT`
+        // and are populated procedurally per planet at scenario load (and
+        // are NOT in the saves, source assets, sirenix dump, or locale).
+        // Path (b): drop the misleading column entirely and rename to
+        // "Market base ($/t)" with an honest tooltip.
+        let locale = resources_fixture_locale();
+        let sirenix = Sirenix {
+            resources: vec![make_resource_stat("alloy", "Normal")],
+            ..Default::default()
+        };
+        let page = page_resources(&locale, &sirenix);
+        assert!(
+            !page.contains("License (Earth)"),
+            "page should no longer expose the misleading 'License (Earth)' header:\n{page}"
+        );
+        assert!(
+            page.contains("Market base ($/t)"),
+            "page should expose a renamed 'Market base ($/t)' header:\n{page}"
+        );
+        assert!(
+            page.contains("vary per planet"),
+            "the column's tooltip should disclose that actual license fees vary per planet:\n{page}"
         );
     }
 
@@ -5915,6 +6162,352 @@ mod tests {
         assert!(
             mining > base,
             "Asteroid Mining (order {mining}) must propagate past its parent Asteroid Base (order {base})\npage:\n{page}"
+        );
+    }
+
+    // ---------- Date-locked contracts use year as Order ----------
+
+    /// Build a date-locked contract (isLocked + dateTimeStringStart).
+    /// Used for the Exoplanet Search / interstellar chain ordering tests.
+    fn date_locked_contract(
+        id: &str,
+        date_time_string_start: &str,
+        unlock_rewards: Vec<String>,
+    ) -> ContractStat {
+        let mut c = make_contract(id, vec![], unlock_rewards);
+        c.is_locked = true;
+        c.date_time_string_start = Some(date_time_string_start.into());
+        c
+    }
+
+    #[test]
+    fn date_locked_contract_uses_year_as_order() {
+        // Exoplanet Search has isLocked=true and dateTimeStringStart="2080-01-01 00:00:00".
+        // Its Order should be 2080 (year extracted from dateTimeStringStart),
+        // not 0 (its natural chain depth — it has no contract or research
+        // prereqs).
+        let locale = contracts_fixture_locale();
+        let mut locale = locale;
+        locale.contracts.push(NameDesc {
+            id: "contract_general_exoplanetsearch".into(),
+            name: "Exoplanet Search".into(),
+            description: "Find an exoplanet.".into(),
+        });
+        let sirenix = Sirenix {
+            contracts: vec![date_locked_contract(
+                "contract_general_exoplanetsearch",
+                "2080-01-01 00:00:00",
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let page = page_contracts(&locale, &sirenix);
+        let order = contract_order(&page, "Exoplanet Search");
+        assert_eq!(
+            order, 2080,
+            "Exoplanet Search should be Order 2080 (year from dateTimeStringStart)\npage:\n{page}"
+        );
+    }
+
+    #[test]
+    fn date_locked_contract_surfaces_year_in_prereq_column() {
+        // Hiding the Order column (CSS-driven) means the year requirement
+        // disappears from the visible row.  The Prereq column should carry
+        // a `Year ≥ YYYY` line so the time-gate is still visible to players.
+        let mut locale = contracts_fixture_locale();
+        locale.contracts.push(NameDesc {
+            id: "contract_general_exoplanetsearch".into(),
+            name: "Exoplanet Search".into(),
+            description: "Find an exoplanet.".into(),
+        });
+        let sirenix = Sirenix {
+            contracts: vec![date_locked_contract(
+                "contract_general_exoplanetsearch",
+                "2080-01-01 00:00:00",
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let page = page_contracts(&locale, &sirenix);
+        // Locate the row by its name link and inspect the Prereq cell.
+        let row = page
+            .lines()
+            .find(|l| l.contains("Exoplanet Search"))
+            .expect("Exoplanet Search row should exist");
+        let cells: Vec<&str> = row.split('|').collect();
+        // Header: Order | Contract | Prereq | Requirements | Rewards | Premise
+        // Pipe split produces leading + trailing empty cells.
+        let prereq_cell = cells.get(3).copied().unwrap_or("").trim();
+        assert!(
+            prereq_cell.contains("Year"),
+            "prereq cell should mention the year requirement; got: {prereq_cell}\nrow: {row}"
+        );
+        assert!(
+            prereq_cell.contains("2080"),
+            "prereq cell should mention 2080; got: {prereq_cell}\nrow: {row}"
+        );
+    }
+
+    #[test]
+    fn descendants_of_date_locked_get_incremental_years() {
+        // Exoplanet Search (2080) → First Step to Interstellar (2081) →
+        // Beyond the Solar System (2082).  Each downstream contract gets
+        // +1 year past its parent's date-locked Order.
+        let mut locale = contracts_fixture_locale();
+        locale.contracts.push(NameDesc {
+            id: "contract_general_exoplanetsearch".into(),
+            name: "Exoplanet Search".into(),
+            description: "Find an exoplanet.".into(),
+        });
+        locale.contracts.push(NameDesc {
+            id: "contract_general_interstellar1".into(),
+            name: "First Step to Interstellar".into(),
+            description: "Build the interstellar vehicle.".into(),
+        });
+        locale.contracts.push(NameDesc {
+            id: "contract_general_interstellar2".into(),
+            name: "Beyond the Solar System".into(),
+            description: "Travel beyond.".into(),
+        });
+        let sirenix = Sirenix {
+            contracts: vec![
+                date_locked_contract(
+                    "contract_general_exoplanetsearch",
+                    "2080-01-01 00:00:00",
+                    vec!["contract_general_interstellar1".into()],
+                ),
+                make_contract(
+                    "contract_general_interstellar1",
+                    vec![],
+                    vec!["contract_general_interstellar2".into()],
+                ),
+                make_contract(
+                    "contract_general_interstellar2",
+                    vec![],
+                    vec![],
+                ),
+            ],
+            ..Default::default()
+        };
+        let page = page_contracts(&locale, &sirenix);
+        assert_eq!(contract_order(&page, "Exoplanet Search"), 2080, "page:\n{page}");
+        assert_eq!(
+            contract_order(&page, "First Step to Interstellar"),
+            2081,
+            "page:\n{page}"
+        );
+        assert_eq!(
+            contract_order(&page, "Beyond the Solar System"),
+            2082,
+            "page:\n{page}"
+        );
+    }
+
+    // ---------- Objective-driven depth gating ----------
+
+    #[test]
+    fn make_research_objective_gates_contract_to_research_depth() {
+        // A contract whose only objective is `MakeResearch: research_X` must
+        // have its Order ≥ depth(research_X) + 1.  Here research_deep is at
+        // depth 8 (7 prereqs chained), so the contract should be Order ≥ 9.
+        let mut locale = contracts_fixture_locale();
+        locale.contracts.push(NameDesc {
+            id: "contract_gated_by_research".into(),
+            name: "Gated By Research".into(),
+            description: "Research gates.".into(),
+        });
+        // Add research entries to the locale.  Names/descriptions don't matter
+        // for depth calc.
+        for n in 0..=8 {
+            locale.research.push(ResearchEntry {
+                id: format!("research_chain_{n}"),
+                category: "chem".into(),
+                name: format!("Chain {n}"),
+                description: String::new(),
+            });
+        }
+
+        // Build a research chain: chain_0 has no prereqs, chain_N depends on
+        // chain_(N-1).  depth(chain_8) = 8.
+        let mut research: Vec<ResearchStat> = Vec::new();
+        for n in 0..=8 {
+            let mut r = make_research(&format!("research_chain_{n}"), "None", None);
+            if n > 0 {
+                r.prereqs = vec![format!("research_chain_{}", n - 1)];
+            }
+            research.push(r);
+        }
+        let sirenix = Sirenix {
+            research,
+            contracts: vec![make_contract(
+                "contract_gated_by_research",
+                vec![obj("MakeResearch", 1.0, Some("research_chain_8"))],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let page = page_contracts(&locale, &sirenix);
+        let order = contract_order(&page, "Gated By Research");
+        assert!(
+            order >= 9,
+            "MakeResearch objective should gate contract depth to ≥ depth(research)+1 = 9; got {order}\npage:\n{page}"
+        );
+    }
+
+    #[test]
+    fn build_facility_objective_gates_contract_to_facility_research_depth() {
+        // research_X at depth 5 unlocks facility F.  A contract whose objective
+        // is `BuildFacility: F` must have its Order ≥ 6.
+        let mut locale = contracts_fixture_locale();
+        locale.contracts.push(NameDesc {
+            id: "contract_gated_by_facility".into(),
+            name: "Gated By Facility".into(),
+            description: "Facility gates.".into(),
+        });
+        for n in 0..=5 {
+            locale.research.push(ResearchEntry {
+                id: format!("research_fac_{n}"),
+                category: "chem".into(),
+                name: format!("Fac {n}"),
+                description: String::new(),
+            });
+        }
+        // Research chain of length 5.
+        let mut research: Vec<ResearchStat> = Vec::new();
+        for n in 0..5 {
+            let mut r = make_research(&format!("research_fac_{n}"), "None", None);
+            if n > 0 {
+                r.prereqs = vec![format!("research_fac_{}", n - 1)];
+            }
+            research.push(r);
+        }
+        // research_fac_5 is at depth 5 and unlocks build_special_facility.
+        let mut r5 = make_research(
+            "research_fac_5",
+            "UnlockFacility",
+            Some("build_special_facility"),
+        );
+        r5.prereqs = vec!["research_fac_4".into()];
+        research.push(r5);
+
+        let sirenix = Sirenix {
+            research,
+            facilities: vec![facility_stat("special_facility", "Production")],
+            contracts: vec![make_contract(
+                "contract_gated_by_facility",
+                vec![obj("BuildFacility", 1.0, Some("build_special_facility"))],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let page = page_contracts(&locale, &sirenix);
+        let order = contract_order(&page, "Gated By Facility");
+        assert!(
+            order >= 6,
+            "BuildFacility objective should gate contract depth to ≥ depth(research)+1 = 6; got {order}\npage:\n{page}"
+        );
+    }
+
+    #[test]
+    fn deliver_resource_objective_uses_first_producer_research() {
+        // Resource R is produced by facility F.  F is unlocked by research_R0
+        // at depth 4.  A contract with `Deliver: id_resource_R` must have
+        // Order ≥ 5.
+        let mut locale = contracts_fixture_locale();
+        locale.contracts.push(NameDesc {
+            id: "contract_deliver_R".into(),
+            name: "Deliver R".into(),
+            description: "Deliver resource R.".into(),
+        });
+        for n in 0..=4 {
+            locale.research.push(ResearchEntry {
+                id: format!("research_R{n}"),
+                category: "chem".into(),
+                name: format!("R{n}"),
+                description: String::new(),
+            });
+        }
+        let mut research: Vec<ResearchStat> = Vec::new();
+        for n in 0..4 {
+            let mut r = make_research(&format!("research_R{n}"), "None", None);
+            if n > 0 {
+                r.prereqs = vec![format!("research_R{}", n - 1)];
+            }
+            research.push(r);
+        }
+        // research_R4 (depth 4) unlocks build_R_producer.
+        let mut r4 = make_research(
+            "research_R4",
+            "UnlockFacility",
+            Some("build_R_producer"),
+        );
+        r4.prereqs = vec!["research_R3".into()];
+        research.push(r4);
+
+        // Facility build_R_producer produces resource R.
+        let mut facility = facility_stat("R_producer", "Production");
+        facility.produces = vec![ResourceCost {
+            resource_id: "R".into(),
+            amount: 1.0,
+        }];
+
+        let sirenix = Sirenix {
+            research,
+            facilities: vec![facility],
+            contracts: vec![make_contract(
+                "contract_deliver_R",
+                vec![obj("Deliver", 1.0, Some("id_resource_R"))],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let page = page_contracts(&locale, &sirenix);
+        let order = contract_order(&page, "Deliver R");
+        assert!(
+            order >= 5,
+            "Deliver objective should gate contract depth to ≥ depth(producer-research)+1 = 5; got {order}\npage:\n{page}"
+        );
+    }
+
+    #[test]
+    fn generic_possession_with_no_product_uses_iris_research_depth_floor() {
+        // Fleet Expansion-style: Possession objective with productItem=null
+        // (e.g. "Possess 10 spacecraft" — no specific id).  Must be floored
+        // at depth(research_sc_iris) + 1.  Here research_sc_iris is at depth
+        // 2 (chained behind two prereqs), so the contract should be Order ≥ 3.
+        let mut locale = contracts_fixture_locale();
+        locale.contracts.push(NameDesc {
+            id: "contract_generic_fleet".into(),
+            name: "Generic Fleet".into(),
+            description: "Possess spacecraft.".into(),
+        });
+        // research_sc_iris depth-2 chain.
+        let mut research: Vec<ResearchStat> = Vec::new();
+        let mut chem0 = make_research("research_chem_0", "None", None);
+        chem0.prereqs = vec![];
+        research.push(chem0);
+        let mut chem1 = make_research("research_chem_1", "None", None);
+        chem1.prereqs = vec!["research_chem_0".into()];
+        research.push(chem1);
+        let mut iris = make_research("research_sc_iris", "UnlockSpacecraftType", Some("spacecraft_chem_small"));
+        iris.prereqs = vec!["research_chem_1".into()];
+        research.push(iris);
+
+        let sirenix = Sirenix {
+            research,
+            contracts: vec![make_contract(
+                "contract_generic_fleet",
+                // Possession with target=None.
+                vec![obj("Possession", 10.0, None)],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let page = page_contracts(&locale, &sirenix);
+        let order = contract_order(&page, "Generic Fleet");
+        assert!(
+            order >= 3,
+            "Generic Possession (no product) should be floored at depth(research_sc_iris)+1 = 3; got {order}\npage:\n{page}"
         );
     }
 }

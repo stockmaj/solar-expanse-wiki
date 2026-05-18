@@ -204,6 +204,16 @@ struct Contract {
     /// dump means "always available from game start"; we normalize that to
     /// `None`.
     date_start_active: Option<String>,
+    /// Future-dated "this contract isn't even visible until year YYYY"
+    /// timestamp, read from `dateTimeStringStart` (format
+    /// `YYYY-MM-DD HH:MM:SS`).  Distinct from `date_start_active` (which uses
+    /// `MM/DD/YYYY` and is for "this offer first appears on this calendar day
+    /// of the player's run").  Only set when `dateTimeStringStartEnable` is
+    /// true and the field is non-empty; together with `is_locked` the
+    /// renderer uses the year here to drive the Order column for date-locked
+    /// contracts (e.g. Exoplanet Search → 2080 → Order 2080).
+    #[serde(default)]
+    date_time_string_start: Option<String>,
     /// Duration (in years) the contract remains offerable before it
     /// disappears. `0` means "never expires".
     years_to_expire: f64,
@@ -871,6 +881,14 @@ fn parse_contract(v: &Value) -> Option<Contract> {
         .and_then(|x| x.as_str())
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
+    // dateTimeStringStart: "YYYY-MM-DD HH:MM:SS" — empty string means "no
+    // future-dated lockout"; normalize to None so the renderer can fall back
+    // to natural depth ordering for those contracts.
+    let date_time_string_start = v
+        .get("dateTimeStringStart")
+        .and_then(|x| x.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
     let years_to_expire = v
         .get("yearsToExpire")
         .and_then(|x| x.as_f64())
@@ -888,6 +906,7 @@ fn parse_contract(v: &Value) -> Option<Contract> {
         launch_vehicle_grants,
         resource_grants,
         date_start_active,
+        date_time_string_start,
         years_to_expire,
         objective_layers,
         has_layer_none_objective,
@@ -2368,5 +2387,29 @@ mod tests {
         });
         let c = parse_contract(&v).expect("contract should parse");
         assert_eq!(c.objective_layers, vec!["Asteroid".to_string()]);
+    }
+
+    #[test]
+    fn parses_date_locked_contract() {
+        // Date-locked contracts (e.g. Exoplanet Search) carry both
+        // `isLocked: true` and a `dateTimeStringStart: "YYYY-MM-DD HH:MM:SS"`.
+        // The renderer needs that string to derive the contract's display
+        // Order (year extracted from the start date).
+        let v = serde_json::json!({
+            "id": "contract_general_exoplanetsearch",
+            "isLocked": true,
+            "isFinalContract": false,
+            "dateTimeStringStart": "2080-01-01 00:00:00",
+            "dateStartActive": "",
+            "yearsToExpire": 0,
+            "objectives": [],
+            "rewards": []
+        });
+        let c = parse_contract(&v).expect("contract should parse");
+        assert!(c.is_locked);
+        assert_eq!(
+            c.date_time_string_start.as_deref(),
+            Some("2080-01-01 00:00:00")
+        );
     }
 }
