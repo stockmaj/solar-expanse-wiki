@@ -784,8 +784,8 @@
         rid: 'human',
         name: transport.name + ' ×' + crew.capsules + ' (' + workers + ' humans)',
         amount: Math.round(crew.mass),
-        tip: crew.capsules + ' × (' + transport.mass + ' t module + crew) = ' +
-             modulesT + ' t modules + ' + workers + ' t crew = ' + Math.round(crew.mass) + ' t',
+        tip: crew.capsules + ' × (' + transport.mass + 't module + ' + transport.capacity + 't crew) = ' +
+             modulesT + 't modules + ' + workers + 't crew = ' + Math.round(crew.mass) + 't',
       });
     }
     cargoRows.sort(function (a, b) { return b.amount - a.amount; });
