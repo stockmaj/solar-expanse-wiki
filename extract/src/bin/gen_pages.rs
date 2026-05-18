@@ -2301,7 +2301,7 @@ in this table. The names and corp rosters below are stable.*\n\n",
     for s in &sirenix.scenario_starts {
         let id = &s.scenario_id;
         let name = epoch_display_name(id);
-        let selected = if id == "StartGameEpoch_TheExpansion" {
+        let selected = if id == "StartGameEpoch_EarlyExploration" {
             " selected"
         } else {
             ""
@@ -6989,20 +6989,17 @@ mod tests {
             !prose.contains("StartGameEpoch_"),
             "internal epoch id leaked into player-facing prose:\n{prose}"
         );
-        // The default-selected scenario must be The Expansion. Early
-        // Exploration starts every corp with zero pre-built facilities, so
-        // the Starting facilities section in the comparison table comes up
-        // empty there. The Expansion is the first scenario where the
-        // matrix has data to compare.
+        // The default-selected scenario is Early Exploration — the chronological
+        // first epoch.  Players land on the canonical "earliest start" rather
+        // than a curated downstream snapshot.
         assert!(
-            page.contains("value=\"StartGameEpoch_TheExpansion\" selected"),
-            "The Expansion should be the default-selected option:\n{page}"
+            page.contains("value=\"StartGameEpoch_EarlyExploration\" selected"),
+            "Early Exploration should be the default-selected option:\n{page}"
         );
-        // No other scenario should carry the selected attribute.
-        for other in ["StartGameEpoch_EarlyExploration", "StartGameEpoch_Colonization", "StartGameEpoch_RaceBeyond"] {
+        for other in ["StartGameEpoch_TheExpansion", "StartGameEpoch_Colonization", "StartGameEpoch_RaceBeyond"] {
             assert!(
                 !page.contains(&format!("value=\"{other}\" selected")),
-                "only The Expansion should be selected, but {other} is:\n{page}"
+                "only Early Exploration should be selected, but {other} is:\n{page}"
             );
         }
         // Scenario order in the dropdown must be Early → Expansion → Colonization → RaceBeyond.
