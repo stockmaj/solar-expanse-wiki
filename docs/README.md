@@ -15,8 +15,8 @@ the names, descriptions, and stat tables here match exactly what you see in-game
 | [Launch Vehicles](launch-vehicles/) | Surface-to-orbit lifters — Albatross, Pelican, Magpie, Condor, Teratorn. |
 | [Facilities](facilities/) | Ground buildings and orbital modules — power, mining, refining, habitats, life support, etc. |
 | [Research](research/) | Tech tree — chemical, electric, nuclear, fusion propulsion, life support, materials, computing. |
-| [Missions](missions/) | Mission planning — landings, flybys, gravity assists, asteroid pulling, cyclical routes. |
-| [Contracts](contracts/) | Story and freelance contracts that drive progression. |
+| [Missions](missions/) | Mission planning — Plan Mission walk-through, mission types, launch-window pointer. |
+| [Contracts](contracts/) | Story and freelance contracts — the in-game Contracts tab — that drive progression. |
 | [Resources](resources/) | The 20+ resource types — water, metals, fissiles, He-3, supplies, exotic alloys. |
 | [Corporations](corporations/) | Playable starting factions — SoleX, NASA, ESA, CNSA, Roscosmos. |
 

@@ -3274,6 +3274,7 @@ funding alongside resource sales. Each contract is a set of objectives — usual
 out cash, resources, or unlocks when complete. Many contracts also unlock\n\
 the next link in a chain (Mars Phase 1 → Mars Phase 2 → …), a new spacecraft,\n\
 or a new launch vehicle.\n\n\
+For mission planning mechanics (flight planning, gravity assists, cyclical routes), see [Missions](../missions/).\n\n\
 {table}\n\
 ## Reading the table\n\n\
 - The **Order** column is the contract's dependency depth in the unlock DAG (0 = no prereq, N = unlocked after an Order N-1 contract). Rows are sorted by **campaign chain** — each starting contract is followed by its full follow-up chain (depth-first), so a tutorial or campaign reads top-to-bottom as a progression instead of jumping around by depth. Tutorial chains come first; non-tutorial roots follow alphabetically.\n\
@@ -4004,33 +4005,17 @@ research tree (Computing, Chemical Propulsion, Spacecraft, …).\n\n",
     out
 }
 
-fn page_missions(locale: &Locale, sirenix: &Sirenix) -> String {
-    // The Missions page combines the planning-flow primer with the in-game
-    // contracts list (the game's word for what drives progression).
-    let contracts_table = page_contracts(locale, sirenix);
-    // Strip the "# Contracts\n\n…" preamble — we want everything from the
-    // contracts table onwards. The table is wrapped in
-    //   <div class="no-sort" markdown="1">
-    // which is what (a) tells the global sortable-table JS to skip it and
-    // (b) hides the "Order" column via CSS. Slicing at the first "\n\n|"
-    // (the first table row) would strip the wrapper opening and the player
-    // would see the depth-numbered Order column AND be able to re-sort
-    // the chain-ordered table — both wrong. Anchor the slice at the
-    // wrapper opening instead so it survives the embed intact.
-    let table_only = contracts_table
-        .find("<div class=\"no-sort\"")
-        .map(|i| &contracts_table[i..])
-        .unwrap_or(&contracts_table)
-        .trim_start();
-
-    format!(
+fn page_missions(_locale: &Locale, _sirenix: &Sirenix) -> String {
+    // The Missions page is a *Plan Mission* primer: destination →
+    // spacecraft → cargo → launch vehicle → flight plan, plus the
+    // in-game mission types. The contracts list lives on its own page
+    // (/contracts/) — this page links there but does not duplicate it.
+    String::from(
         "# Missions\n\n\
 This page covers two related concepts, both of which the game calls\n\
 \"missions\" depending on context.\n\n\
-1. **Contracts** — the in-game *Contracts* tab, listed below.  A contract is\n\
-   a fixed set of objectives that pays out cash, resources, or unlocks when\n\
-   complete.  Contracts are the primary source of progression and funding\n\
-   in single-player.\n\
+1. **Contracts** — the in-game *Contracts* tab. See [Contracts](../contracts/)\n\
+   for the full list and dependency chain.\n\
 2. **Flight missions** — an individual scheduled trip you plan in Plan\n\
    Mission (Earth → Mars on day N).  Flight missions are runtime state,\n\
    not static data — see the **planning flow** section below for how to\n\
@@ -4051,9 +4036,8 @@ Plan Mission walks you through five steps:\n\n\
 | **Asteroid Pulling** | Specialised mission to push an asteroid into a different orbit using an Asteroid Engine Module. |\n\
 | **Probe Deployment** | Drops a small probe at a destination (typically the first thing you send anywhere). |\n\n\
 For launch-window timing for any destination, see [Launch Windows](../celestial-bodies/launch-windows.md).\n\n\
-## Funding missions (contracts)\n\n\
-{table_only}\n\
 ## See also\n\n\
+- [Contracts](../contracts/)\n\
 - [Spacecraft](../spacecraft/)\n\
 - [Launch Vehicles](../launch-vehicles/)\n\
 - [Launch Windows](../celestial-bodies/launch-windows.md)\n"
@@ -4075,8 +4059,8 @@ the names, descriptions, and stat tables here match exactly what you see in-game
 | [Launch Vehicles](launch-vehicles/) | Surface-to-orbit lifters — Albatross, Pelican, Magpie, Condor, Teratorn. |\n\
 | [Facilities](facilities/) | Ground buildings and orbital modules — power, mining, refining, habitats, life support, etc. |\n\
 | [Research](research/) | Tech tree — chemical, electric, nuclear, fusion propulsion, life support, materials, computing. |\n\
-| [Missions](missions/) | Mission planning — landings, flybys, gravity assists, asteroid pulling, cyclical routes. |\n\
-| [Contracts](contracts/) | Story and freelance contracts that drive progression. |\n\
+| [Missions](missions/) | Mission planning — Plan Mission walk-through, mission types, launch-window pointer. |\n\
+| [Contracts](contracts/) | Story and freelance contracts — the in-game Contracts tab — that drive progression. |\n\
 | [Resources](resources/) | The 20+ resource types — water, metals, fissiles, He-3, supplies, exotic alloys. |\n\
 | [Corporations](corporations/) | Playable starting factions — SoleX, NASA, ESA, CNSA, Roscosmos. |\n\n\
 ## How to use this wiki\n\n\
@@ -6993,50 +6977,55 @@ mod tests {
     }
 
     #[test]
-    fn missions_page_preserves_no_sort_wrapper() {
-        // The missions page embeds the contracts table by reusing
-        // page_contracts() output. The wrapper <div class="no-sort"
-        // markdown="1"> ... </div> must survive the embed so the global
-        // sortable-table JS skips this table and the CSS rule
-        // `.no-sort table th:first-child { display: none }` hides the
-        // Order column. Without the wrapper, the player would see the
-        // depth-numbered Order column and could re-sort the table out of
-        // its meaningful chain order.
+    fn missions_page_does_not_embed_contracts_table() {
+        // The missions page is a planning primer, not a contracts list.
+        // It must NOT carry the contracts table — that lives at
+        // /contracts/. The previous embed left two giveaway signatures
+        // in the rendered output: the no-sort wrapper around the table,
+        // and at least one well-known contract name like "First Orbit".
         let locale = contracts_fixture_locale();
         let sirenix = Sirenix {
             contracts: vec![make_contract(
-                "contract_tutorial_moonlanding",
-                vec![obj("MakeResearch", 0.0, Some("research_sc_helios"))],
+                "contract_tutorial_firstorbit",
+                vec![],
                 vec![],
             )],
             ..Default::default()
         };
         let page = page_missions(&locale, &sirenix);
         assert!(
-            page.contains("<div class=\"no-sort\""),
-            "missions page must preserve the no-sort wrapper around the embedded contracts table:\n{page}"
+            !page.contains("<div class=\"no-sort\""),
+            "missions page must NOT embed the no-sort-wrapped contracts table:\n{page}"
         );
         assert!(
-            page.contains("</div>"),
-            "missions page must keep the closing </div> of the no-sort wrapper:\n{page}"
+            !page.contains("**First Orbit**"),
+            "missions page must NOT contain contract names like 'First Orbit'; they belong on /contracts/:\n{page}"
         );
-        // The wrapper's opening tag must appear before the contracts table's
-        // Order-column header. (There's a "Mission types" prose table earlier
-        // in the page, so we anchor on the Order header rather than the
-        // first pipe.) And it must appear after the planning-flow heading
-        // so we're sure it's wrapping the contracts table, not some other.
-        let wrap = page.find("<div class=\"no-sort\"").unwrap_or(usize::MAX);
-        let order_header = page.find(">Order</span>").unwrap_or(0);
+    }
+
+    #[test]
+    fn missions_page_links_to_contracts_page() {
+        // Cross-link: the missions page sends the player to /contracts/
+        // for the canonical contract list.
+        let locale = contracts_fixture_locale();
+        let sirenix = Sirenix::default();
+        let page = page_missions(&locale, &sirenix);
         assert!(
-            wrap < order_header,
-            "no-sort wrapper opening must precede the contracts Order header; got wrap={wrap}, order_header={order_header}"
+            page.contains("(../contracts/)"),
+            "missions page must link to ../contracts/:\n{page}"
         );
-        // Closing </div> must come after the Order header so the wrapper
-        // brackets the table.
-        let close = page.rfind("</div>").unwrap_or(0);
+    }
+
+    #[test]
+    fn contracts_page_links_to_missions_page() {
+        // Cross-link the other direction: the contracts page sends the
+        // player to /missions/ for mission-planning mechanics.
+        let locale = contracts_fixture_locale();
+        let sirenix = Sirenix::default();
+        let page = page_contracts(&locale, &sirenix);
         assert!(
-            close > order_header,
-            "no-sort wrapper close must follow the contracts table; got close={close}, order_header={order_header}"
+            page.contains("(../missions/)"),
+            "contracts page must link to ../missions/:\n{page}"
         );
     }
 }

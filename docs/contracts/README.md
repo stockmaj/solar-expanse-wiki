@@ -7,6 +7,8 @@ out cash, resources, or unlocks when complete. Many contracts also unlock
 the next link in a chain (Mars Phase 1 → Mars Phase 2 → …), a new spacecraft,
 or a new launch vehicle.
 
+For mission planning mechanics (flight planning, gravity assists, cyclical routes), see [Missions](../missions/).
+
 <div class="no-sort" markdown="1">
 
 | <span title="Dependency depth: 0 = no prereq, N = unlocked after an Order N-1 contract">Order</span> | Contract | <span title="Contracts that must complete before this one is offered">Prereq</span> | <span title="Objectives that must be completed to claim the rewards">Requirements</span> | <span title="Cash, resources, unlocks, and follow-up contracts granted on completion">Rewards</span> | Premise |
