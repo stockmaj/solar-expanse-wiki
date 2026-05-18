@@ -272,6 +272,22 @@ struct CrewTransport {
     is_locked: bool,
 }
 
+/// Per-celestial-body mining license fees, in dollars per tonne extracted.
+/// Sourced from each loaded `ObjectInfo.ResourceMiningLicenseFeePerT`
+/// dictionary, which is `[OdinSerialize]` and only populated at runtime —
+/// hence why these values come from the BepInEx mod's live MonoBehaviour
+/// walk rather than from AssetRipper or any save file. Earth is presently
+/// the only body that charges fees; entries with empty `fees_per_t`
+/// (e.g. Mars) are still emitted so the renderer can show "no fee" rows.
+#[derive(Serialize, Debug, Default, PartialEq)]
+struct BodyLicenseFee {
+    body_name: String,
+    /// Map of resource id (e.g. `"alloy"`, `"fuel"`) → license fee in
+    /// dollars per tonne. Populated only when the mod walks live
+    /// `ObjectInfo` MonoBehaviours; empty for bodies that don't charge.
+    fees_per_t: std::collections::BTreeMap<String, f64>,
+}
+
 #[derive(Serialize)]
 struct Sirenix {
     spacecraft: Vec<Spacecraft>,
@@ -284,6 +300,10 @@ struct Sirenix {
     contracts: Vec<Contract>,
     scenario_starts: Vec<ScenarioStart>,
     epochs: Vec<Epoch>,
+    /// Per-body mining license fees. Empty when the dump predates the
+    /// BepInEx mod's `ObjectInfo` walk; otherwise one entry per body in
+    /// the loaded scene, sorted by `body_name`.
+    license_fees: Vec<BodyLicenseFee>,
 }
 
 fn parse_spacecraft(v: &Value) -> Option<Spacecraft> {
@@ -732,6 +752,40 @@ fn parse_space_component(v: &Value) -> Option<SpaceComponent> {
         life_support_max: f(&["lifeSupportMax"]),
         fuel_type,
         is_locked: lookup_bool(v, &["isLocked"]).unwrap_or(false),
+    })
+}
+
+/// Parse a single `ObjectInfo` entry from the BepInEx mod's runtime walk into
+/// a `BodyLicenseFee`. The entry has the shape:
+///   {"name": "Earth", "resourceMiningLicenseFeePerT": {"id_resource_alloy": 30, ...}}
+///
+/// Resource ids may carry the `id_resource_` prefix (from
+/// `MyIDScriptableObject.ID`); we strip it to align with `parse_resource`'s
+/// normalized resource id space. Returns `None` when the entry is missing a
+/// `name` field — that's never happened in practice but lets the caller
+/// gracefully skip a malformed row instead of poisoning the whole vec.
+fn parse_body_license_fee(v: &Value) -> Option<BodyLicenseFee> {
+    let body_name = v.get("name")?.as_str()?.to_string();
+    if body_name.is_empty() {
+        return None;
+    }
+    let mut fees_per_t = std::collections::BTreeMap::new();
+    if let Some(map) = v
+        .get("resourceMiningLicenseFeePerT")
+        .and_then(|x| x.as_object())
+    {
+        for (k, val) in map {
+            let Some(amount) = val.as_f64() else { continue };
+            if amount == 0.0 {
+                continue;
+            }
+            let res_id = normalize_resource_id(k);
+            fees_per_t.insert(res_id, amount);
+        }
+    }
+    Some(BodyLicenseFee {
+        body_name,
+        fees_per_t,
     })
 }
 
@@ -1459,6 +1513,17 @@ fn main() -> Result<()> {
     };
     epochs.sort_by_key(epoch_order);
 
+    // Per-body mining license fees. The mod walks live `ObjectInfo`
+    // MonoBehaviours, so this key is only present in dumps from a built
+    // BepInEx mod (no top-level `ObjectInfo` key → empty vector, never an
+    // error). Sort by body_name for stable downstream rendering.
+    let mut license_fees: Vec<BodyLicenseFee> = raw
+        .get("ObjectInfo")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(parse_body_license_fee).collect())
+        .unwrap_or_default();
+    license_fees.sort_by(|a, b| a.body_name.cmp(&b.body_name));
+
     let out = Sirenix {
         spacecraft,
         launch_vehicles,
@@ -1470,10 +1535,11 @@ fn main() -> Result<()> {
         contracts,
         scenario_starts,
         epochs,
+        license_fees,
     };
     serde_json::to_writer_pretty(fs::File::create(&output)?, &out)?;
     eprintln!(
-        "wrote {} ({} spacecraft, {} LVs, {} research, {} facilities, {} components, {} crew transports, {} resources, {} contracts, {} scenarios, {} epochs)",
+        "wrote {} ({} spacecraft, {} LVs, {} research, {} facilities, {} components, {} crew transports, {} resources, {} contracts, {} scenarios, {} epochs, {} bodies w/ license fees)",
         output.display(),
         out.spacecraft.len(),
         out.launch_vehicles.len(),
@@ -1485,6 +1551,7 @@ fn main() -> Result<()> {
         out.contracts.len(),
         out.scenario_starts.len(),
         out.epochs.len(),
+        out.license_fees.len(),
     );
     Ok(())
 }
@@ -2387,6 +2454,68 @@ mod tests {
         });
         let c = parse_contract(&v).expect("contract should parse");
         assert_eq!(c.objective_layers, vec!["Asteroid".to_string()]);
+    }
+
+    #[test]
+    fn parses_earth_license_fees_from_object_info() {
+        // The BepInEx mod emits each ObjectInfo MonoBehaviour as
+        //   {"name": <body>, "resourceMiningLicenseFeePerT": {<resId>: <fee>, ...}}
+        // Earth is the only body that currently charges fees; values come
+        // from the runtime walk because the field is [OdinSerialize].
+        let v = serde_json::json!({
+            "name": "Earth",
+            "resourceMiningLicenseFeePerT": {
+                "id_resource_alloy": 30,
+                "id_resource_fuel": 50,
+                "id_resource_steel": 0
+            }
+        });
+        let bf = parse_body_license_fee(&v).expect("Earth entry should parse");
+        assert_eq!(bf.body_name, "Earth");
+        // Zero-fee entries are dropped — they would render identically to
+        // "no fee" rows and add noise to downstream lookups.
+        assert_eq!(bf.fees_per_t.len(), 2);
+        assert_eq!(bf.fees_per_t.get("alloy"), Some(&30.0));
+        assert_eq!(bf.fees_per_t.get("fuel"), Some(&50.0));
+        assert!(bf.fees_per_t.get("steel").is_none());
+    }
+
+    #[test]
+    fn parses_body_with_empty_license_fee_map() {
+        // Mars (and most other bodies) doesn't charge a license fee; the
+        // dict is empty. We still emit the body so the renderer can show
+        // "no fees" if it wants to.
+        let v = serde_json::json!({
+            "name": "Mars",
+            "resourceMiningLicenseFeePerT": {}
+        });
+        let bf = parse_body_license_fee(&v).expect("Mars entry should parse");
+        assert_eq!(bf.body_name, "Mars");
+        assert!(bf.fees_per_t.is_empty());
+    }
+
+    #[test]
+    fn license_fees_round_trip_through_serde() {
+        // Round-trip check: the BodyLicenseFee struct must serialize into
+        // the same shape gen_pages.rs deserializes from. Mirrors the
+        // synthetic Earth + empty-Mars dump the spec calls out.
+        let earth = BodyLicenseFee {
+            body_name: "Earth".to_string(),
+            fees_per_t: [("alloy".to_string(), 30.0), ("fuel".to_string(), 50.0)]
+                .into_iter()
+                .collect(),
+        };
+        let mars = BodyLicenseFee {
+            body_name: "Mars".to_string(),
+            fees_per_t: Default::default(),
+        };
+        let json = serde_json::to_string(&vec![&earth, &mars]).unwrap();
+        let back: Vec<serde_json::Value> = serde_json::from_str(&json).unwrap();
+        assert_eq!(back[0]["body_name"], "Earth");
+        assert_eq!(back[0]["fees_per_t"]["alloy"], 30.0);
+        assert_eq!(back[0]["fees_per_t"]["fuel"], 50.0);
+        assert_eq!(back[1]["body_name"], "Mars");
+        assert!(back[1]["fees_per_t"].as_object().unwrap().is_empty());
     }
 
     #[test]

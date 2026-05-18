@@ -75,6 +75,17 @@ struct Stats {
     bodies: Vec<Body>,
 }
 
+/// Per-celestial-body mining license fees, mirroring `parse_sirenix::BodyLicenseFee`.
+/// Currently only Earth has non-empty fees; other bodies serialize with an
+/// empty map. When the dump predates the BepInEx mod's `ObjectInfo` walk the
+/// outer vec is empty and the resources page falls back to em-dashes.
+#[derive(Deserialize, Clone, Default)]
+struct BodyLicenseFeeStat {
+    body_name: String,
+    #[serde(default)]
+    fees_per_t: BTreeMap<String, f64>,
+}
+
 #[derive(Deserialize, Default)]
 struct Sirenix {
     spacecraft: Vec<SpacecraftStat>,
@@ -94,6 +105,12 @@ struct Sirenix {
     scenario_starts: Vec<ScenarioStartStat>,
     #[serde(default)]
     epochs: Vec<EpochStat>,
+    /// Per-body mining license fees, sourced from the BepInEx mod's runtime
+    /// walk of `ObjectInfo` MonoBehaviours. Empty for any dump produced
+    /// before the mod was rebuilt with the ObjectInfo emitter; the
+    /// resources page falls back to em-dashes in that case.
+    #[serde(default)]
+    license_fees: Vec<BodyLicenseFeeStat>,
 }
 
 #[derive(Deserialize, Clone, Default)]
@@ -2070,10 +2087,28 @@ fn page_resources(locale: &Locale, sirenix: &Sirenix) -> String {
         })
     });
 
+    // Earth's per-resource license fees, sourced from the BepInEx mod's
+    // runtime ObjectInfo walk. Earth is currently the only body that
+    // charges, so we only need that one entry; if it's missing (older
+    // dump or non-Earth-charging build) the column falls back to em-dashes.
+    let earth_fees: Option<&BTreeMap<String, f64>> = sirenix
+        .license_fees
+        .iter()
+        .find(|b| b.body_name == "Earth")
+        .map(|b| &b.fees_per_t);
+
     let rows: Vec<Vec<String>> = entries
         .iter()
         .map(|r| {
             let display = res_name.get(r.id.as_str()).copied().unwrap_or(r.id.as_str());
+            // License (Earth) — em-dash for resources Earth doesn't charge
+            // for, AND for every row when no Earth entry is in the dump.
+            // Zero-fee entries are pre-stripped by `parse_body_license_fee`,
+            // so a present value here is always a real charge.
+            let license_cell = earth_fees
+                .and_then(|m| m.get(&r.id))
+                .map(|f| fmt_abbrev(*f))
+                .unwrap_or_else(|| "—".to_string());
             let price = if r.market_price_base > 0.0 {
                 fmt_abbrev(r.market_price_base)
             } else {
@@ -2120,6 +2155,7 @@ fn page_resources(locale: &Locale, sirenix: &Sirenix) -> String {
             vec![
                 format!("{anchor}{icon}&nbsp;**{}**", escape_cell(display)),
                 r.resource_type.clone(),
+                license_cell,
                 price,
                 prod_cell,
                 cons_cell,
@@ -2131,6 +2167,7 @@ fn page_resources(locale: &Locale, sirenix: &Sirenix) -> String {
         &[
             "Resource",
             "Type",
+            "License (Earth, $/t)",
             "Market base ($/t)",
             "Producers",
             "Consumers",
@@ -2139,7 +2176,8 @@ fn page_resources(locale: &Locale, sirenix: &Sirenix) -> String {
         &[
             None,
             Some("Normal (physical), Energy (real-time power), or Human (colonists)"),
-            Some("Base clearing price used as the market price anchor — actual mining license fees vary per planet and are not exposed in static game data"),
+            Some("Earth licensing fee per tonne extracted. Other planets either don't charge or set their own rates; check in-game per-deposit tooltips for non-Earth values."),
+            Some("Base clearing price used as the market price anchor — supply and demand push actual prices around it"),
             Some("Facilities whose structured production data lists this resource as an output"),
             Some("Facilities whose structured production data lists this resource as an input"),
             None,
@@ -2156,7 +2194,8 @@ types exist:\n\n\
 - **Human** — colonists; produced over time by habitats and consumed by jobs.\n\n\
 {table}\n\
 ## Reading the table\n\n\
-- **Market base ($/t)** is `ResourceDefinition.marketClearingPriceBase` — the starting clearing-price anchor used by the global market; supply and demand move actual prices around it. It is NOT the per-planet mining license fee. Real license fees live on each celestial body's `ObjectInfo.ResourceMiningLicenseFeePerT` and are populated procedurally per planet at scenario load, so they vary by world and aren't extractable from static game data; check the in-game tooltip on each resource deposit for the exact license fee.\n\
+- **License (Earth, $/t)** is the per-tonne fee Earth charges for extracting each resource. Earth is currently the only body that charges; other planets either don't charge at all or set their own rates per deposit (check the in-game tooltip on each deposit for non-Earth values).\n\
+- **Market base ($/t)** is the starting clearing-price anchor used by the global market; supply and demand move actual prices around it.\n\
 - **Producers** and **Consumers** are pulled from each facility's structured production data (`refinerData`, `energyProductionData`, `resourcesToMine`, `byproducts`) — not from tooltip text — so refineries don't get mis-credited as producing their inputs. Per-day rates aren't extractable from the static descriptors; the in-game tooltip remains the source of truth for rate numbers.\n"
     )
 }
@@ -4907,16 +4946,19 @@ mod tests {
             .lines()
             .find(|l| l.contains("resource-alloy"))
             .expect("Alloy row present:\n");
-        // Resource | Type | Market base | Producers | Consumers | Description
+        // Resource | Type | License (Earth) | Market base | Producers | Consumers | Description
         let cells: Vec<&str> = alloy_row.split('|').collect();
         // Pipe-split rows have leading + trailing empty cells: ["", " Resource ", ..., ""].
-        // With six data columns we expect 8 entries.
+        // With seven data columns we expect 9 entries.
         assert_eq!(
             cells.len(),
-            8,
-            "row should have six columns (Resource, Type, Market base, Producers, Consumers, Description):\n{alloy_row}"
+            9,
+            "row should have seven columns (Resource, Type, License (Earth), Market base, Producers, Consumers, Description):\n{alloy_row}"
         );
-        let consumers_cell = cells[5].trim();
+        // Consumers is column 6 (1-indexed data columns: 1=Resource, 2=Type,
+        // 3=License, 4=Market, 5=Producers, 6=Consumers, 7=Description), so
+        // cells[6] in the split (since cells[0] is the leading empty).
+        let consumers_cell = cells[6].trim();
         assert_eq!(
             consumers_cell, "—",
             "Consumers cell should render an em-dash when nothing consumes the resource:\n{alloy_row}"
@@ -4924,15 +4966,10 @@ mod tests {
     }
 
     #[test]
-    fn resources_page_market_base_column_replaces_license_earth() {
-        // The original "License (Earth)" column was wrong: it rendered
-        // `marketClearingPriceBase`, which is the global market clearing
-        // price anchor, not Earth's per-resource license fee.  Actual
-        // license fees live on each `ObjectInfo.ResourceMiningLicenseFeePerT`
-        // and are populated procedurally per planet at scenario load (and
-        // are NOT in the saves, source assets, sirenix dump, or locale).
-        // Path (b): drop the misleading column entirely and rename to
-        // "Market base ($/t)" with an honest tooltip.
+    fn resources_page_keeps_market_base_column_alongside_license() {
+        // Both columns coexist: Market base is the global clearing-price
+        // anchor (`marketClearingPriceBase`), License (Earth) is the
+        // per-tonne licensing fee Earth charges. They're different signals.
         let locale = resources_fixture_locale();
         let sirenix = Sirenix {
             resources: vec![make_resource_stat("alloy", "Normal")],
@@ -4940,16 +4977,100 @@ mod tests {
         };
         let page = page_resources(&locale, &sirenix);
         assert!(
-            !page.contains("License (Earth)"),
-            "page should no longer expose the misleading 'License (Earth)' header:\n{page}"
-        );
-        assert!(
             page.contains("Market base ($/t)"),
-            "page should expose a renamed 'Market base ($/t)' header:\n{page}"
+            "page should still expose the 'Market base ($/t)' header:\n{page}"
         );
         assert!(
-            page.contains("vary per planet"),
-            "the column's tooltip should disclose that actual license fees vary per planet:\n{page}"
+            page.contains("License (Earth, $/t)"),
+            "page should expose the new 'License (Earth, $/t)' header:\n{page}"
+        );
+    }
+
+    #[test]
+    fn resources_page_renders_earth_license_fee_for_matching_resource() {
+        // When the BepInEx mod has run and populated license_fees with an
+        // Earth entry, the License (Earth, $/t) column should show the fee
+        // for any resource Earth charges for. The fee comes from the
+        // body whose body_name == "Earth"; lookups are by resource id.
+        let locale = resources_fixture_locale();
+        let mut fees: BTreeMap<String, f64> = BTreeMap::new();
+        fees.insert("alloy".to_string(), 30.0);
+        let sirenix = Sirenix {
+            resources: vec![make_resource_stat("alloy", "Normal")],
+            license_fees: vec![BodyLicenseFeeStat {
+                body_name: "Earth".to_string(),
+                fees_per_t: fees,
+            }],
+            ..Default::default()
+        };
+        let page = page_resources(&locale, &sirenix);
+        let alloy_row = page
+            .lines()
+            .find(|l| l.contains("resource-alloy"))
+            .expect("Alloy row present:\n");
+        let cells: Vec<&str> = alloy_row.split('|').collect();
+        // License (Earth) is data column 3 → cells[3] after the leading empty.
+        let license_cell = cells[3].trim();
+        assert_eq!(
+            license_cell, "30",
+            "License (Earth) cell should render Earth's fee for alloy:\n{alloy_row}"
+        );
+    }
+
+    #[test]
+    fn resources_page_renders_dash_for_non_earth_resource() {
+        // Earth doesn't charge a license fee for every resource. Resources
+        // not listed in Earth's fees_per_t map render as em-dash, NOT as
+        // zero, so the column distinguishes "no charge" from "$0".
+        let locale = resources_fixture_locale();
+        let mut fees: BTreeMap<String, f64> = BTreeMap::new();
+        fees.insert("steel".to_string(), 25.0);
+        let sirenix = Sirenix {
+            resources: vec![make_resource_stat("alloy", "Normal")],
+            license_fees: vec![BodyLicenseFeeStat {
+                body_name: "Earth".to_string(),
+                fees_per_t: fees,
+            }],
+            ..Default::default()
+        };
+        let page = page_resources(&locale, &sirenix);
+        let alloy_row = page
+            .lines()
+            .find(|l| l.contains("resource-alloy"))
+            .expect("Alloy row present:\n");
+        let cells: Vec<&str> = alloy_row.split('|').collect();
+        let license_cell = cells[3].trim();
+        assert_eq!(
+            license_cell, "—",
+            "License (Earth) should be em-dash for resources Earth doesn't fee:\n{alloy_row}"
+        );
+    }
+
+    #[test]
+    fn resources_page_license_column_renders_dashes_when_no_dump_data() {
+        // When the dump predates the mod rebuild (license_fees is empty),
+        // every row's License (Earth) cell must show em-dash. The page
+        // must NOT panic — the column gracefully degrades.
+        let locale = resources_fixture_locale();
+        let sirenix = Sirenix {
+            resources: vec![make_resource_stat("alloy", "Normal")],
+            // license_fees deliberately omitted → empty Vec.
+            ..Default::default()
+        };
+        let page = page_resources(&locale, &sirenix);
+        assert!(
+            page.contains("License (Earth, $/t)"),
+            "License column header should be present even with empty data:\n{page}"
+        );
+        let alloy_row = page
+            .lines()
+            .find(|l| l.contains("resource-alloy"))
+            .expect("Alloy row present:\n");
+        let cells: Vec<&str> = alloy_row.split('|').collect();
+        let license_cell = cells[3].trim();
+        assert_eq!(
+            license_cell, "—",
+            "License (Earth) cell should fall back to em-dash when license_fees is empty:\n{alloy_row}"
         );
     }
 

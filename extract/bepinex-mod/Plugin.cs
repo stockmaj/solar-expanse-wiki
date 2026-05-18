@@ -5,6 +5,8 @@ using System.Linq;
 using System.Reflection;
 using System.Text;
 using BepInEx;
+using Data.ScriptableObject;
+using Game.Info;
 using HarmonyLib;
 using Manager;
 using UnityEngine;
@@ -135,6 +137,14 @@ namespace SolarExpanseWikiDumper
                 if (!list.Contains(so)) list.Add(so);
             }
 
+            // 3. Walk ObjectInfo MonoBehaviours.  ResourceMiningLicenseFeePerT is
+            //    [OdinSerialize] and only populated at runtime, so it's invisible to
+            //    AssetRipper / static dumps.  Values are per-body; identical across
+            //    scenarios (scenarios change player state, not planet properties).
+            var objectInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>()
+                .Where(oi => oi != null)
+                .ToList();
+
             var writer = new JsonWriter();
             writer.StartObject();
             foreach (var kv in byType)
@@ -150,8 +160,44 @@ namespace SolarExpanseWikiDumper
                 }
                 writer.EndArray();
             }
+
+            // Emit the per-body license-fee table.  Shape:
+            //   "ObjectInfo": [
+            //     { "name": "Earth", "resourceMiningLicenseFeePerT": { "alloy": 30, ... } },
+            //     { "name": "Mars",  "resourceMiningLicenseFeePerT": {} },
+            //     ...
+            //   ]
+            // Resource keys come from the dictionary key's MyIDScriptableObject.ID
+            // (falling back to the asset name) so they line up with the same id
+            // space parse_sirenix.rs uses for every other resource reference.
+            if (objectInfos.Count > 0)
+            {
+                writer.Key("ObjectInfo");
+                writer.StartArray();
+                foreach (var oi in objectInfos)
+                {
+                    writer.StartObject();
+                    writer.Key("name");
+                    writer.String(oi.gameObject ? oi.gameObject.name : oi.name);
+                    writer.Key("resourceMiningLicenseFeePerT");
+                    writer.StartObject();
+                    foreach (var kv in oi.ResourceMiningLicenseFeePerT)
+                    {
+                        if (kv.Key == null) continue;
+                        var resId = (kv.Key as MyIDScriptableObject)?.ID ?? kv.Key.name;
+                        if (string.IsNullOrEmpty(resId)) continue;
+                        writer.Key(resId);
+                        writer.Raw(kv.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                    }
+                    writer.EndObject();
+                    writer.EndObject();
+                }
+                writer.EndArray();
+            }
+
             writer.EndObject();
             Plugin.Log.LogInfo($"Collected {byType.Sum(p => p.Value.Count):N0} objects across {byType.Count} type(s).");
+            Plugin.Log.LogInfo($"Walked {objectInfos.Count} ObjectInfo MonoBehaviours for license fees.");
             return writer.ToString();
         }
 

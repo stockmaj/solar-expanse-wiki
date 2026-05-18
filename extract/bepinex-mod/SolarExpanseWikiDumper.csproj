@@ -38,6 +38,13 @@
       <HintPath>$(SolarExpanseInstall)/Solar Expanse_Data/Managed/Assembly-CSharp.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <!-- ObjectInfo derives from SerializedMonoBehaviour, which lives in
+         Sirenix.Serialization.dll.  Needed for the runtime ObjectInfo walk
+         that surfaces per-planet mining license fees. -->
+    <Reference Include="Sirenix.Serialization">
+      <HintPath>$(SolarExpanseInstall)/Solar Expanse_Data/Managed/Sirenix.Serialization.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 
 </Project>
