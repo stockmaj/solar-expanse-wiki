@@ -17,6 +17,7 @@ the names, descriptions, and stat tables here match exactly what you see in-game
 | [Research](research/) | Tech tree — chemical, electric, nuclear, fusion propulsion, life support, materials, computing. |
 | [Missions](missions/) | Mission planning — Plan Mission walk-through, mission types, launch-window pointer. |
 | [Contracts](contracts/) | Story and freelance contracts — the in-game Contracts tab — that drive progression. |
+| [Achievements](achievements/) | Steam achievements and how to earn each — keyed to contracts, spacecraft, and launch vehicles. |
 | [Resources](resources/) | The 20+ resource types — water, metals, fissiles, He-3, supplies, exotic alloys. |
 | [Corporations](corporations/) | Playable starting factions — SoleX, NASA, ESA, CNSA, Roscosmos. |
 

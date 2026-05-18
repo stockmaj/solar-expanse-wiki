@@ -288,6 +288,40 @@ struct BodyLicenseFee {
     fees_per_t: std::collections::BTreeMap<String, f64>,
 }
 
+/// One way to earn a Steam achievement.  The same achievement id can appear
+/// in multiple rows when it's bound by several distinct sources (e.g.
+/// `id_achievement_ThePowerofaStar` is awarded by both the fusion spacecraft
+/// family and `spacecraft_asteroid_puller`).
+///
+/// Sources in the Sirenix dump:
+///   * `ContractDefinition[].steamAchievements[]`        → `source_type = "contract"`
+///   * `SpacecraftType[].steamAchievement`               → `source_type = "spacecraft"`
+///   * `LaunchVehicleType[].steamAchievement`            → `source_type = "launch_vehicle"`
+///
+/// Each binding has shape
+/// `{ conditions: [...], conditionsType: "All", achievement: {name: "id_achievement_X"} | null }`.
+/// Null-inner bindings are placeholders (e.g. Cheat / Fake LV slots) and are
+/// dropped during parse.
+#[derive(Serialize, Debug, Default, PartialEq, Clone)]
+struct Achievement {
+    /// Steam achievement id (e.g. `id_achievement_NotToday`).  No corresponding
+    /// locale key exists in `en-US.csv`, so the player-facing `name` is
+    /// derived from this id with a heuristic split (see `gen_pages`).
+    id: String,
+    /// Player-facing name.  Populated by the locale lookup in `gen_pages` —
+    /// `parse_sirenix` always emits this as an empty string and lets the
+    /// renderer fill it in.
+    name: String,
+    /// What kind of game entity triggers the achievement.
+    source_type: String,
+    /// Specific entity id — `contract_*`, `spacecraft_*`, `lv_*` / `id_Rocket_*`.
+    source_id: String,
+    /// Reserved for a free-form description if the locale ever adds one.
+    /// Always empty against the current dump; kept on the struct so we can
+    /// fill it in without bumping the schema later.
+    description: String,
+}
+
 #[derive(Serialize)]
 struct Sirenix {
     spacecraft: Vec<Spacecraft>,
@@ -304,6 +338,127 @@ struct Sirenix {
     /// BepInEx mod's `ObjectInfo` walk; otherwise one entry per body in
     /// the loaded scene, sorted by `body_name`.
     license_fees: Vec<BodyLicenseFee>,
+    /// Steam achievement bindings — one row per `(source, achievement)` pair.
+    /// See `Achievement` for the underlying data shape and source list.
+    achievements: Vec<Achievement>,
+}
+
+/// Extract the achievement id from a single steamAchievement binding object.
+/// Returns `None` when the binding's inner `achievement` is null (a
+/// placeholder slot) or when the name string is missing/empty.
+fn extract_binding_achievement_id(binding: &Value) -> Option<String> {
+    binding
+        .pointer("/achievement/name")
+        .and_then(|x| x.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+}
+
+/// Walk `ContractDefinition.steamAchievements[]` and produce one `Achievement`
+/// row per (contract id, non-null binding) pair.  Empty when the contract has
+/// no `steamAchievements` field, an empty array, or every binding is a
+/// placeholder.
+fn parse_contract_achievements(v: &Value) -> Vec<Achievement> {
+    let Some(id) = v.get("id").and_then(|x| x.as_str()) else {
+        return Vec::new();
+    };
+    let Some(arr) = v.get("steamAchievements").and_then(|x| x.as_array()) else {
+        return Vec::new();
+    };
+    arr.iter()
+        .filter_map(|binding| {
+            let ach_id = extract_binding_achievement_id(binding)?;
+            Some(Achievement {
+                id: ach_id,
+                name: String::new(),
+                source_type: "contract".to_string(),
+                source_id: id.to_string(),
+                description: String::new(),
+            })
+        })
+        .collect()
+}
+
+/// SpacecraftType[].steamAchievement is a *single* binding object (not an
+/// array).  Return one `Achievement` row when the inner `achievement` is
+/// non-null, else `None`.
+fn parse_spacecraft_achievement(v: &Value) -> Option<Achievement> {
+    let id = v.get("id").and_then(|x| x.as_str())?;
+    let binding = v.get("steamAchievement")?;
+    let ach_id = extract_binding_achievement_id(binding)?;
+    Some(Achievement {
+        id: ach_id,
+        name: String::new(),
+        source_type: "spacecraft".to_string(),
+        source_id: id.to_string(),
+        description: String::new(),
+    })
+}
+
+/// LaunchVehicleType[].steamAchievement is shaped identically to the
+/// SpacecraftType field.  As of the current dump no LV actually populates a
+/// non-null inner achievement, but we still parse the field so the page
+/// would render automatically if the game added one.
+fn parse_launch_vehicle_achievement(v: &Value) -> Option<Achievement> {
+    let id = v.get("id").and_then(|x| x.as_str())?;
+    let binding = v.get("steamAchievement")?;
+    let ach_id = extract_binding_achievement_id(binding)?;
+    Some(Achievement {
+        id: ach_id,
+        name: String::new(),
+        source_type: "launch_vehicle".to_string(),
+        source_id: id.to_string(),
+        description: String::new(),
+    })
+}
+
+/// Walk all three sources, dedupe exact (source_type, source_id, id) triples,
+/// and emit a stable order: contract → spacecraft → launch_vehicle, then by
+/// source_id, then by achievement id.
+fn collect_achievements(raw: &Value) -> Vec<Achievement> {
+    let mut out: Vec<Achievement> = Vec::new();
+
+    if let Some(arr) = raw.get("ContractDefinition").and_then(|v| v.as_array()) {
+        for v in arr {
+            out.extend(parse_contract_achievements(v));
+        }
+    }
+    if let Some(arr) = raw.get("SpacecraftType").and_then(|v| v.as_array()) {
+        for v in arr {
+            if let Some(a) = parse_spacecraft_achievement(v) {
+                out.push(a);
+            }
+        }
+    }
+    if let Some(arr) = raw.get("LaunchVehicleType").and_then(|v| v.as_array()) {
+        for v in arr {
+            if let Some(a) = parse_launch_vehicle_achievement(v) {
+                out.push(a);
+            }
+        }
+    }
+
+    // Dedupe exact (source_type, source_id, id) triples.
+    let mut seen: std::collections::BTreeSet<(String, String, String)> =
+        std::collections::BTreeSet::new();
+    out.retain(|a| seen.insert((a.source_type.clone(), a.source_id.clone(), a.id.clone())));
+
+    // Deterministic order for rendering.
+    let order_key = |a: &Achievement| -> u8 {
+        match a.source_type.as_str() {
+            "contract" => 0,
+            "spacecraft" => 1,
+            "launch_vehicle" => 2,
+            _ => 99,
+        }
+    };
+    out.sort_by(|a, b| {
+        order_key(a)
+            .cmp(&order_key(b))
+            .then(a.source_id.cmp(&b.source_id))
+            .then(a.id.cmp(&b.id))
+    });
+    out
 }
 
 fn parse_spacecraft(v: &Value) -> Option<Spacecraft> {
@@ -1524,6 +1679,12 @@ fn main() -> Result<()> {
         .unwrap_or_default();
     license_fees.sort_by(|a, b| a.body_name.cmp(&b.body_name));
 
+    // Steam achievements — one row per (source, achievement) binding. The
+    // collect helper walks all three source tables (contract / spacecraft /
+    // launch vehicle), drops null-inner placeholder bindings, dedupes exact
+    // duplicates, and orders the result for stable rendering.
+    let achievements = collect_achievements(&raw);
+
     let out = Sirenix {
         spacecraft,
         launch_vehicles,
@@ -1536,10 +1697,11 @@ fn main() -> Result<()> {
         scenario_starts,
         epochs,
         license_fees,
+        achievements,
     };
     serde_json::to_writer_pretty(fs::File::create(&output)?, &out)?;
     eprintln!(
-        "wrote {} ({} spacecraft, {} LVs, {} research, {} facilities, {} components, {} crew transports, {} resources, {} contracts, {} scenarios, {} epochs, {} bodies w/ license fees)",
+        "wrote {} ({} spacecraft, {} LVs, {} research, {} facilities, {} components, {} crew transports, {} resources, {} contracts, {} scenarios, {} epochs, {} bodies w/ license fees, {} achievements)",
         output.display(),
         out.spacecraft.len(),
         out.launch_vehicles.len(),
@@ -1552,6 +1714,7 @@ fn main() -> Result<()> {
         out.scenario_starts.len(),
         out.epochs.len(),
         out.license_fees.len(),
+        out.achievements.len(),
     );
     Ok(())
 }
@@ -2539,6 +2702,229 @@ mod tests {
         assert_eq!(
             c.date_time_string_start.as_deref(),
             Some("2080-01-01 00:00:00")
+        );
+    }
+
+    // ---------- Steam achievements ----------
+    //
+    // Three sources in the dump:
+    //   * ContractDefinition[].steamAchievements[]   (array of binding objects)
+    //   * SpacecraftType[].steamAchievement          (single binding object)
+    //   * LaunchVehicleType[].steamAchievement       (single binding object)
+    //
+    // A "binding object" has shape:
+    //   { conditions: [...], conditionsType: "All", achievement: { ..., name: "id_achievement_X" } | null }
+    //
+    // The inner `achievement` is null on entries that exist only as placeholders
+    // (Cheat / Fake / etc.) — we MUST skip those, otherwise we'd emit empty rows.
+
+    #[test]
+    fn parse_contract_achievements_extracts_each_binding() {
+        let v = serde_json::json!({
+            "id": "contract_asteroid_impact",
+            "steamAchievements": [
+                {
+                    "conditions": [],
+                    "conditionsType": "All",
+                    "achievement": {
+                        "$ref": true,
+                        "type": "SteamAchievement",
+                        "name": "id_achievement_NotToday"
+                    }
+                }
+            ]
+        });
+        let achs = parse_contract_achievements(&v);
+        assert_eq!(achs.len(), 1);
+        assert_eq!(achs[0].id, "id_achievement_NotToday");
+        assert_eq!(achs[0].source_type, "contract");
+        assert_eq!(achs[0].source_id, "contract_asteroid_impact");
+    }
+
+    #[test]
+    fn parse_contract_achievements_handles_multiple_bindings_per_contract() {
+        // Real example: contract_general_interstellar2 binds two achievements
+        // (ToInfinity unconditionally, Wanderlust if completed before 2400).
+        let v = serde_json::json!({
+            "id": "contract_general_interstellar2",
+            "steamAchievements": [
+                {
+                    "conditions": [],
+                    "conditionsType": "All",
+                    "achievement": { "name": "id_achievement_ToInfinity" }
+                },
+                {
+                    "conditions": [{"minTime": {"_DateTime": "0001-01-01T00:00:00.0000000"}, "maxTime": {"_DateTime": "2400-01-01T00:00:00.0010000"}, "negate": false}],
+                    "conditionsType": "All",
+                    "achievement": { "name": "id_achievement_Wanderlust" }
+                }
+            ]
+        });
+        let achs = parse_contract_achievements(&v);
+        let ids: Vec<&str> = achs.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, vec!["id_achievement_ToInfinity", "id_achievement_Wanderlust"]);
+        assert!(achs.iter().all(|a| a.source_id == "contract_general_interstellar2"));
+    }
+
+    #[test]
+    fn parse_contract_achievements_skips_null_bindings() {
+        // Some contracts have a binding entry whose inner `achievement` is null —
+        // these are placeholders and must not produce a row.
+        let v = serde_json::json!({
+            "id": "contract_placeholder",
+            "steamAchievements": [
+                { "conditions": [], "conditionsType": "All", "achievement": null }
+            ]
+        });
+        assert!(parse_contract_achievements(&v).is_empty());
+    }
+
+    #[test]
+    fn parse_contract_achievements_empty_when_no_field() {
+        let v = serde_json::json!({ "id": "contract_no_field" });
+        assert!(parse_contract_achievements(&v).is_empty());
+    }
+
+    #[test]
+    fn parse_spacecraft_achievement_extracts_id_and_source() {
+        // SpacecraftType[].steamAchievement is a *single* binding object,
+        // not an array.
+        let v = serde_json::json!({
+            "id": "spacecraft_fusion_large",
+            "steamAchievement": {
+                "conditions": [],
+                "conditionsType": "All",
+                "achievement": { "name": "id_achievement_ThePowerofaStar" }
+            }
+        });
+        let a = parse_spacecraft_achievement(&v).expect("should parse");
+        assert_eq!(a.id, "id_achievement_ThePowerofaStar");
+        assert_eq!(a.source_type, "spacecraft");
+        assert_eq!(a.source_id, "spacecraft_fusion_large");
+    }
+
+    #[test]
+    fn parse_spacecraft_achievement_skips_null_inner() {
+        let v = serde_json::json!({
+            "id": "spacecraft_chem_mid",
+            "steamAchievement": {
+                "conditions": [],
+                "conditionsType": "All",
+                "achievement": null
+            }
+        });
+        assert!(parse_spacecraft_achievement(&v).is_none());
+    }
+
+    #[test]
+    fn parse_spacecraft_achievement_skips_missing_field() {
+        let v = serde_json::json!({ "id": "spacecraft_no_achievement" });
+        assert!(parse_spacecraft_achievement(&v).is_none());
+    }
+
+    #[test]
+    fn parse_launch_vehicle_achievement_extracts_id_and_source() {
+        // No real-data examples exist (every LV in the dump has a null inner),
+        // but the field shape mirrors SpacecraftType — make sure we'd surface
+        // it correctly if the game added one.
+        let v = serde_json::json!({
+            "id": "lv_chem_seadragon",
+            "steamAchievement": {
+                "conditions": [],
+                "conditionsType": "All",
+                "achievement": { "name": "id_achievement_HeavyLifter" }
+            }
+        });
+        let a = parse_launch_vehicle_achievement(&v).expect("should parse");
+        assert_eq!(a.id, "id_achievement_HeavyLifter");
+        assert_eq!(a.source_type, "launch_vehicle");
+        assert_eq!(a.source_id, "lv_chem_seadragon");
+    }
+
+    #[test]
+    fn parse_launch_vehicle_achievement_skips_null_inner() {
+        let v = serde_json::json!({
+            "id": "lv_nuke_large",
+            "steamAchievement": {
+                "conditions": [],
+                "conditionsType": "All",
+                "achievement": null
+            }
+        });
+        assert!(parse_launch_vehicle_achievement(&v).is_none());
+    }
+
+    #[test]
+    fn collect_achievements_dedupes_exact_source_pairs() {
+        // If somehow the same (source_type, source_id, achievement_id) appears
+        // twice (defensive — the dump shouldn't, but multiple bindings per
+        // contract could otherwise collide), keep only one row.
+        let raw = serde_json::json!({
+            "ContractDefinition": [
+                {
+                    "id": "contract_a",
+                    "steamAchievements": [
+                        { "conditions": [], "conditionsType": "All", "achievement": { "name": "id_achievement_X" } },
+                        { "conditions": [], "conditionsType": "All", "achievement": { "name": "id_achievement_X" } }
+                    ]
+                }
+            ],
+            "SpacecraftType": [],
+            "LaunchVehicleType": []
+        });
+        let achs = collect_achievements(&raw);
+        assert_eq!(achs.len(), 1);
+        assert_eq!(achs[0].id, "id_achievement_X");
+    }
+
+    #[test]
+    fn collect_achievements_keeps_distinct_sources_for_same_achievement() {
+        // Real example: id_achievement_ThePowerofaStar is bound by multiple
+        // spacecraft (fusion_small/mid/large + asteroid_puller).  Each is a
+        // distinct way to earn it and should produce its own row.
+        let raw = serde_json::json!({
+            "ContractDefinition": [],
+            "SpacecraftType": [
+                { "id": "spacecraft_fusion_large", "steamAchievement": { "conditions": [], "conditionsType": "All", "achievement": { "name": "id_achievement_ThePowerofaStar" } } },
+                { "id": "spacecraft_fusion_mid", "steamAchievement": { "conditions": [], "conditionsType": "All", "achievement": { "name": "id_achievement_ThePowerofaStar" } } }
+            ],
+            "LaunchVehicleType": []
+        });
+        let achs = collect_achievements(&raw);
+        assert_eq!(achs.len(), 2);
+        assert!(achs.iter().all(|a| a.id == "id_achievement_ThePowerofaStar"));
+        let sources: Vec<&str> = achs.iter().map(|a| a.source_id.as_str()).collect();
+        assert!(sources.contains(&"spacecraft_fusion_large"));
+        assert!(sources.contains(&"spacecraft_fusion_mid"));
+    }
+
+    #[test]
+    fn collect_achievements_orders_by_source_type_then_id() {
+        // Deterministic output for stable downstream rendering: by source_type
+        // (contract → spacecraft → launch_vehicle), then by source_id ascending,
+        // then by achievement id.
+        let raw = serde_json::json!({
+            "ContractDefinition": [
+                { "id": "contract_z", "steamAchievements": [ { "conditions": [], "conditionsType": "All", "achievement": { "name": "id_achievement_Z" } } ] },
+                { "id": "contract_a", "steamAchievements": [ { "conditions": [], "conditionsType": "All", "achievement": { "name": "id_achievement_A" } } ] }
+            ],
+            "SpacecraftType": [
+                { "id": "spacecraft_b", "steamAchievement": { "conditions": [], "conditionsType": "All", "achievement": { "name": "id_achievement_B" } } }
+            ],
+            "LaunchVehicleType": []
+        });
+        let achs = collect_achievements(&raw);
+        let order: Vec<(&str, &str)> = achs
+            .iter()
+            .map(|a| (a.source_type.as_str(), a.source_id.as_str()))
+            .collect();
+        assert_eq!(
+            order,
+            vec![
+                ("contract", "contract_a"),
+                ("contract", "contract_z"),
+                ("spacecraft", "spacecraft_b"),
+            ]
         );
     }
 }
