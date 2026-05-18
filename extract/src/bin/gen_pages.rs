@@ -2562,143 +2562,6 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
         );
     }
 
-    // Layer-Asteroid gating fix-up.
-    //
-    // In-game, every asteroid-themed contract is gated by getting the player
-    // out to the asteroid belt — that's not encoded as a contract→contract
-    // `unlock_rewards` edge, it's encoded on the *objective* via the
-    // `layer: "Asteroid"` field.  Without this fix, contracts like
-    // "Asteroid Base" sit at Order 0 because nothing precedes them in
-    // unlock_rewards, even though the player can't physically attempt them
-    // until they've reached the belt via the Moon/Mars chain.
-    //
-    // A contract is considered "asteroid-layer" iff it has at least one
-    // objective with `layer: "Asteroid"` AND none of its objectives have
-    // `layer: "None"`.  In the Sirenix dump, `layer` defaults to "Asteroid"
-    // on every objective; the handful of contracts whose authors went out of
-    // their way to mark an objective as `layer: "None"` (Humans on Mars,
-    // Space Dock) are exactly the bridge contracts that take the player out
-    // of the asteroid belt's gating, so we treat them as "non-asteroid" for
-    // the purposes of bumping.
-    //
-    // The fix:
-    // 1. Identify the **asteroid gate**: the asteroid-layer contract that
-    //    carries a `SelectLayer` objective with `layer: "Asteroid"`.  Only
-    //    one contract in production has this objective —
-    //    `contract_asteroid_first` (Probing Lutetia) — which is exactly the
-    //    in-game contract that asks the player to *physically choose* the
-    //    asteroid layer for the first time.  Its computed depth is the gate
-    //    depth.  (We don't use "min depth of asteroid-layer contract with a
-    //    non-asteroid parent" because the dump's default `layer: "Asteroid"`
-    //    bleeds into moon/mars campaign contracts and produces false gates.)
-    // 2. Bump every standalone "stranded" asteroid contract — one whose
-    //    current depth is below the gate AND that has no contract or research
-    //    parent — up to the gate depth.  Contracts that are already deeper
-    //    than the gate, or that sit inside the moon/mars chain, are left
-    //    alone so we don't disturb the legitimate pre-asteroid sequence.
-    // 3. Re-propagate forward via a fixed-point pass so descendants of any
-    //    bumped contract get their depth recomputed from their parents.
-    //
-    // Build the lookup keyed on ALL contracts (not just rendered entries) so
-    // that parents which are filtered out (e.g. `_test` contracts whose
-    // locale name is empty) are still classified correctly.
-    //
-    // The literal `objective_layers` test (contains "Asteroid", no "None")
-    // matches nearly every production contract because the Sirenix dump
-    // serializes the `Layer` enum's default value ("Asteroid") on every
-    // unset objective.  To avoid bumping unrelated tutorial/Moon/Mars
-    // contracts, we additionally require the id to start with
-    // `contract_asteroid_` — an unambiguous marker for the asteroid-belt
-    // contracts the game writers actually authored as such (matches the
-    // user-facing examples Asteroid Base, Pulling, Sample, etc.).
-    let is_asteroid_layer: BTreeMap<&str, bool> = sirenix
-        .contracts
-        .iter()
-        .map(|c| {
-            let asteroid = c.objective_layers.iter().any(|l| l == "Asteroid")
-                && !c.has_layer_none_objective
-                && c.id.starts_with("contract_asteroid_");
-            (c.id.as_str(), asteroid)
-        })
-        .collect();
-    // The gate is the asteroid-layer contract carrying a `SelectLayer`
-    // objective.  In production only `contract_asteroid_first` qualifies.
-    let gate_depth: Option<u32> = entries
-        .iter()
-        .filter(|c| *is_asteroid_layer.get(c.id.as_str()).unwrap_or(&false))
-        .filter(|c| {
-            c.objectives
-                .iter()
-                .any(|o| o.kind.eq_ignore_ascii_case("SelectLayer"))
-        })
-        .filter_map(|c| depth.get(c.id.as_str()).copied())
-        .min();
-    if let Some(gate) = gate_depth {
-        for c in &entries {
-            if !*is_asteroid_layer.get(c.id.as_str()).unwrap_or(&false) {
-                continue;
-            }
-            // Only bump "stranded" asteroid contracts — those that have no
-            // contract or research parent (so they currently sit at Order 0
-            // for the wrong reason).  Contracts that are already part of a
-            // chain keep their natural depth; the fixed-point pass below will
-            // bring descendants of any bumped node forward.
-            let has_parent = unlocked_by
-                .get(c.id.as_str())
-                .map_or(false, |parents| {
-                    parents.iter().any(|p| entry_ids.contains(*p))
-                })
-                || research_unlockers_of_contract
-                    .get(c.id.as_str())
-                    .map_or(false, |rs| !rs.is_empty());
-            if has_parent {
-                continue;
-            }
-            let cur = depth.get(c.id.as_str()).copied().unwrap_or(0);
-            if cur < gate {
-                depth.insert(c.id.as_str(), gate);
-            }
-        }
-        // Fixed-point re-propagation: a bumped contract's descendants need
-        // their depth pushed forward too (depth[child] >= depth[parent] + 1
-        // for every contract or research parent).
-        loop {
-            let mut changed = false;
-            for c in &entries {
-                let id = c.id.as_str();
-                let cur = depth.get(id).copied().unwrap_or(0);
-                let mut max_parent = 0u32;
-                let mut has_parent = false;
-                if let Some(parents) = unlocked_by.get(id) {
-                    for p in parents {
-                        has_parent = true;
-                        let pd = depth.get(*p).copied().unwrap_or(0);
-                        if pd > max_parent {
-                            max_parent = pd;
-                        }
-                    }
-                }
-                if let Some(rs) = research_unlockers_of_contract.get(id) {
-                    for r in rs {
-                        has_parent = true;
-                        let rd = research_depth.get(*r).copied().unwrap_or(0);
-                        if rd > max_parent {
-                            max_parent = rd;
-                        }
-                    }
-                }
-                let need = if has_parent { max_parent + 1 } else { cur };
-                if need > cur {
-                    depth.insert(id, need);
-                    changed = true;
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
-    }
-
     // -----------------------------------------------------------------
     // Path A — Date-locked contracts use their year as Order.
     //
@@ -2898,6 +2761,218 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
         }
         if !changed {
             break;
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Layer-Asteroid gating fix-up.
+    //
+    // In-game, every asteroid-themed contract is gated by getting the player
+    // out to the asteroid belt — that's not encoded as a contract→contract
+    // `unlock_rewards` edge, it's encoded on the *objective* via the
+    // `layer: "Asteroid"` field.  Without this fix, contracts like
+    // "Asteroid Base" sit at Order 0 because nothing precedes them in
+    // unlock_rewards, even though the player can't physically attempt them
+    // until they've reached the belt via the Moon/Mars chain.
+    //
+    // A contract is considered "asteroid-layer" iff it has at least one
+    // objective with `layer: "Asteroid"` AND none of its objectives have
+    // `layer: "None"`.  In the Sirenix dump, `layer` defaults to "Asteroid"
+    // on every objective; the handful of contracts whose authors went out of
+    // their way to mark an objective as `layer: "None"` (Humans on Mars,
+    // Space Dock) are exactly the bridge contracts that take the player out
+    // of the asteroid belt's gating, so we treat them as "non-asteroid" for
+    // the purposes of bumping.
+    //
+    // The fix:
+    // 1. Identify the **asteroid gate**: the asteroid-layer contract that
+    //    carries a `SelectLayer` objective with `layer: "Asteroid"`.  Only
+    //    one contract in production has this objective —
+    //    `contract_asteroid_first` (Probing Lutetia) — which is exactly the
+    //    in-game contract that asks the player to *physically choose* the
+    //    asteroid layer for the first time.  Its computed depth is the gate
+    //    depth.  (We don't use "min depth of asteroid-layer contract with a
+    //    non-asteroid parent" because the dump's default `layer: "Asteroid"`
+    //    bleeds into moon/mars campaign contracts and produces false gates.)
+    // 2. Bump every asteroid-layer contract whose current depth is below the
+    //    gate up to the gate depth.  This catches both stranded contracts
+    //    (no parents — e.g. Asteroid Base) AND contracts whose only parent
+    //    is a research node shallower than the gate (e.g. Asteroid Pulling,
+    //    unlocked by `research_launch_massengine` at depth ~6 but still
+    //    physically gated by reaching the asteroid belt).  Moon/Mars chain
+    //    contracts are NOT asteroid-layer (they carry `layer: "None"` or
+    //    don't start with `contract_asteroid_`) so they're untouched.
+    // 3. Re-propagate forward via a fixed-point pass so descendants of any
+    //    bumped contract get their depth recomputed from their parents.
+    //
+    // This step runs AFTER Path A (year overrides) and Path B (objective-
+    // floor) and their joint propagation pass, because the gate itself
+    // (Probing Lutetia) is reachable from Humans on Mars via unlock_rewards,
+    // and Mars Landing's depth is bumped by Path B (its Hermes research
+    // objective).  Running asteroid-gate before that propagation would read
+    // a stale gate depth.
+    //
+    // Build the lookup keyed on ALL contracts (not just rendered entries) so
+    // that parents which are filtered out (e.g. `_test` contracts whose
+    // locale name is empty) are still classified correctly.
+    //
+    // The literal `objective_layers` test (contains "Asteroid", no "None")
+    // matches nearly every production contract because the Sirenix dump
+    // serializes the `Layer` enum's default value ("Asteroid") on every
+    // unset objective.  To avoid bumping unrelated tutorial/Moon/Mars
+    // contracts, we additionally require the id to start with
+    // `contract_asteroid_` — an unambiguous marker for the asteroid-belt
+    // contracts the game writers actually authored as such (matches the
+    // user-facing examples Asteroid Base, Pulling, Sample, etc.).
+    let is_asteroid_layer: BTreeMap<&str, bool> = sirenix
+        .contracts
+        .iter()
+        .map(|c| {
+            let asteroid = c.objective_layers.iter().any(|l| l == "Asteroid")
+                && !c.has_layer_none_objective
+                && c.id.starts_with("contract_asteroid_");
+            (c.id.as_str(), asteroid)
+        })
+        .collect();
+    // The gate is the asteroid-layer contract carrying a `SelectLayer`
+    // objective.  In production only `contract_asteroid_first` qualifies.
+    let gate_depth: Option<u32> = entries
+        .iter()
+        .filter(|c| *is_asteroid_layer.get(c.id.as_str()).unwrap_or(&false))
+        .filter(|c| {
+            c.objectives
+                .iter()
+                .any(|o| o.kind.eq_ignore_ascii_case("SelectLayer"))
+        })
+        .filter_map(|c| depth.get(c.id.as_str()).copied())
+        .min();
+    if let Some(gate) = gate_depth {
+        for c in &entries {
+            if !*is_asteroid_layer.get(c.id.as_str()).unwrap_or(&false) {
+                continue;
+            }
+            // Bump every asteroid-layer contract below the gate.  Contracts
+            // already deeper than the gate (e.g. Asteroid Mining at gate+1
+            // because Probing Lutetia → Asteroid Mining via unlock_rewards)
+            // are left alone — `cur < gate` skips them.  The gate itself
+            // also satisfies `cur == gate` so it isn't bumped.  The fixed-
+            // point pass below carries any bumps forward to descendants.
+            let cur = depth.get(c.id.as_str()).copied().unwrap_or(0);
+            if cur < gate {
+                depth.insert(c.id.as_str(), gate);
+            }
+        }
+        // Fixed-point re-propagation: a bumped contract's descendants need
+        // their depth pushed forward too (depth[child] >= depth[parent] + 1
+        // for every contract or research parent).
+        loop {
+            let mut changed = false;
+            for c in &entries {
+                let id = c.id.as_str();
+                let cur = depth.get(id).copied().unwrap_or(0);
+                let mut max_parent = 0u32;
+                let mut has_parent = false;
+                if let Some(parents) = unlocked_by.get(id) {
+                    for p in parents {
+                        has_parent = true;
+                        let pd = depth.get(*p).copied().unwrap_or(0);
+                        if pd > max_parent {
+                            max_parent = pd;
+                        }
+                    }
+                }
+                if let Some(rs) = research_unlockers_of_contract.get(id) {
+                    for r in rs {
+                        has_parent = true;
+                        let rd = research_depth.get(*r).copied().unwrap_or(0);
+                        if rd > max_parent {
+                            max_parent = rd;
+                        }
+                    }
+                }
+                let need = if has_parent { max_parent + 1 } else { cur };
+                if need > cur {
+                    depth.insert(id, need);
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Fix B — orphan general/spacestation contracts get a chain-derived floor.
+    //
+    // Contracts with id prefix `contract_general_` or `contract_spacestation_`
+    // that have no `unlock_rewards` contract parent end up at Path B's iris/
+    // research-derived floor, which is typically 2-6 — too shallow because
+    // these are mid/late-game side-contracts the player would realistically
+    // tackle around the deepest tutorial-chain final contract (Humans on
+    // Mars).  Floor them at `depth(contract_mars_marslanding)` so they sort
+    // alongside the chain progression a player has reached by then.
+    //
+    // The `if floor > cur` guard means already-deeper contracts (notably the
+    // date-locked Exoplanet Search / interstellar chain at 2080+) are left
+    // alone — Fix B never lowers a depth.
+    let mars_landing_depth: Option<u32> = depth.get("contract_mars_marslanding").copied();
+    if let Some(floor) = mars_landing_depth {
+        for c in &entries {
+            let id = c.id.as_str();
+            if !(id.starts_with("contract_general_") || id.starts_with("contract_spacestation_")) {
+                continue;
+            }
+            let has_contract_parent = unlocked_by
+                .get(id)
+                .map_or(false, |parents| {
+                    parents.iter().any(|p| entry_ids.contains(*p))
+                });
+            if has_contract_parent {
+                continue;
+            }
+            let cur = depth.get(id).copied().unwrap_or(0);
+            if floor > cur {
+                depth.insert(id, floor);
+            }
+        }
+        // Final propagation pass: descendants of any contract floored above
+        // need their depth pushed forward (children via unlock_rewards or
+        // research dependency).
+        loop {
+            let mut changed = false;
+            for c in &entries {
+                let id = c.id.as_str();
+                let cur = depth.get(id).copied().unwrap_or(0);
+                let mut max_parent = 0u32;
+                let mut has_parent = false;
+                if let Some(parents) = unlocked_by.get(id) {
+                    for p in parents {
+                        has_parent = true;
+                        let pd = depth.get(*p).copied().unwrap_or(0);
+                        if pd > max_parent {
+                            max_parent = pd;
+                        }
+                    }
+                }
+                if let Some(rs) = research_unlockers_of_contract.get(id) {
+                    for r in rs {
+                        has_parent = true;
+                        let rd = research_depth.get(*r).copied().unwrap_or(0);
+                        if rd > max_parent {
+                            max_parent = rd;
+                        }
+                    }
+                }
+                let need = if has_parent { max_parent + 1 } else { cur };
+                if need > cur {
+                    depth.insert(id, need);
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
         }
     }
 
@@ -6522,6 +6597,398 @@ mod tests {
         assert!(
             order >= 3,
             "Generic Possession (no product) should be floored at depth(research_sc_iris)+1 = 3; got {order}\npage:\n{page}"
+        );
+    }
+
+    // ---------- Re-ordered depth pipeline: asteroid-gate must run AFTER
+    // objective-floor propagation so Path B's bumps reach the gate before
+    // stranded asteroid contracts are floored against it. ----------
+
+    #[test]
+    fn asteroid_gate_reflects_path_b_bump_to_gate_parent() {
+        // Setup mirrors production: the asteroid gate (`contract_asteroid_first`)
+        // is reachable from `contract_mars_marslanding` via unlock_rewards, and
+        // Mars Landing carries a `MakeResearch: research_sc_hermes` objective
+        // whose research is at depth 9 (so Path B bumps Mars Landing to 10,
+        // which propagates the gate to 11).  Stranded `contract_asteroid_base`
+        // must end at ≥ 11, matching the final propagated gate depth — not the
+        // gate's pre-Path-B value of ~3.
+        let mut locale = contracts_fixture_locale();
+        locale.contracts.push(NameDesc {
+            id: "contract_asteroid_first".into(),
+            name: "Probing Lutetia".into(),
+            description: "Land on an asteroid.".into(),
+        });
+        locale.contracts.push(NameDesc {
+            id: "contract_asteroid_base".into(),
+            name: "Asteroid Base".into(),
+            description: "Build an asteroid base.".into(),
+        });
+        locale.contracts.push(NameDesc {
+            id: "contract_mars_marslanding".into(),
+            name: "Humans on Mars".into(),
+            description: "Land on Mars.".into(),
+        });
+        // research_sc_hermes chained to depth 9 (8 prereqs).
+        for n in 0..=9 {
+            locale.research.push(ResearchEntry {
+                id: format!("research_hermes_chain_{n}"),
+                category: "sc".into(),
+                name: format!("Hermes Chain {n}"),
+                description: String::new(),
+            });
+        }
+        let mut research: Vec<ResearchStat> = Vec::new();
+        for n in 0..9 {
+            let mut r = make_research(&format!("research_hermes_chain_{n}"), "None", None);
+            if n > 0 {
+                r.prereqs = vec![format!("research_hermes_chain_{}", n - 1)];
+            }
+            research.push(r);
+        }
+        // Production uses `research_sc_hermes` as the gate research; fixture's
+        // contracts_fixture_locale already declares it.  Wire it at depth 9.
+        let mut hermes = make_research("research_sc_hermes", "None", None);
+        hermes.prereqs = vec!["research_hermes_chain_8".into()];
+        research.push(hermes);
+
+        let sirenix = Sirenix {
+            research,
+            contracts: vec![
+                // Tutorial chain leading to Mars Landing.
+                make_contract(
+                    "contract_tutorial_firstorbit",
+                    vec![],
+                    vec!["contract_tutorial_moonorbit".into()],
+                ),
+                make_contract(
+                    "contract_tutorial_moonorbit",
+                    vec![],
+                    vec!["contract_tutorial_moonlanding".into()],
+                ),
+                make_contract(
+                    "contract_tutorial_moonlanding",
+                    vec![],
+                    vec!["contract_mars_marslanding".into()],
+                ),
+                // Mars Landing has the Hermes research objective (Path B bumps).
+                make_contract(
+                    "contract_mars_marslanding",
+                    vec![obj("MakeResearch", 1.0, Some("research_sc_hermes"))],
+                    vec!["contract_asteroid_first".into()],
+                ),
+                // Asteroid gate.
+                asteroid_gate_contract("contract_asteroid_first", vec![]),
+                // Stranded asteroid contract.
+                make_contract_with_layers(
+                    "contract_asteroid_base",
+                    vec![],
+                    vec!["Asteroid".into()],
+                ),
+            ],
+            ..Default::default()
+        };
+        let page = page_contracts(&locale, &sirenix);
+        let gate = contract_order(&page, "Probing Lutetia");
+        let base = contract_order(&page, "Asteroid Base");
+        assert!(
+            gate >= 11,
+            "Probing Lutetia should reach depth ≥ 11 once Mars Landing is bumped by Path B; got {gate}\npage:\n{page}"
+        );
+        assert!(
+            base >= gate,
+            "Asteroid Base ({base}) must be ≥ Probing Lutetia's final depth ({gate}) — asteroid-gate must run AFTER Path B propagation\npage:\n{page}"
+        );
+    }
+
+    #[test]
+    fn asteroid_layer_contract_with_research_parent_bumps_to_gate() {
+        // Production case: contract_asteroid_pulling is unlocked by
+        // research_launch_massengine (depth ~6) and is layer:Asteroid.  Its
+        // natural depth via research is ~7, but it should still be bumped to
+        // the gate depth (Probing Lutetia, ~11) since the player can't
+        // physically attempt any asteroid contract before reaching the belt.
+        let mut locale = contracts_fixture_locale();
+        locale.contracts.push(NameDesc {
+            id: "contract_asteroid_first".into(),
+            name: "Probing Lutetia".into(),
+            description: "Land on an asteroid.".into(),
+        });
+        locale.contracts.push(NameDesc {
+            id: "contract_asteroid_pulling".into(),
+            name: "Asteroid Pulling".into(),
+            description: "Pull an asteroid.".into(),
+        });
+        locale.contracts.push(NameDesc {
+            id: "contract_mars_marslanding".into(),
+            name: "Humans on Mars".into(),
+            description: "Land on Mars.".into(),
+        });
+        // Push Mars Landing to depth 10 via Hermes (chain of 9).
+        for n in 0..=9 {
+            locale.research.push(ResearchEntry {
+                id: format!("research_hermes_chain_{n}"),
+                category: "sc".into(),
+                name: format!("Hermes Chain {n}"),
+                description: String::new(),
+            });
+        }
+        locale.research.push(ResearchEntry {
+            id: "research_launch_massengine".into(),
+            category: "launch".into(),
+            name: "Mass Engine".into(),
+            description: String::new(),
+        });
+        let mut research: Vec<ResearchStat> = Vec::new();
+        for n in 0..9 {
+            let mut r = make_research(&format!("research_hermes_chain_{n}"), "None", None);
+            if n > 0 {
+                r.prereqs = vec![format!("research_hermes_chain_{}", n - 1)];
+            }
+            research.push(r);
+        }
+        let mut hermes = make_research("research_sc_hermes", "None", None);
+        hermes.prereqs = vec!["research_hermes_chain_8".into()];
+        research.push(hermes);
+        // Shallow research that unlocks asteroid_pulling (depth ~6).
+        let mut massengine = make_research("research_launch_massengine", "None", None);
+        massengine.prereqs = vec!["research_hermes_chain_5".into()];
+        massengine.contract_unlocks = vec!["contract_asteroid_pulling".into()];
+        research.push(massengine);
+
+        let sirenix = Sirenix {
+            research,
+            contracts: vec![
+                make_contract(
+                    "contract_tutorial_firstorbit",
+                    vec![],
+                    vec!["contract_tutorial_moonorbit".into()],
+                ),
+                make_contract(
+                    "contract_tutorial_moonorbit",
+                    vec![],
+                    vec!["contract_tutorial_moonlanding".into()],
+                ),
+                make_contract(
+                    "contract_tutorial_moonlanding",
+                    vec![],
+                    vec!["contract_mars_marslanding".into()],
+                ),
+                make_contract(
+                    "contract_mars_marslanding",
+                    vec![obj("MakeResearch", 1.0, Some("research_sc_hermes"))],
+                    vec!["contract_asteroid_first".into()],
+                ),
+                asteroid_gate_contract("contract_asteroid_first", vec![]),
+                make_contract_with_layers(
+                    "contract_asteroid_pulling",
+                    vec![],
+                    vec!["Asteroid".into()],
+                ),
+            ],
+            ..Default::default()
+        };
+        let page = page_contracts(&locale, &sirenix);
+        let gate = contract_order(&page, "Probing Lutetia");
+        let pulling = contract_order(&page, "Asteroid Pulling");
+        assert!(
+            pulling >= gate,
+            "Asteroid Pulling ({pulling}) must reach gate depth ({gate}) even though it has a shallow research parent\npage:\n{page}"
+        );
+    }
+
+    // ---------- Fix B: orphan general/spacestation contracts get a chain floor ----------
+
+    #[test]
+    fn orphan_general_contracts_floored_at_mars_landing_depth() {
+        // contract_general_fleet has no unlock_rewards parent but a Possession
+        // objective (Path B floors it at iris+1 ≈ 2).  In production this puts
+        // it at Order 4-6, far earlier than realistic play.  Fix B floors it
+        // at depth(contract_mars_marslanding) — the deepest tutorial-final
+        // contract — so it sits with mid/late tutorial-chain progression.
+        let mut locale = contracts_fixture_locale();
+        locale.contracts.push(NameDesc {
+            id: "contract_mars_marslanding".into(),
+            name: "Humans on Mars".into(),
+            description: "Land on Mars.".into(),
+        });
+        // research_sc_hermes chained to depth 9 so Mars Landing → Path B → 10.
+        for n in 0..=9 {
+            locale.research.push(ResearchEntry {
+                id: format!("research_hermes_chain_{n}"),
+                category: "sc".into(),
+                name: format!("Hermes Chain {n}"),
+                description: String::new(),
+            });
+        }
+        let mut research: Vec<ResearchStat> = Vec::new();
+        for n in 0..9 {
+            let mut r = make_research(&format!("research_hermes_chain_{n}"), "None", None);
+            if n > 0 {
+                r.prereqs = vec![format!("research_hermes_chain_{}", n - 1)];
+            }
+            research.push(r);
+        }
+        let mut hermes = make_research("research_sc_hermes", "None", None);
+        hermes.prereqs = vec!["research_hermes_chain_8".into()];
+        research.push(hermes);
+
+        let sirenix = Sirenix {
+            research,
+            contracts: vec![
+                make_contract(
+                    "contract_tutorial_firstorbit",
+                    vec![],
+                    vec!["contract_tutorial_moonorbit".into()],
+                ),
+                make_contract(
+                    "contract_tutorial_moonorbit",
+                    vec![],
+                    vec!["contract_tutorial_moonlanding".into()],
+                ),
+                make_contract(
+                    "contract_tutorial_moonlanding",
+                    vec![],
+                    vec!["contract_mars_marslanding".into()],
+                ),
+                make_contract(
+                    "contract_mars_marslanding",
+                    vec![obj("MakeResearch", 1.0, Some("research_sc_hermes"))],
+                    vec![],
+                ),
+                // Orphan general — generic possession floor.
+                make_contract(
+                    "contract_general_fleet",
+                    vec![obj("Possession", 10.0, None)],
+                    vec![],
+                ),
+            ],
+            ..Default::default()
+        };
+        let page = page_contracts(&locale, &sirenix);
+        let mars = contract_order(&page, "Humans on Mars");
+        let fleet = contract_order(&page, "Fleet Expansion");
+        assert!(
+            mars >= 10,
+            "Humans on Mars should reach depth ≥ 10 once Path B bumps from Hermes research; got {mars}\npage:\n{page}"
+        );
+        assert!(
+            fleet >= mars,
+            "Fleet Expansion ({fleet}) must be floored at Humans on Mars depth ({mars}) — Fix B for orphan general/spacestation contracts\npage:\n{page}"
+        );
+    }
+
+    #[test]
+    fn orphan_spacestation_contracts_floored_at_mars_landing_depth() {
+        // Same shape as the general-orphan test but for contract_spacestation_*.
+        let mut locale = contracts_fixture_locale();
+        locale.contracts.push(NameDesc {
+            id: "contract_mars_marslanding".into(),
+            name: "Humans on Mars".into(),
+            description: "Land on Mars.".into(),
+        });
+        locale.contracts.push(NameDesc {
+            id: "contract_spacestation_fuel1".into(),
+            name: "Propellant Depot".into(),
+            description: "Stock the orbital depot.".into(),
+        });
+        for n in 0..=9 {
+            locale.research.push(ResearchEntry {
+                id: format!("research_hermes_chain_{n}"),
+                category: "sc".into(),
+                name: format!("Hermes Chain {n}"),
+                description: String::new(),
+            });
+        }
+        let mut research: Vec<ResearchStat> = Vec::new();
+        for n in 0..9 {
+            let mut r = make_research(&format!("research_hermes_chain_{n}"), "None", None);
+            if n > 0 {
+                r.prereqs = vec![format!("research_hermes_chain_{}", n - 1)];
+            }
+            research.push(r);
+        }
+        let mut hermes = make_research("research_sc_hermes", "None", None);
+        hermes.prereqs = vec!["research_hermes_chain_8".into()];
+        research.push(hermes);
+
+        let sirenix = Sirenix {
+            research,
+            contracts: vec![
+                make_contract(
+                    "contract_tutorial_firstorbit",
+                    vec![],
+                    vec!["contract_tutorial_moonorbit".into()],
+                ),
+                make_contract(
+                    "contract_tutorial_moonorbit",
+                    vec![],
+                    vec!["contract_tutorial_moonlanding".into()],
+                ),
+                make_contract(
+                    "contract_tutorial_moonlanding",
+                    vec![],
+                    vec!["contract_mars_marslanding".into()],
+                ),
+                make_contract(
+                    "contract_mars_marslanding",
+                    vec![obj("MakeResearch", 1.0, Some("research_sc_hermes"))],
+                    vec![],
+                ),
+                // Orphan spacestation — generic possession floor.
+                make_contract(
+                    "contract_spacestation_fuel1",
+                    vec![obj("Possession", 10.0, None)],
+                    vec![],
+                ),
+            ],
+            ..Default::default()
+        };
+        let page = page_contracts(&locale, &sirenix);
+        let mars = contract_order(&page, "Humans on Mars");
+        let depot = contract_order(&page, "Propellant Depot");
+        assert!(
+            depot >= mars,
+            "Propellant Depot ({depot}) must be floored at Humans on Mars depth ({mars}) — Fix B for orphan spacestation contracts\npage:\n{page}"
+        );
+    }
+
+    #[test]
+    fn fix_b_does_not_lower_date_locked_general_contracts() {
+        // Date-locked contracts like Exoplanet Search are already at 2080+ via
+        // Path A; Fix B must not pull them down to mars-landing depth.  The
+        // `if floor > cur` guard inside Fix B handles this — verify it works.
+        let mut locale = contracts_fixture_locale();
+        locale.contracts.push(NameDesc {
+            id: "contract_general_exoplanetsearch".into(),
+            name: "Exoplanet Search".into(),
+            description: "Find an exoplanet.".into(),
+        });
+        locale.contracts.push(NameDesc {
+            id: "contract_mars_marslanding".into(),
+            name: "Humans on Mars".into(),
+            description: "Land on Mars.".into(),
+        });
+        let sirenix = Sirenix {
+            contracts: vec![
+                make_contract(
+                    "contract_mars_marslanding",
+                    vec![],
+                    vec![],
+                ),
+                date_locked_contract(
+                    "contract_general_exoplanetsearch",
+                    "2080-01-01 00:00:00",
+                    vec![],
+                ),
+            ],
+            ..Default::default()
+        };
+        let page = page_contracts(&locale, &sirenix);
+        assert_eq!(
+            contract_order(&page, "Exoplanet Search"),
+            2080,
+            "Exoplanet Search must keep its 2080 year-Order; Fix B's `if floor > cur` guard must protect it\npage:\n{page}"
         );
     }
 
