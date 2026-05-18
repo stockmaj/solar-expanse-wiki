@@ -309,8 +309,12 @@ test('CORP_DATA.scenarios is ordered Early → Expansion → Colonization → Ra
   ]);
 });
 
-test('default-selected scenario on page load is Early Exploration', () => {
-  assert.equal(C.DEFAULT_SCENARIO_ID, 'StartGameEpoch_EarlyExploration');
+test('default-selected scenario on page load is The Expansion', () => {
+  // Early Exploration starts every corp with zero pre-built facilities, so
+  // the facilityRows section on /corporations/ comes up empty. The Expansion
+  // is the first scenario where starting facilities differ between corps —
+  // making it the more useful default for the comparison view.
+  assert.equal(C.DEFAULT_SCENARIO_ID, 'StartGameEpoch_TheExpansion');
 });
 
 // ---- Starting facilities section ---------------------------------------

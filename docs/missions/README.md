@@ -36,6 +36,8 @@ For launch-window timing for any destination, see [Launch Windows](../celestial-
 
 ## Funding missions (contracts)
 
+<div class="no-sort" markdown="1">
+
 | <span title="Dependency depth: 0 = no prereq, N = unlocked after an Order N-1 contract">Order</span> | Contract | <span title="Contracts that must complete before this one is offered">Prereq</span> | <span title="Objectives that must be completed to claim the rewards">Requirements</span> | <span title="Cash, resources, unlocks, and follow-up contracts granted on completion">Rewards</span> | Premise |
 | --- | --- | --- | --- | --- | --- |
 | 0 | <a id="contract-contract-tutorial-firstorbit"></a>**First Orbit** | — | Deliver 1× Hubel Telescope Cargo<br>Explore | Cash: 15k<br>Next: [Explore Luna](#contract-contract-tutorial-moonorbit) | We're ready for our big launch! To start off, we need to put a brand new space telescope in Low Earth Orbit. It will let us look above and beyond, and scout out suitable locations for future missions. |

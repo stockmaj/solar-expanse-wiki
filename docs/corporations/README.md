@@ -15,8 +15,8 @@ Pick a scenario and difficulty to compare starting funding, fleet, and completed
 <div class="calc">
 <label>Scenario:
 <select id="corp-scenario">
-<option value="StartGameEpoch_EarlyExploration" selected>Early Exploration</option>
-<option value="StartGameEpoch_TheExpansion">The Expansion</option>
+<option value="StartGameEpoch_EarlyExploration">Early Exploration</option>
+<option value="StartGameEpoch_TheExpansion" selected>The Expansion</option>
 <option value="StartGameEpoch_Colonization">Colonization Era</option>
 <option value="StartGameEpoch_RaceBeyond">Race Beyond</option>
 </select>

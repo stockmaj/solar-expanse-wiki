@@ -1921,16 +1921,18 @@ in this table. The names and corp rosters below are stable.*\n\n",
     out.push_str(
         "Pick a scenario and difficulty to compare starting funding, fleet, and completed research across all five corporations side-by-side. Only research held by at least one corporation at the selected scenario is listed.\n\n",
     );
-    // <select> elements use Early Exploration + Pioneer as defaults; the JS
+    // <select> elements use The Expansion + Pioneer as defaults; the JS
     // layer reads the current value and re-renders the table on change.
-    // Early Exploration is the most playable starting point (no pre-built
-    // fleet, full progression ahead), so it's the natural default.
+    // Early Exploration starts every corp with zero pre-built facilities,
+    // so the comparison's Starting facilities section comes up empty —
+    // a poor landing view. The Expansion is the first scenario with a
+    // non-trivial facility delta between corps.
     out.push_str("<div class=\"calc\">\n");
     out.push_str("<label>Scenario:\n<select id=\"corp-scenario\">\n");
     for s in &sirenix.scenario_starts {
         let id = &s.scenario_id;
         let name = epoch_display_name(id);
-        let selected = if id == "StartGameEpoch_EarlyExploration" {
+        let selected = if id == "StartGameEpoch_TheExpansion" {
             " selected"
         } else {
             ""
@@ -3931,9 +3933,17 @@ fn page_missions(locale: &Locale, sirenix: &Sirenix) -> String {
     // The Missions page combines the planning-flow primer with the in-game
     // contracts list (the game's word for what drives progression).
     let contracts_table = page_contracts(locale, sirenix);
-    // Strip the "# Contracts\n\n…\n\n" preamble — we want just the table + reading notes.
+    // Strip the "# Contracts\n\n…" preamble — we want everything from the
+    // contracts table onwards. The table is wrapped in
+    //   <div class="no-sort" markdown="1">
+    // which is what (a) tells the global sortable-table JS to skip it and
+    // (b) hides the "Order" column via CSS. Slicing at the first "\n\n|"
+    // (the first table row) would strip the wrapper opening and the player
+    // would see the depth-numbered Order column AND be able to re-sort
+    // the chain-ordered table — both wrong. Anchor the slice at the
+    // wrapper opening instead so it survives the embed intact.
     let table_only = contracts_table
-        .find("\n\n|")
+        .find("<div class=\"no-sort\"")
         .map(|i| &contracts_table[i..])
         .unwrap_or(&contracts_table)
         .trim_start();
@@ -5118,16 +5128,20 @@ mod tests {
             !prose.contains("StartGameEpoch_"),
             "internal epoch id leaked into player-facing prose:\n{prose}"
         );
-        // The default-selected scenario must be Early Exploration.
+        // The default-selected scenario must be The Expansion. Early
+        // Exploration starts every corp with zero pre-built facilities, so
+        // the Starting facilities section in the comparison table comes up
+        // empty there. The Expansion is the first scenario where the
+        // matrix has data to compare.
         assert!(
-            page.contains("value=\"StartGameEpoch_EarlyExploration\" selected"),
-            "Early Exploration should be the default-selected option:\n{page}"
+            page.contains("value=\"StartGameEpoch_TheExpansion\" selected"),
+            "The Expansion should be the default-selected option:\n{page}"
         );
         // No other scenario should carry the selected attribute.
-        for other in ["StartGameEpoch_TheExpansion", "StartGameEpoch_Colonization", "StartGameEpoch_RaceBeyond"] {
+        for other in ["StartGameEpoch_EarlyExploration", "StartGameEpoch_Colonization", "StartGameEpoch_RaceBeyond"] {
             assert!(
                 !page.contains(&format!("value=\"{other}\" selected")),
-                "only Early Exploration should be selected, but {other} is:\n{page}"
+                "only The Expansion should be selected, but {other} is:\n{page}"
             );
         }
         // Scenario order in the dropdown must be Early → Expansion → Colonization → RaceBeyond.
@@ -6508,6 +6522,54 @@ mod tests {
         assert!(
             order >= 3,
             "Generic Possession (no product) should be floored at depth(research_sc_iris)+1 = 3; got {order}\npage:\n{page}"
+        );
+    }
+
+    #[test]
+    fn missions_page_preserves_no_sort_wrapper() {
+        // The missions page embeds the contracts table by reusing
+        // page_contracts() output. The wrapper <div class="no-sort"
+        // markdown="1"> ... </div> must survive the embed so the global
+        // sortable-table JS skips this table and the CSS rule
+        // `.no-sort table th:first-child { display: none }` hides the
+        // Order column. Without the wrapper, the player would see the
+        // depth-numbered Order column and could re-sort the table out of
+        // its meaningful chain order.
+        let locale = contracts_fixture_locale();
+        let sirenix = Sirenix {
+            contracts: vec![make_contract(
+                "contract_tutorial_moonlanding",
+                vec![obj("MakeResearch", 0.0, Some("research_sc_helios"))],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let page = page_missions(&locale, &sirenix);
+        assert!(
+            page.contains("<div class=\"no-sort\""),
+            "missions page must preserve the no-sort wrapper around the embedded contracts table:\n{page}"
+        );
+        assert!(
+            page.contains("</div>"),
+            "missions page must keep the closing </div> of the no-sort wrapper:\n{page}"
+        );
+        // The wrapper's opening tag must appear before the contracts table's
+        // Order-column header. (There's a "Mission types" prose table earlier
+        // in the page, so we anchor on the Order header rather than the
+        // first pipe.) And it must appear after the planning-flow heading
+        // so we're sure it's wrapping the contracts table, not some other.
+        let wrap = page.find("<div class=\"no-sort\"").unwrap_or(usize::MAX);
+        let order_header = page.find(">Order</span>").unwrap_or(0);
+        assert!(
+            wrap < order_header,
+            "no-sort wrapper opening must precede the contracts Order header; got wrap={wrap}, order_header={order_header}"
+        );
+        // Closing </div> must come after the Order header so the wrapper
+        // brackets the table.
+        let close = page.rfind("</div>").unwrap_or(0);
+        assert!(
+            close > order_header,
+            "no-sort wrapper close must follow the contracts table; got close={close}, order_header={order_header}"
         );
     }
 }

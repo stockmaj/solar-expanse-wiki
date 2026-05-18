@@ -9,10 +9,13 @@
 
 (function (root) {
   // The default-selected scenario when the page first loads.  Early
-  // Exploration is the most playable starting epoch — every corp begins
-  // with no pre-built fleet and a smaller research tree, so the comparison
-  // table shows the broadest possible delta as the player progresses.
-  var DEFAULT_SCENARIO_ID = 'StartGameEpoch_EarlyExploration';
+  // Exploration starts every corp with zero pre-built facilities (and a
+  // very small research delta), so the comparison table comes up nearly
+  // empty there — players hit the page and see no facility differences.
+  // The Expansion is the first scenario where the starting facility mix
+  // diverges between corps, so it makes the more informative landing.
+  // Users can still switch back via the scenario dropdown.
+  var DEFAULT_SCENARIO_ID = 'StartGameEpoch_TheExpansion';
 
   // ----- Pure logic ------------------------------------------------------
 
@@ -314,8 +317,9 @@
         o.textContent = s.name;
         scenarioSel.appendChild(o);
       });
-      // Default to Early Exploration — the most playable starting point —
-      // when the page's <select> was rendered with no pre-selected option.
+      // Default to The Expansion — the first scenario where the starting
+      // facility mix differs between corps — when the page's <select> was
+      // rendered with no pre-selected option.
       scenarioSel.value = DEFAULT_SCENARIO_ID;
     }
     if (difficultySel.options.length === 0) {
