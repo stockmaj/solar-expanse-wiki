@@ -25,6 +25,10 @@ namespace SolarExpanseWikiDumper
 
         internal static BepInEx.Logging.ManualLogSource Log;
 
+        private bool dumped;
+        private bool armed;
+        private float nextCheckTime;
+
         private void Awake()
         {
             Log = Logger;
@@ -34,48 +38,49 @@ namespace SolarExpanseWikiDumper
                 Log.LogInfo($"Marker present at {marker}; dumper will not run.  Delete it to re-dump.");
                 return;
             }
-            new Harmony(PluginGuid).PatchAll();
-            Log.LogInfo("Harmony patches installed; waiting for ObjectInfoManager.SetAllObjectInfos (fires after scenario load).");
+            armed = true;
+            Log.LogInfo("Update poll armed; waiting for ObjectInfoManager + AllScriptableObjectManager to be ready.");
         }
-    }
 
-    // We hook ObjectInfoManager.SetAllObjectInfos rather than
-    // AllScriptableObjectManager.InitializeSingleton because the latter runs at
-    // game launch, before any scenario is loaded — at that point no ObjectInfo
-    // MonoBehaviours exist yet and the [OdinSerialize] resourceMiningLicenseFeePerT
-    // dictionaries are empty.  SetAllObjectInfos is called from
-    // SolarLoader.CreateSolarSystem once all bodies are instantiated; by the time
-    // its postfix fires the per-body license-fee tables are fully populated.
-    [HarmonyPatch(typeof(ObjectInfoManager), "SetAllObjectInfos")]
-    internal static class DumpPatch
-    {
-        private static bool dumped;
-
-        // ReSharper disable once UnusedMember.Local
-        private static void Postfix(ObjectInfoManager __instance)
+        // Poll every ~0.5s for the managers to be live and ObjectInfo list populated.
+        // We previously hooked ObjectInfoManager.SetAllObjectInfos via Harmony, but the
+        // postfix never fired on the game's actual load path (likely inlined or hit a
+        // mismatched overload), so we switched to a guaranteed-coverage Update poll.
+        // ObjectInfoManager is MonoBehaviourSingleton<ObjectInfoManager>; its
+        // allObjectInfos list only gets populated once SolarLoader.CreateSolarSystem
+        // calls SetAllObjectInfos, so its non-empty count is our "scene ready" signal.
+        private void Update()
         {
-            if (dumped) return;
-            dumped = true;
+            if (!armed || dumped) return;
+            if (Time.unscaledTime < nextCheckTime) return;
+            nextCheckTime = Time.unscaledTime + 0.5f;
 
+            var oim = MonoBehaviourSingleton<ObjectInfoManager>.Instance;
+            if (oim == null) return;
+
+            // allObjectInfos accessor name might shift between versions; reflect for safety.
+            var allField = typeof(ObjectInfoManager).GetField(
+                "allObjectInfos", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+            var all = allField?.GetValue(oim) as System.Collections.ICollection;
+            if (all == null || all.Count == 0) return;
+
+            var asoMgr = SerializedMonoBehaviourSingleton<AllScriptableObjectManager>.Instance
+                         ?? UnityEngine.Object.FindObjectOfType<AllScriptableObjectManager>();
+            if (asoMgr == null) return;
+
+            dumped = true;
             var dir = Application.streamingAssetsPath;
             try
             {
-                Plugin.Log.LogInfo("ObjectInfoManager.SetAllObjectInfos postfix fired — running dump.");
-                var asoMgr = SerializedMonoBehaviourSingleton<AllScriptableObjectManager>.Instance
-                             ?? UnityEngine.Object.FindObjectOfType<AllScriptableObjectManager>();
-                if (asoMgr == null)
-                {
-                    Plugin.Log.LogError("AllScriptableObjectManager.Instance is null at SetAllObjectInfos postfix; aborting dump.");
-                    return;
-                }
+                Log.LogInfo($"Update poll: ObjectInfoManager has {all.Count} bodies and AllScriptableObjectManager is ready — running dump.");
                 var json = Dumper.Dump(asoMgr);
-                File.WriteAllText(Path.Combine(dir, Plugin.OutputFileName), json);
-                File.WriteAllText(Path.Combine(dir, Plugin.MarkerFileName), DateTime.UtcNow.ToString("O"));
-                Plugin.Log.LogInfo($"Wrote {json.Length:N0} characters to {Plugin.OutputFileName}");
+                File.WriteAllText(Path.Combine(dir, OutputFileName), json);
+                File.WriteAllText(Path.Combine(dir, MarkerFileName), DateTime.UtcNow.ToString("O"));
+                Log.LogInfo($"Wrote {json.Length:N0} characters to {OutputFileName}");
             }
             catch (Exception ex)
             {
-                Plugin.Log.LogError($"Dump failed: {ex}");
+                Log.LogError($"Dump failed: {ex}");
             }
         }
     }
