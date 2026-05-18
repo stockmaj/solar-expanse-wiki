@@ -21,6 +21,7 @@ the names, descriptions, and stat tables here match exactly what you see in-game
 | [Achievements](achievements/) | Steam achievements and how to earn each — keyed to contracts, spacecraft, and launch vehicles. |
 | [Resources](resources/) | The 20+ resource types — water, metals, fissiles, He-3, supplies, exotic alloys. |
 | [Asteroid Taxonomy](asteroid-taxonomy/) | The five asteroid classes (Carbon, Dark, Helium-3, Metal, Stone) and the per-class resource roll table the game uses when you mine a deposit. |
+| [Terraforming](terraforming/) | Per-resource thermal / phase constants — boiling and melting points, latent heat, heat capacity, optical depth — that drive the atmosphere sim. |
 | [Corporations](corporations/) | Playable starting factions — SoleX, NASA, ESA, CNSA, Roscosmos. |
 
 ## How to use this wiki

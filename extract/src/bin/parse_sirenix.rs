@@ -241,6 +241,22 @@ struct Resource {
     terraformation_info: Option<TerraformationInfo>,
 }
 
+/// Per-resource thermal / phase constants from
+/// `ResourceDefinition.terraformationInfo`. The values drive Solar Expanse's
+/// atmosphere and surface-temperature sim — boiling / melting points, latent
+/// heat of vaporization, heat capacity, greenhouse contribution. Units come
+/// from inspecting how the C# sim consumes them (see Assembly-CSharp
+/// `TerraformationInfoDef`):
+///
+/// * `boiling_temperature_k` / `melting_temperature_k` — kelvin (used with
+///   the gas constant R = 8.314 J/(mol·K) in the Clausius-Clapeyron formula).
+/// * `vaporization_latent_heat` — J/mol (divided by R in the same formula).
+/// * `pressure_triple_point` — atmospheres (water's 0.00611 atm = 611 Pa,
+///   CO2's 5.11 atm both match real values).
+/// * `heat_capacity` — specific heat (J/(kg·K) for steam-like resources).
+/// * `optical_depth_parameter` — dimensionless greenhouse coefficient
+///   (formerly `gasIRAbsorbtionCoefficient`).
+///
 #[derive(Serialize, Debug, Default, PartialEq)]
 struct ContractObjective {
     kind: String,                 // Possession / BuildFacility / MarketsOffers / etc.
