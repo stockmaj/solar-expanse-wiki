@@ -555,6 +555,17 @@ struct Body {
     #[allow(dead_code)]
     body_type: Option<i64>,
     orbit_data_source: Option<String>,
+    /// Asteroid class identifier (`Carbon`, `Dark`, `Helium3`, `Metal`,
+    /// `Stone`) for asteroid bodies, sourced from the body's
+    /// `objectSubType` reference when present.  None for any body not
+    /// classified per-asteroid in the dump — at the time of writing the
+    /// game stores classes only on the per-class roll tables
+    /// (`ObjectSubType.Asteroid*` in sirenix-dump.json) and not on the
+    /// per-asteroid `ObjectInfo` rows, so this field is None for every
+    /// asteroid in the current pipeline.  The asteroid table renders an
+    /// em-dash for None and falls back gracefully.
+    #[serde(default)]
+    asteroid_class: Option<String>,
 }
 
 const PLANETS: &[&str] = &[
@@ -830,8 +841,13 @@ fn asteroid_table(ctx: &WikiCtx, ids: &[&str]) -> String {
             let a = body.and_then(|b| b.semi_major_axis_au);
             let e = body.and_then(|b| b.eccentricity);
             let i = body.and_then(|b| b.inclination_deg);
+            let class_cell = body
+                .and_then(|b| b.asteroid_class.as_deref())
+                .map(asteroid_class_cell)
+                .unwrap_or_else(|| "—".to_string());
             vec![
                 format!("**{display}**"),
+                class_cell,
                 fmt_radius(radius),
                 fmt_au(a),
                 fmt_opt(e, 4),
@@ -839,9 +855,31 @@ fn asteroid_table(ctx: &WikiCtx, ids: &[&str]) -> String {
             ]
         })
         .collect();
-    md_table(
-        &["Asteroid", "Radius (km)", "Semi-major axis (AU)", "Eccentricity", "Inclination (°)"],
+    md_table_with_tips(
+        &["Asteroid", "Class", "Radius (km)", "Semi-major axis (AU)", "Eccentricity", "Inclination (°)"],
+        &[
+            None,
+            Some("Mining roll table — Carbon / Dark / Helium-3 / Metal / Stone."),
+            None,
+            None,
+            None,
+            None,
+        ],
         &rows,
+    )
+}
+
+/// Render a raw asteroid-class name (`Carbon`, `Dark`, `Helium3`, `Metal`,
+/// `Stone`) as a markdown link to the matching anchor on the
+/// `../asteroid-taxonomy/` page, with a hover tooltip naming the full set
+/// of classes.  GitHub's automatic header anchors lowercase the H2 text
+/// and replace spaces with hyphens, so `## Helium-3 Asteroid` becomes
+/// `#helium-3-asteroid` — we mirror that here.
+fn asteroid_class_cell(raw: &str) -> String {
+    let display = asteroid_class_display(raw);
+    let anchor = format!("{}-asteroid", display.to_ascii_lowercase());
+    format!(
+        "[<span title=\"Mining roll table — Carbon / Dark / Helium-3 / Metal / Stone.\">{display}</span>](../asteroid-taxonomy/#{anchor})"
     )
 }
 
@@ -1536,7 +1574,7 @@ lift them to space.\n\n",
                 "Exhaust V",
                 "Reusable",
                 "Built at",
-                "Launch vehicle",
+                "Requires LV",
                 "Build cost",
                 "Time (d)",
                 "Description",
@@ -1692,7 +1730,7 @@ lift them to space.\n\n",
 - **Exhaust V** is the engine's effective exhaust velocity in km/s, equivalent to specific impulse (multiply by ~102 to get ISP in seconds). Higher exhaust V = more Δv per kilogram of fuel = longer reach, but typically less thrust. Chemical engines sit around 3–5 km/s; nuclear thermal 8–15; fusion and ion drives 20+.\n\
 - **Build cost** is the resource cost of building the spacecraft itself (engine and tank modules are paid for separately when configured).\n\
 - **Built at** is where the craft is assembled: *Orbit* means it's built in an orbital shipyard and never lands; *Surface* means it's built on a planet's surface (some surface craft are full SSTOs, some are upper stages or ride a [launch vehicle](../launch-vehicles/) — the player picks which LV to pair with the craft at flight-planning time, so no fixed mapping is listed here).\n\
-- **Launch vehicle** says when the craft must ride an LV to reach orbit: *Earth only* means it can self-launch from Luna, Mars, and asteroids but still needs an LV from Earth's gravity well; *Any body* means it needs an LV from every planet/moon (most early chemical and electric craft); *Built in orbit* means it never sits on a surface so the column doesn't apply. Earth always forces an LV regardless of the underlying flag.\n\n\
+- **Requires LV** says when the craft must ride an LV to reach orbit: *Earth only* means it can self-launch from Luna, Mars, and asteroids but still needs an LV from Earth's gravity well; *Any body* means it needs an LV from every planet/moon (most early chemical and electric craft); *Built in orbit* means it never sits on a surface so the column doesn't apply. Earth always forces an LV regardless of the underlying flag.\n\n\
 ## See also\n\n\
 - [Launch Vehicles](../launch-vehicles/) — surface-to-orbit lifters\n\
 - [Research](../research/) — propulsion tech tree\n",
@@ -5140,10 +5178,12 @@ the names, descriptions, and stat tables here match exactly what you see in-game
 | [Terraforming](terraforming/) | Per-resource thermal / phase constants — boiling and melting points, latent heat, heat capacity, optical depth — that drive the atmosphere sim. |\n\
 | [Corporations](corporations/) | Playable starting factions — SoleX, NASA, ESA, CNSA, Roscosmos. |\n\n\
 ## How to use this wiki\n\n\
-Every page is plain Markdown. Jekyll renders the site on GitHub Pages, with a\n\
-custom layout, a sortable-table snippet, and three small browser-side modules\n\
-that power the launch-window, gravity-assist, and corporation-comparison\n\
-calculators. Browse by clicking section links above.\n\n\
+- **Find data fast.** Bodies (planets, moons, asteroids, comets, exoplanets) live under [Celestial Bodies](celestial-bodies/) — radius, semi-major axis, eccentricity, inclination, parent. Fleet planning lives under [Spacecraft](spacecraft/) and [Launch Vehicles](launch-vehicles/) — dry mass, cargo, fuel, thrust, exhaust velocity, build cost. What-to-build prompts and the workforce / energy / resource math behind each structure are on [Facilities](facilities/). The tech tree — costs, prereqs, and what each node unlocks — is on [Research](research/).\n\
+- **Plan progression.** [Contracts](contracts/) is the in-game contracts tab, ordered by their root tree, with rewards and follow-on links. [Missions](missions/) walks the Plan Mission flow and points at launch-window data. [Achievements](achievements/) lists every Steam achievement keyed to the contract, spacecraft, or launch vehicle that earns it.\n\
+- **Compare scenario starts.** [Corporations](corporations/) is a side-by-side table of the playable factions — starting cash, starting research, starting fleet, starting facilities — so you can pick the run you want.\n\
+- **Understand the economy.** [Resources](resources/) lists every resource (water, metals, fissiles, He-3, supplies, exotic alloys), what produces it, what consumes it, and per-body mining license fees.  [Asteroid Taxonomy](asteroid-taxonomy/) shows the resource roll table for each of the five asteroid classes (Carbon, Dark, Helium-3, Metal, Stone) so you know what mining a given asteroid will yield.\n\
+- **Tables are sortable.** Click any column header to sort by that column; click again to reverse.  Hover a column header for a tooltip explaining its units or source data.\n\
+- **Calculator.** Several pages embed a small Calculator that computes a fleet's total payload and crew capacity for trip planning — change the inputs and the totals update live.\n\n\
 ## Contributing\n\n\
 Almost every page is generated from the game's own files; direct edits get\n\
 overwritten when the pipeline reruns. Fixes belong in the [generator code](https://github.com/stockmaj/solar-expanse-wiki/tree/main/extract).\n\
@@ -5330,6 +5370,7 @@ mod tests {
             omega_uc_deg: None,
             body_type: None,
             orbit_data_source: Some("OrbitUniversal".into()),
+            asteroid_class: None,
         };
         let km = moon_distance_km(&moon).unwrap();
         let expected = 2.57 * AU_IN_KM / 1000.0;
@@ -5354,6 +5395,7 @@ mod tests {
             omega_uc_deg: None,
             body_type: Some(0),
             orbit_data_source: Some("SolarBody".into()),
+            asteroid_class: None,
         };
         // 0.387 AU is ~57.9M km when not scaled
         let km = moon_distance_km(&planet).unwrap();
@@ -5413,6 +5455,7 @@ mod tests {
             omega_uc_deg: None,
             body_type: None,
             orbit_data_source: None,
+            asteroid_class: None,
         }
     }
 
@@ -5800,6 +5843,7 @@ mod tests {
             omega_uc_deg: None,
             body_type: None,
             orbit_data_source: Some("SolarBody".into()),
+            asteroid_class: None,
         };
         let stats = Stats {
             bodies: vec![
@@ -6542,8 +6586,8 @@ mod tests {
     }
 
     #[test]
-    fn spacecraft_page_has_launch_vehicle_column_header_and_tooltip() {
-        // The Spacecraft page should expose a "Launch vehicle" column with
+    fn spacecraft_page_has_requires_lv_column_header_and_tooltip() {
+        // The Spacecraft page should expose a "Requires LV" column with
         // an explanatory tooltip — players need to know which craft are
         // Earth-launchable on their own (none) vs. surface-launchable
         // elsewhere (most non-chemical craft) vs. built in orbit.
@@ -6554,14 +6598,14 @@ mod tests {
         };
         let page = page_spacecraft(&locale, &sirenix);
         assert!(
-            page.contains("Launch vehicle"),
-            "spacecraft page missing 'Launch vehicle' column header:\n{page}"
+            page.contains("Requires LV"),
+            "spacecraft page missing 'Requires LV' column header:\n{page}"
         );
         // Tooltip should reference Earth specifically because Earth is the
         // hard-coded `Company.mainObjectInfo` that always requires an LV.
         assert!(
             page.contains("Earth"),
-            "Launch vehicle column tooltip should mention Earth:\n{page}"
+            "Requires LV column tooltip should mention Earth:\n{page}"
         );
     }
 
@@ -9667,6 +9711,229 @@ mod tests {
             "expected sentinel:\n{page}"
         );
     }
+
+    // ---------- Task 1: Asteroid class column ----------
+
+    #[test]
+    fn asteroid_table_renders_class_column_with_taxonomy_link() {
+        // A body whose `asteroid_class` is "Metal" should appear in the
+        // asteroid table with a Class column linking to the per-class
+        // anchor on the asteroid-taxonomy page.
+        let locale = Locale {
+            celestial_bodies: vec![
+                CelestialBody { id: "Psyche".into(), name: "16 Psyche".into() },
+            ],
+            spacecraft: vec![],
+            launch_vehicles: vec![],
+            research: vec![],
+            corporations: vec![],
+            contracts: vec![],
+            resources: vec![],
+            facilities: vec![],
+            habitability_scales: BTreeMap::new(),
+            cargo: vec![],
+        };
+        let mut psyche = fixture_body("16 Psyche");
+        psyche.asteroid_class = Some("Metal".into());
+        let stats = Stats { bodies: vec![psyche] };
+        let ctx = WikiCtx::build(&locale, &stats);
+
+        let table = asteroid_table(&ctx, &["Psyche"]);
+        // Header is "Class" (between Asteroid and Radius).
+        assert!(
+            table.contains("Class"),
+            "asteroid table must include a Class column header:\n{table}"
+        );
+        // The Metal class cell links to the metal-asteroid anchor on the
+        // asteroid-taxonomy page (sibling section).
+        assert!(
+            table.contains("../asteroid-taxonomy/#metal-asteroid"),
+            "Metal-class row must link to #metal-asteroid:\n{table}"
+        );
+        // And a tooltip on the Class cell mentions the roll-table classes.
+        assert!(
+            table.contains("Mining roll table"),
+            "Class cell tooltip should reference the mining roll table:\n{table}"
+        );
+    }
+
+    #[test]
+    fn asteroid_table_helium3_class_links_to_helium_3_anchor() {
+        // Game's internal `Helium3` should render as `Helium-3` and link to
+        // the GitHub-auto-generated `#helium-3-asteroid` anchor.
+        let locale = Locale {
+            celestial_bodies: vec![
+                CelestialBody { id: "Apophis".into(), name: "99942 Apophis".into() },
+            ],
+            spacecraft: vec![],
+            launch_vehicles: vec![],
+            research: vec![],
+            corporations: vec![],
+            contracts: vec![],
+            resources: vec![],
+            facilities: vec![],
+            habitability_scales: BTreeMap::new(),
+            cargo: vec![],
+        };
+        let mut apophis = fixture_body("99942 Apophis");
+        apophis.asteroid_class = Some("Helium3".into());
+        let stats = Stats { bodies: vec![apophis] };
+        let ctx = WikiCtx::build(&locale, &stats);
+
+        let table = asteroid_table(&ctx, &["Apophis"]);
+        assert!(
+            table.contains("../asteroid-taxonomy/#helium-3-asteroid"),
+            "Helium3 row must link to #helium-3-asteroid:\n{table}"
+        );
+        assert!(
+            table.contains("Helium-3"),
+            "Helium3 should display as 'Helium-3':\n{table}"
+        );
+    }
+
+    #[test]
+    fn asteroid_table_dashes_class_when_unknown() {
+        // Bodies without a known class should render an em-dash in the
+        // Class column rather than failing the build.  Per-asteroid class
+        // isn't linked anywhere in the current dump, so this is the
+        // expected path for every shipped asteroid today.
+        let locale = Locale {
+            celestial_bodies: vec![
+                CelestialBody { id: "Ceres".into(), name: "1 Ceres".into() },
+            ],
+            spacecraft: vec![],
+            launch_vehicles: vec![],
+            research: vec![],
+            corporations: vec![],
+            contracts: vec![],
+            resources: vec![],
+            facilities: vec![],
+            habitability_scales: BTreeMap::new(),
+            cargo: vec![],
+        };
+        let ceres = fixture_body("1 Ceres"); // asteroid_class defaults to None
+        let stats = Stats { bodies: vec![ceres] };
+        let ctx = WikiCtx::build(&locale, &stats);
+
+        let table = asteroid_table(&ctx, &["Ceres"]);
+        // The Ceres row should still parse with a Class cell — em-dash for
+        // unknown class (don't fail the build).
+        let row = table
+            .lines()
+            .find(|l| l.contains("1 Ceres"))
+            .expect("Ceres row present");
+        let cells: Vec<&str> = row.split('|').map(|c| c.trim()).collect();
+        // Leading empty cell, then: Asteroid | Class | Radius | a | e | i | trailing.
+        // Class is index 2.
+        let class_cell = cells.get(2).expect("Class cell present");
+        assert_eq!(*class_cell, "—", "unknown class should render as em-dash; row:\n{row}");
+    }
+
+    // ---------- Task 3: Root README "How to use this wiki" rewrite ----------
+
+    #[test]
+    fn root_readme_how_to_use_section_is_player_facing() {
+        // The "How to use this wiki" section should help players navigate
+        // the wiki (Bodies / Spacecraft / Calculator), not describe the
+        // generator implementation (Jekyll, sortable-table snippet).
+        let root = page_root();
+        // Find the "How to use this wiki" section and the next H2.
+        let start = root
+            .find("## How to use this wiki")
+            .expect("How to use this wiki section present");
+        let after_start = &root[start..];
+        let end_rel = after_start[3..].find("\n## ").map(|i| i + 3).unwrap_or(after_start.len());
+        let section = &after_start[..end_rel];
+
+        // Player-navigation cues that should appear.
+        for needle in ["Bodies", "Spacecraft", "Calculator"] {
+            assert!(
+                section.contains(needle),
+                "How-to-use section should mention {needle}; section:\n{section}"
+            );
+        }
+        // Generator implementation talk that should NOT appear.
+        for forbidden in ["Jekyll", "sortable-table snippet"] {
+            assert!(
+                !section.contains(forbidden),
+                "How-to-use section should not mention {forbidden} (generator-talk); section:\n{section}"
+            );
+        }
+    }
+
+    // ---------- Task 4: Footer version detection ----------
+
+    #[test]
+    fn detect_game_version_parses_bundle_version_from_project_settings() {
+        // Given a Unity ProjectSettings.asset containing a
+        // `  bundleVersion: 0.26.5.15.14 BETA` line, the helper should
+        // surface that string so the wiki footer renders v0.26.5.15.14 BETA
+        // rather than v"unknown".
+        let dir = std::env::temp_dir().join("solar_expanse_wiki_version_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("mktemp");
+        let path = dir.join("ProjectSettings.asset");
+        std::fs::write(
+            &path,
+            "  serializedVersion: 26\n  bundleVersion: 0.26.5.15.14 BETA\n  AndroidBundleVersionCode: 0\n",
+        )
+        .expect("write fixture");
+
+        let v = detect_game_version_from_project_settings(&path);
+        assert_eq!(v.as_deref(), Some("0.26.5.15.14 BETA"));
+    }
+
+    #[test]
+    fn detect_game_version_returns_none_when_file_missing() {
+        let path = std::env::temp_dir().join("solar_expanse_wiki_does_not_exist_xyz.asset");
+        let _ = std::fs::remove_file(&path);
+        assert!(detect_game_version_from_project_settings(&path).is_none());
+    }
+}
+
+/// Parse the Unity engine's `bundleVersion` line out of a
+/// `ProjectSettings.asset` file.  Unity writes the line as e.g.:
+///
+/// ```text
+///   bundleVersion: 0.26.5.15.14 BETA
+/// ```
+///
+/// Returns `Some(version_string)` (with leading/trailing whitespace
+/// stripped) when found; `None` when the file is missing, unreadable, or
+/// has no `bundleVersion:` line.  The gen-pages binary calls this when no
+/// explicit `[game-version]` CLI arg is passed, so an interactive
+/// developer running `cargo run --bin gen-pages …` directly still sees a
+/// real version in the footer instead of `vunknown`.
+fn detect_game_version_from_project_settings(path: &Path) -> Option<String> {
+    let content = fs::read_to_string(path).ok()?;
+    for line in content.lines() {
+        // Unity indents the field by two spaces; tolerate any leading
+        // whitespace (some Unity versions reflow on save).
+        let trimmed = line.trim_start();
+        if let Some(rest) = trimmed.strip_prefix("bundleVersion:") {
+            let v = rest.trim();
+            if !v.is_empty() {
+                return Some(v.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Look for a Unity `ProjectSettings.asset` near the cache layout that
+/// `extract.sh` produces and return its `bundleVersion`.  The cache lives
+/// at `extract/cache/project/ExportedProject/ProjectSettings/ProjectSettings.asset`
+/// relative to the workspace root, and `gen-pages` is typically invoked
+/// with stats.json at `extract/cache/stats.json` — so we walk up from the
+/// stats path and check the expected sibling layout.
+fn auto_detect_game_version(stats_path: &Path) -> Option<String> {
+    let cache_dir = stats_path.parent()?;
+    let candidate = cache_dir
+        .join("project")
+        .join("ExportedProject")
+        .join("ProjectSettings")
+        .join("ProjectSettings.asset");
+    detect_game_version_from_project_settings(&candidate)
 }
 
 fn main() -> Result<()> {
@@ -9680,7 +9947,12 @@ fn main() -> Result<()> {
     let stats_path = PathBuf::from(&args[2]);
     let sirenix_path = PathBuf::from(&args[3]);
     let wiki_root = PathBuf::from(&args[4]);
-    let game_version = args.get(5).cloned().unwrap_or_else(|| "unknown".to_string());
+    // Priority: explicit CLI arg → sibling ProjectSettings.asset → "unknown".
+    let game_version = args
+        .get(5)
+        .cloned()
+        .or_else(|| auto_detect_game_version(&stats_path))
+        .unwrap_or_else(|| "unknown".to_string());
 
     let locale: Locale = serde_json::from_str(&fs::read_to_string(&locale_path)?)
         .with_context(|| format!("parsing {}", locale_path.display()))?;
