@@ -30,6 +30,15 @@ per-resource thermal properties. Use these tables to understand:
 | <a id="terraforming-silicon"></a><img src="../images/resources/silicon.png" width="16" alt="Silicon"/>&nbsp;**[Silicon](../resources/#resource-silicon)** | 1687 / 1414 °C | 3538 / 3265 °C | 359000 | 705 | 1 | 1.0e-5 |
 | <a id="terraforming-water"></a><img src="../images/resources/water.png" width="16" alt="Water"/>&nbsp;**[Water](../resources/#resource-water)** | 220 / -53 °C | 373 / 100 °C | 50000 | 1860 | 0.002 | 0.00611 |
 
+## Terraforming facilities
+
+Facilities that actively modify a planet's habitability parameters over time. See the [Facilities page](../facilities/) for build cost, prerequisites, and other stats.
+
+| Facility | Per-day habitability deltas |
+| --- | --- |
+| **[Orbital Magnetosphere Generator](../facilities/#facility-terraform-space-magnet)** | Radiation −0.72<br>Magnetic field +0.72 |
+| **[Planetary Magnetosphere Generator](../facilities/#facility-terraform-magnet)** | Radiation −0.6<br>Magnetic field +0.6 |
+
 ## Reading the table
 
 - **Melting / Boiling** are the phase-change temperatures the body's average surface temperature must cross to keep the resource solid, liquid, or gas at reference pressure. Both columns show kelvin first with the celsius equivalent in parentheses.
@@ -41,3 +50,4 @@ per-resource thermal properties. Use these tables to understand:
 ## See also
 
 - [Resources](../resources/) — per-resource production / consumption, market prices, and Earth licensing fees.
+- [Facilities](../facilities/) — full table of buildings (including the terraforming structures surfaced above), with build costs and prerequisites.
