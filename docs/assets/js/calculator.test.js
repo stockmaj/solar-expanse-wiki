@@ -1,7 +1,7 @@
 // Node-only unit tests for calculator.js — additive-stacking math.
 // Run with `node docs/assets/js/calculator.test.js` from anywhere.
 
-const { applyReductions, workerTotal, powerNetTotal, addSaved, removeSaved, iconFile, fmtAbbrev, crewTransportMass, buildDayTotal } = require('./calculator.js');
+const { applyReductions, workerTotal, powerNetTotal, addSaved, removeSaved, iconFile, fmtAbbrev, crewTransportMass, buildDayTotal, encodeShareState, decodeShareState } = require('./calculator.js');
 
 let passed = 0;
 let failed = 0;
@@ -336,6 +336,34 @@ eq(
   400,
   'build days: serial sum of build_time × count, missing field treated as 0'
 );
+
+// ----- Share-by-URL round-trip --------------------------------------------
+
+// Node lacks atob/btoa by default in old versions; the JS expects globals.
+// Confirm they're around (Node 16+ provides them).
+if (typeof atob === 'undefined') { global.atob = require('buffer').Buffer.from(arguments[0], 'base64').toString('binary'); }
+
+const fullState = {
+  placed: { build_habitat: 3, build_alloymine: 1 },
+  checked: { research_lifesup_10: true },
+  crewTransport: 'module_crew_compartment',
+  spacecraft: 'spacecraft_chem_large',
+};
+eq(decodeShareState(encodeShareState(fullState)), fullState, 'share: round-trip preserves full state');
+
+eq(
+  decodeShareState(encodeShareState({
+    placed: {}, checked: {}, crewTransport: null, spacecraft: null,
+  })),
+  { placed: {}, checked: {}, crewTransport: null, spacecraft: null },
+  'share: round-trip preserves empty state'
+);
+
+eq(decodeShareState('not-base64!!!'), null, 'share: bad input → null');
+
+// URL safety — no characters that need encoding in a query string.
+const encoded = encodeShareState(fullState);
+eq(/^[A-Za-z0-9_-]+$/.test(encoded), true, 'share: encoded form is URL-safe (no +/=)');
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed === 0 ? 0 : 1);

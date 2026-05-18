@@ -93,6 +93,31 @@
     return scaled.toFixed(1) + suffix;
   }
 
+  function encodeShareState(state) {
+    var payload = {
+      p: state.placed,
+      c: state.checked,
+      ct: state.crewTransport,
+      sc: state.spacecraft,
+    };
+    return btoa(JSON.stringify(payload))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
+  function decodeShareState(encoded) {
+    try {
+      var b64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
+      while (b64.length % 4) b64 += '=';
+      var payload = JSON.parse(atob(b64));
+      return {
+        placed: payload.p || {},
+        checked: payload.c || {},
+        crewTransport: payload.ct || null,
+        spacecraft: payload.sc || null,
+      };
+    } catch (e) { return null; }
+  }
+
   function addSaved(saved, name, placed) {
     var trimmed = String(name).trim();
     if (!trimmed) return saved.slice();
@@ -251,7 +276,22 @@
   }
 
   function render(root, data) {
+    // A `?p=<base64>` query string overrides whatever's in localStorage on
+    // load. Once applied we drop the query string so a refresh doesn't keep
+    // re-importing it (and we persist the merged state to localStorage).
     var state = loadState();
+    var qs = (typeof location !== 'undefined' ? location.search : '') || '';
+    var match = qs.match(/[?&]p=([^&]+)/);
+    if (match) {
+      var imported = decodeShareState(decodeURIComponent(match[1]));
+      if (imported) {
+        state = imported;
+        saveState(state);
+        if (window.history && window.history.replaceState) {
+          window.history.replaceState({}, '', location.pathname);
+        }
+      }
+    }
     pruneState(state, data);
 
     root.innerHTML =
@@ -266,6 +306,7 @@
           '<div class="calc-pane-header">' +
             '<h3>Placed</h3>' +
             '<button type="button" class="calc-save" id="calc-save">Save…</button>' +
+            '<button type="button" class="calc-save" id="calc-share">Share</button>' +
             '<button type="button" class="calc-reset" id="calc-reset">Reset</button>' +
           '</div>' +
           '<div class="calc-saved" id="calc-saved"></div>' +
@@ -312,10 +353,34 @@
     bindPlaced(root, ctx);
     bindReset(root, ctx);
     bindSave(root, ctx);
+    bindShare(root, ctx);
     bindCrewPicker(root, ctx);
     bindSpacecraftPicker(root, ctx);
     setupTooltips(root);
     rerenderAll(root, ctx);
+  }
+
+  function bindShare(root, ctx) {
+    var btn = root.querySelector('#calc-share');
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      if (!Object.keys(ctx.state.placed).length) return;
+      var encoded = encodeShareState(ctx.state);
+      var url = location.origin + location.pathname + '?p=' + encoded;
+      var original = btn.textContent;
+      function flash(msg) {
+        btn.textContent = msg;
+        setTimeout(function () { btn.textContent = original; }, 1500);
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(
+          function () { flash('Copied!'); },
+          function () { prompt('Copy this link:', url); }
+        );
+      } else {
+        prompt('Copy this link:', url);
+      }
+    });
   }
 
   function renderCrewPicker(ctx) {
@@ -870,6 +935,8 @@
     fmtAbbrev: fmtAbbrev,
     crewTransportMass: crewTransportMass,
     buildDayTotal: buildDayTotal,
+    encodeShareState: encodeShareState,
+    decodeShareState: decodeShareState,
   };
 
   if (typeof module !== 'undefined' && module.exports) {
