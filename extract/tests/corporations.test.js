@@ -465,3 +465,103 @@ test('renderTableMarkup: omits Starting facilities header when every corp has no
   assert.equal(html.indexOf('Starting facilities'), -1,
     'Starting facilities section must not render when no corp has any');
 });
+
+// ---- Pre-built facilities summary-block total --------------------------
+// The left "summary" block (Starting cash / Pre-built LVs / Pre-built SC)
+// now carries an additional Pre-built facilities row that sums EVERY
+// starting facility for each corp — universals (HQ, Main Building)
+// included.  The per-facility breakdown below the category header still
+// excludes universals; only the summary total includes them.
+
+// Five-corp Expansion-like fixture with HQ + Main Building + various
+// extraction facilities.  Total per corp:
+//   SoleX     = 1 + 1 + 2 + 1     = 5
+//   NASA      = 1 + 1 + 1 + 1     = 4
+//   ESA       = 1 + 1 + 3         = 5
+//   CNSA      = 1 + 1 + 2 + 2     = 6
+//   Roscosmos = 1 + 1 + 1         = 3
+const EXPANSION_FACILITIES_FIXTURE = {
+  scenarios: [
+    {
+      id: 'StartGameEpoch_TheExpansion',
+      name: 'The Expansion',
+      corps: [
+        { name: 'SoleX', starting_money: 0, lv_count: 0, sc_count: 0, research: [],
+          starting_facilities: [
+            { name: 'HQ', count: 1 },
+            { name: 'Main Building', count: 1 },
+            { name: 'Metal Mine', count: 2 },
+            { name: 'Noble Gas Mine', count: 1 },
+          ] },
+        { name: 'NASA', starting_money: 0, lv_count: 0, sc_count: 0, research: [],
+          starting_facilities: [
+            { name: 'HQ', count: 1 },
+            { name: 'Main Building', count: 1 },
+            { name: 'Noble Gas Mine', count: 1 },
+            { name: 'Uranium Mine', count: 1 },
+          ] },
+        { name: 'ESA', starting_money: 0, lv_count: 0, sc_count: 0, research: [],
+          starting_facilities: [
+            { name: 'HQ', count: 1 },
+            { name: 'Main Building', count: 1 },
+            { name: 'Noble Gas Mine', count: 3 },
+          ] },
+        { name: 'CNSA', starting_money: 0, lv_count: 0, sc_count: 0, research: [],
+          starting_facilities: [
+            { name: 'HQ', count: 1 },
+            { name: 'Main Building', count: 1 },
+            { name: 'Metal Mine', count: 2 },
+            { name: 'Uranium Mine', count: 2 },
+          ] },
+        { name: 'Roscosmos', starting_money: 0, lv_count: 0, sc_count: 0, research: [],
+          starting_facilities: [
+            { name: 'HQ', count: 1 },
+            { name: 'Main Building', count: 1 },
+            { name: 'Metal Mine', count: 1 },
+          ] },
+      ],
+    },
+  ],
+  difficulties: [
+    { name: 'Pioneer', money_multiplier: 1.0 },
+  ],
+};
+
+test('summary_block_includes_pre_built_facilities_total', () => {
+  // The summary block (cash / LVs / spacecraft / facilities) carries a
+  // facilityTotals array — one entry per corp — counting EVERY starting
+  // facility (HQ + Main Building + extraction).  Five-corp Expansion-like
+  // fixture, all five corps own at least one facility.
+  const cmp = C.buildComparison(EXPANSION_FACILITIES_FIXTURE,
+    'StartGameEpoch_TheExpansion', 'Pioneer', false);
+  assert.ok(Array.isArray(cmp.facilityTotals),
+    'buildComparison() must include a facilityTotals array, got ' + JSON.stringify(cmp));
+  assert.equal(cmp.facilityTotals.length, 5,
+    'facilityTotals must have one entry per corp, got ' + JSON.stringify(cmp.facilityTotals));
+  cmp.facilityTotals.forEach((v, i) => {
+    assert.ok(v > 0, 'corp ' + cmp.corpNames[i] + ' facilityTotal must be > 0, got ' + v);
+  });
+  // Specific totals — see fixture comment for arithmetic.
+  assert.deepEqual(cmp.facilityTotals, [5, 4, 5, 6, 3]);
+});
+
+test('renderTableMarkup: left summary block contains a "Pre-built facilities" row', () => {
+  const cmp = C.buildComparison(EXPANSION_FACILITIES_FIXTURE,
+    'StartGameEpoch_TheExpansion', 'Pioneer', false);
+  const html = C.renderTableMarkup(cmp);
+  const leftMatch = html.match(/<table class="corp-comparison-left"[\s\S]*?<\/table>/);
+  assert.ok(leftMatch, 'left table not found');
+  const left = leftMatch[0];
+  // Label is present.
+  assert.ok(left.indexOf('Pre-built facilities') !== -1,
+    'left table missing "Pre-built facilities" summary row');
+  // Order: cash < LVs < SC < Pre-built facilities < Starting facilities header.
+  const cashIdx = left.indexOf('Starting cash');
+  const lvIdx   = left.indexOf('Pre-built launch vehicles');
+  const scIdx   = left.indexOf('Pre-built spacecraft');
+  const facIdx  = left.indexOf('Pre-built facilities');
+  const hdrIdx  = left.indexOf('Starting facilities');
+  assert.ok(cashIdx < lvIdx && lvIdx < scIdx && scIdx < facIdx && facIdx < hdrIdx,
+    'expected cash < LV < SC < Pre-built facilities < Starting facilities header, got ' +
+    JSON.stringify({ cashIdx, lvIdx, scIdx, facIdx, hdrIdx }));
+});

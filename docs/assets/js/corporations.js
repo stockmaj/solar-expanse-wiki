@@ -72,7 +72,7 @@
     var scenario = findScenario(data, scenarioId);
     var diff = findDifficulty(data, difficultyName);
     if (!scenario || !diff) {
-      return { corpNames: [], cash: [], lvCounts: [], scCounts: [], researchRows: [] };
+      return { corpNames: [], cash: [], lvCounts: [], scCounts: [], researchRows: [], facilityTotals: [], facilityRows: [] };
     }
     var corps = scenario.corps;
     var corpNames = corps.map(function (c) { return c.name; });
@@ -138,6 +138,19 @@
     // table focuses on the interesting mining / extraction / refinery
     // differences.
     var UNIVERSAL_FACILITIES = { 'HQ': true, 'Main Building': true };
+    // Summary-block total: count of EVERY starting facility per corp,
+    // including universals (HQ + Main Building).  The per-facility
+    // breakdown rows below the "Starting facilities" header still drop
+    // universals via the filter on the next loop; only this aggregate
+    // includes them so the summary reflects the corp's true build count.
+    var facilityTotals = corps.map(function (c) {
+      var entries = c.starting_facilities || [];
+      var total = 0;
+      for (var i = 0; i < entries.length; i++) {
+        total += (entries[i] && entries[i].count) || 0;
+      }
+      return total;
+    });
     var facilityNameSet = Object.create(null);
     var facilityNames = [];
     corps.forEach(function (c) {
@@ -170,6 +183,7 @@
       lvCounts: lvCounts,
       scCounts: scCounts,
       researchRows: researchRows,
+      facilityTotals: facilityTotals,
       facilityRows: facilityRows,
       // When showAll=false, parityHidden = count actively hidden.
       // When showAll=true, parityHidden is 0 but parityHiddenWhenFiltered
@@ -225,6 +239,16 @@
       }).join('') + '</tr>');
     leftRows.push('<tr><td><strong title="Number of spacecraft already constructed in the corp\'s fleet at scenario start (not how many craft types they could build)">Pre-built spacecraft</strong></td>' +
       cmp.scCounts.map(function (v) {
+        return '<td style="text-align:center">' + v + '</td>';
+      }).join('') + '</tr>');
+    // True total of every facility already built at scenario start —
+    // includes the universal HQ and Main Building that every corp always
+    // owns.  The per-facility breakdown rows below the "Starting
+    // facilities" category header drop those universals so the matrix
+    // focuses on what differs; the summary total keeps them so the
+    // headline number matches what the player actually sees in-game.
+    leftRows.push('<tr><td><strong title="Total facilities already built at scenario start, counting HQ, Main Building, and every other facility (the per-facility breakdown below excludes universal HQ / Main Building)">Pre-built facilities</strong></td>' +
+      (cmp.facilityTotals || []).map(function (v) {
         return '<td style="text-align:center">' + v + '</td>';
       }).join('') + '</tr>');
 
