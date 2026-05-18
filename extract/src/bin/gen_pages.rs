@@ -5839,59 +5839,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn exoplanet_row_renders_five_columns_for_populated_body() {
-        let locale = Locale {
-            celestial_bodies: vec![
-                CelestialBody { id: "Trappist-1b".into(), name: "Trappist-1b".into() },
-            ],
-            spacecraft: vec![],
-            launch_vehicles: vec![],
-            research: vec![],
-            corporations: vec![],
-            contracts: vec![],
-            resources: vec![],
-            facilities: vec![],
-            habitability_scales: BTreeMap::new(),
-            cargo: vec![],
-        };
-        let stats = Stats {
-            bodies: vec![Body {
-                name: "Trappist-1b".into(),
-                parent: None,
-                mass_1e24_kg: Some(1.37),
-                radius_km: Some(6900.0),
-                semi_major_axis_au: Some(0.0115),
-                eccentricity: Some(0.006),
-                inclination_deg: Some(89.7),
-                perihelion_au: None,
-                longitude_deg: None,
-                omega_lc_deg: None,
-                omega_uc_deg: None,
-                body_type: None,
-                orbit_data_source: Some("SolarBody".into()),
-            }],
-        };
-        let ctx = WikiCtx::build(&locale, &stats);
-        let page = page_exoplanets(&ctx, &sirenix);
-        let row = page
-            .lines()
-            .find(|l| l.contains("**Trappist-1b**"))
-            .expect("Trappist-1b row present");
-        // Six cells = name + Mass + Radius + a + e + i ⇒ seven pipes.
-        let pipe_count = row.chars().filter(|c| *c == '|').count();
-        assert_eq!(
-            pipe_count, 7,
-            "exoplanet row should have 6 cells (7 pipes): {row}"
-        );
-        assert!(row.contains("1.37"), "mass missing from row: {row}");
-        assert!(row.contains("0.0115"), "semi-major axis missing: {row}");
-        // Page should explain that exoplanet `a` is around the host star.
-        assert!(
-            page.contains("host star"),
-            "page should note exoplanet a is around the host star, not the Sun"
-        );
-    }
+    // (Legacy `exoplanet_row_renders_five_columns_for_populated_body` removed:
+    // the Bodies-nav URL now delegates to page_exoplanets_systems, whose own
+    // tests cover the rendered shape.)
 
     // ---------- Navigation fixes: cross-page links wherever they apply ----------
 
