@@ -2585,6 +2585,74 @@ fn page_terraforming(locale: &Locale, sirenix: &Sirenix) -> String {
         ],
         &rows,
     );
+
+    // ---- Terraforming-facilities table ------------------------------------
+    // Surface the facilities that actively modify a body's habitability
+    // parameters. Source of truth is `FacilityStat.habitability_deltas`; we
+    // skip facilities whose every delta is zero (defensive — the dump
+    // currently only carries non-zero entries, but the column is shared with
+    // role magnitudes elsewhere so the guard keeps us honest).
+    let facility_name: BTreeMap<&str, &str> = locale
+        .facilities
+        .iter()
+        .map(|f| (f.id.as_str(), f.name.as_str()))
+        .collect();
+    let mut terra_facs: Vec<(&FacilityStat, String)> = sirenix
+        .facilities
+        .iter()
+        .filter(|f| !f.is_obsolete)
+        .filter(|f| f.habitability_deltas.iter().any(|(_, v)| *v != 0.0))
+        .map(|f| {
+            let id_no_prefix = f.id.strip_prefix("build_").unwrap_or(&f.id);
+            let raw = facility_name
+                .get(id_no_prefix)
+                .copied()
+                .unwrap_or(id_no_prefix);
+            let display = smart_title_case(raw);
+            (f, display)
+        })
+        .collect();
+    terra_facs.sort_by(|a, b| a.1.cmp(&b.1));
+
+    let facilities_section = if terra_facs.is_empty() {
+        String::new()
+    } else {
+        let fac_rows: Vec<Vec<String>> = terra_facs
+            .iter()
+            .map(|(f, display)| {
+                let id_no_prefix = f.id.strip_prefix("build_").unwrap_or(&f.id);
+                let name_link = link_cross_page(
+                    "facilities",
+                    "facility",
+                    id_no_prefix,
+                    &escape_cell(display),
+                );
+                // One row per facility — each delta on its own line inside the
+                // Effect cell so a multi-parameter facility (Radiation /
+                // Magnetic field) reads cleanly without repeating the name.
+                let effects = f
+                    .habitability_deltas
+                    .iter()
+                    .filter(|(_, v)| *v != 0.0)
+                    .map(|(label, value)| {
+                        let sign = if *value < 0.0 { "−" } else { "+" };
+                        format!("{label} {sign}{}", fmt_magnitude_abs(*value))
+                    })
+                    .collect::<Vec<_>>()
+                    .join("<br>");
+                vec![format!("**{name_link}**"), effects]
+            })
+            .collect();
+        let fac_table = md_table(&["Facility", "Per-day habitability deltas"], &fac_rows);
+        format!(
+            "## Terraforming facilities\n\n\
+Facilities that actively modify a planet's habitability parameters over time. \
+See the [Facilities page](../facilities/) for build cost, prerequisites, and \
+other stats.\n\n\
+{fac_table}\n"
+        )
+    };
+
     format!(
         "# Terraforming\n\n\
 Solar Expanse simulates planetary atmospheres and surface conditions based on\n\
@@ -2594,6 +2662,7 @@ per-resource thermal properties. Use these tables to understand:\n\n\
 - which resources contribute to greenhouse warming (optical depth) and surface heating\n\n\
 ## Resource thermal properties\n\n\
 {table}\n\
+{facilities_section}\
 ## Reading the table\n\n\
 - **Melting / Boiling** are the phase-change temperatures the body's average surface temperature must cross to keep the resource solid, liquid, or gas at reference pressure. Both columns show kelvin first with the celsius equivalent in parentheses.\n\
 - **Latent heat (J/mol)** is the energy required to vaporize one mole of the resource. It drives how strongly evaporation cools the planet's surface and how strongly condensation warms it — the same constant feeds the Clausius-Clapeyron formula the sim uses to compute saturation pressures from temperature.\n\
@@ -2601,7 +2670,8 @@ per-resource thermal properties. Use these tables to understand:\n\n\
 - **Optical depth** is the dimensionless greenhouse contribution. Higher values trap more outgoing infrared radiation — atmospheres dominated by high-optical-depth species (CO2, water vapor) warm.\n\
 - **Triple-point pressure (atm)** is the minimum atmospheric pressure at which a stable liquid phase exists. Below this, the resource sublimates directly between solid and gas (think Mars-pressure CO2 frost).\n\n\
 ## See also\n\n\
-- [Resources](../resources/) — per-resource production / consumption, market prices, and Earth licensing fees.\n"
+- [Resources](../resources/) — per-resource production / consumption, market prices, and Earth licensing fees.\n\
+- [Facilities](../facilities/) — full table of buildings (including the terraforming structures surfaced above), with build costs and prerequisites.\n"
     )
 }
 
@@ -6318,6 +6388,131 @@ mod tests {
         assert!(
             page.contains("../resources/"),
             "page must link back to the resources page:\n{page}"
+        );
+    }
+
+    #[test]
+    fn terraforming_page_surfaces_facility_with_habitability_deltas() {
+        // A facility carrying habitability_deltas should appear on the
+        // terraforming page in a dedicated "Terraforming facilities" section,
+        // with a row per parameter delta (or a single multi-line row).
+        let mut locale = facility_fixture_locale();
+        // Also include the resource set the page is otherwise built from so
+        // the resource thermal table can still render.
+        locale
+            .resources
+            .push(ResourceEntry { id: "water".into(), name: "Water".into() });
+        let mut mag = facility_stat("build_terraform_magnet", "Terraformation");
+        mag.habitability_deltas = vec![
+            ("Radiation".into(), -0.6),
+            ("Magnetic field".into(), 0.6),
+        ];
+        let sirenix = Sirenix {
+            facilities: vec![mag],
+            ..Default::default()
+        };
+        let page = page_terraforming(&locale, &sirenix);
+        // Section header is present.
+        assert!(
+            page.contains("## Terraforming facilities"),
+            "page must include a Terraforming facilities section:\n{page}"
+        );
+        // The facility's player-facing display name should appear in the new section.
+        let after_header = page
+            .split("## Terraforming facilities")
+            .nth(1)
+            .expect("section header present");
+        assert!(
+            after_header.contains("Magnetic Field Generator"),
+            "magnet facility must appear in the new section:\n{after_header}"
+        );
+        // Both labels and signed magnitudes for its deltas must be rendered.
+        assert!(
+            after_header.contains("Radiation"),
+            "section should mention Radiation delta:\n{after_header}"
+        );
+        assert!(
+            after_header.contains("Magnetic field"),
+            "section should mention Magnetic field delta:\n{after_header}"
+        );
+        // Magnitudes appear with proper sign — Unicode minus for the negative.
+        assert!(
+            after_header.contains("0.6"),
+            "delta magnitude 0.6 should appear:\n{after_header}"
+        );
+        assert!(
+            after_header.contains("−0.6") || after_header.contains("-0.6"),
+            "negative Radiation delta should be signed:\n{after_header}"
+        );
+        // The facility name should link back to its row on the facilities page.
+        // anchor_id slugifies the id, so `terraform_magnet` → `terraform-magnet`.
+        assert!(
+            after_header.contains("../facilities/#facility-terraform-magnet"),
+            "facility name should link to its anchor on the facilities page:\n{after_header}"
+        );
+    }
+
+    #[test]
+    fn terraforming_page_skips_facilities_with_no_deltas() {
+        // Facilities with empty (or all-zero) habitability_deltas should not
+        // appear in the Terraforming facilities section.
+        let locale = facility_fixture_locale();
+        let f_empty = facility_stat("build_habitat", "Habitation");
+        let mut f_zero = facility_stat("build_lab", "Other");
+        f_zero.habitability_deltas = vec![("Radiation".into(), 0.0)];
+        let sirenix = Sirenix {
+            facilities: vec![f_empty, f_zero],
+            ..Default::default()
+        };
+        let page = page_terraforming(&locale, &sirenix);
+        let after_header = page
+            .split("## Terraforming facilities")
+            .nth(1)
+            .unwrap_or("");
+        assert!(
+            !after_header.contains("**Habitat**"),
+            "habitat (no deltas) should not appear:\n{after_header}"
+        );
+        assert!(
+            !after_header.contains("**Research Lab**"),
+            "facility with only zero-magnitude deltas should not appear:\n{after_header}"
+        );
+    }
+
+    #[test]
+    fn terraforming_page_orders_facilities_alphabetically() {
+        // Two facilities with deltas — alphabetical by display name. We seed
+        // a "Atmospheric Greenhouse" facility before "Magnetic Field Generator"
+        // in the dump but the page should show Atmospheric first.
+        let mut locale = facility_fixture_locale();
+        locale.facilities.push(Facility {
+            id: "terraform_atmosphere".into(),
+            name: "Atmospheric Greenhouse".into(),
+            description: "Builds atmosphere.".into(),
+        });
+        let mut mag = facility_stat("build_terraform_magnet", "Terraformation");
+        mag.habitability_deltas = vec![("Magnetic field".into(), 0.6)];
+        let mut atmo = facility_stat("build_terraform_atmosphere", "Terraformation");
+        atmo.habitability_deltas = vec![("Pressure".into(), 0.001)];
+        let sirenix = Sirenix {
+            // Insert magnet first so the page must sort.
+            facilities: vec![mag, atmo],
+            ..Default::default()
+        };
+        let page = page_terraforming(&locale, &sirenix);
+        let after_header = page
+            .split("## Terraforming facilities")
+            .nth(1)
+            .expect("section present");
+        let atmo_idx = after_header
+            .find("Atmospheric Greenhouse")
+            .expect("atmosphere row");
+        let mag_idx = after_header
+            .find("Magnetic Field Generator")
+            .expect("magnet row");
+        assert!(
+            atmo_idx < mag_idx,
+            "Atmospheric Greenhouse must sort before Magnetic Field Generator:\n{after_header}"
         );
     }
 
