@@ -322,9 +322,12 @@ fn build_calculator_data(sirenix: &Sirenix, locale: &Locale) -> CalculatorData {
         })
         .collect();
 
-    // Player-buildable interplanetary spacecraft, filtered to those with a
-    // realistic cargo capacity. The dump uses 999999 as a sentinel for
-    // payload containers / asteroid pullers — those aren't cargo ferries.
+    // Interplanetary spacecraft with a meaningful cargo capacity. The dump
+    // uses 999999 as a sentinel for payload containers (and a stray
+    // `_ForAsteroidImpact` test entry); those aren't real ships. The
+    // `can_be_built_by_player` flag in the dump is unreliable — false for
+    // Hermes, Centaur, Atlas, which players absolutely use — so we ignore it
+    // and trust the cargo-capacity bound + a missing-name skip instead.
     let spacecraft_name: std::collections::HashMap<&str, &str> = locale
         .spacecraft
         .iter()
@@ -333,11 +336,15 @@ fn build_calculator_data(sirenix: &Sirenix, locale: &Locale) -> CalculatorData {
     let mut spacecraft: Vec<CalcSpacecraft> = sirenix
         .spacecraft
         .iter()
-        .filter(|s| s.can_be_built_by_player && s.cargo_capacity > 0.0 && s.cargo_capacity < 99_000.0)
-        .map(|s| CalcSpacecraft {
-            id: s.id.clone(),
-            name: spacecraft_name.get(s.id.as_str()).copied().unwrap_or(&s.id).to_string(),
-            cargo_capacity: s.cargo_capacity,
+        .filter(|s| s.cargo_capacity > 0.0 && s.cargo_capacity < 99_000.0)
+        .filter_map(|s| {
+            let name = spacecraft_name.get(s.id.as_str()).copied()?;
+            if name.is_empty() { return None; }
+            Some(CalcSpacecraft {
+                id: s.id.clone(),
+                name: name.to_string(),
+                cargo_capacity: s.cargo_capacity,
+            })
         })
         .collect();
     spacecraft.sort_by(|a, b| {

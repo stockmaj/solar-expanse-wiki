@@ -2136,6 +2136,11 @@
       "cargo_capacity": 2.0
     },
     {
+      "id": "spacecraft_chem_mid",
+      "name": "Centaur",
+      "cargo_capacity": 10.0
+    },
+    {
       "id": "spacecraft_sail_small",
       "name": "Daedalus",
       "cargo_capacity": 20.0
@@ -2144,6 +2149,11 @@
       "id": "spacecraft_chem_mid2",
       "name": "Selene",
       "cargo_capacity": 25.0
+    },
+    {
+      "id": "spacecraft_electric_small",
+      "name": "Hermes",
+      "cargo_capacity": 80.0
     },
     {
       "id": "spacecraft_sail_long",
@@ -2159,6 +2169,11 @@
       "id": "spacecraft_sail_mid",
       "name": "Talos",
       "cargo_capacity": 120.0
+    },
+    {
+      "id": "spacecraft_asteroid_puller",
+      "name": "Atlas",
+      "cargo_capacity": 150.0
     },
     {
       "id": "spacecraft_fusion_large",
