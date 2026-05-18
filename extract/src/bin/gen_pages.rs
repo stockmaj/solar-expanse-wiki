@@ -111,16 +111,12 @@ struct Sirenix {
     /// resources page falls back to em-dashes in that case.
     #[serde(default)]
     license_fees: Vec<BodyLicenseFeeStat>,
-    /// Per-asteroid-class mining roll tables (Carbon / Dark / Helium-3 /
-    /// Metal / Stone). Empty when the dump predates the parser change that
-    /// reads `ObjectSubType[]`; the asteroid taxonomy page renders an
-    /// empty body in that case.
     #[serde(default)]
     asteroid_classes: Vec<AsteroidClassStat>,
+    #[serde(default)]
+    exoplanet_systems: Vec<ExoplanetSystemStat>,
 }
 
-/// Mirror of `parse_sirenix::AsteroidClass`. One asteroid class (Carbon,
-/// Dark, Helium-3, Metal, Stone) and its tiered resource roll table.
 #[derive(Deserialize, Clone, Default)]
 struct AsteroidClassStat {
     name: String,
@@ -139,6 +135,31 @@ struct AsteroidTierStat {
 struct AsteroidRollStat {
     resource_id: String,
     probability: f64,
+}
+
+#[derive(Deserialize, Clone, Default)]
+struct ExoplanetSystemStat {
+    name: String,
+    #[allow(dead_code)]
+    #[serde(default)]
+    id: String,
+    star_type: String,
+    #[serde(default)]
+    second_star_type: Option<String>,
+    system_age: String,
+    #[serde(default)]
+    bodies: Vec<ExoplanetBodyStat>,
+}
+
+#[derive(Deserialize, Clone, Default)]
+struct ExoplanetBodyStat {
+    name: String,
+    planet_type: String,
+    semi_major_axis_au: f64,
+    eccentricity: f64,
+    inclination_deg: f64,
+    mass_1e24_kg: f64,
+    radius_km: f64,
 }
 
 #[derive(Deserialize, Clone, Default)]
@@ -4457,6 +4478,7 @@ the names, descriptions, and stat tables here match exactly what you see in-game
 | Section | What's in it |\n\
 | --- | --- |\n\
 | **[Celestial Bodies](celestial-bodies/)** | The Sun, planets, moons, asteroids, comets, and exoplanet systems. |\n\
+| [Exoplanets](exoplanets/) | Trappist-1, Kepler-90, Tau Ceti, and Proxima Centauri — the four destination systems reachable via a generation ship. |\n\
 | [Spacecraft](spacecraft/) | Interplanetary craft — Iris, Selene, Stratos, Hermes, Centaur, Athena, Prometheus, Hephaistos, Ariane, Cronos, Nike, Sirius, Zeus. |\n\
 | [Launch Vehicles](launch-vehicles/) | Surface-to-orbit lifters — Albatross, Pelican, Magpie, Condor, Teratorn. |\n\
 | [Facilities](facilities/) | Ground buildings and orbital modules — power, mining, refining, habitats, life support, etc. |\n\
@@ -4480,6 +4502,128 @@ See [CONTRIBUTING](CONTRIBUTING.md) for details.\n\n\
 - Wiki text is generated from the game's English localization and is presented\n\
   here for reference purposes only.\n",
     )
+}
+
+/// Humanize a `planet_*` taxonomy id from the game's `GeneratedPlanetType`
+/// table into a player-friendly label. Examples:
+///   `planet_rocky_volcanic` → `"Rocky volcanic"`
+///   `planet_gas_gasgiant`   → `"Gas giant"`
+///   `planet_gas_ice`        → `"Gas-ice giant"` (terminology consistent with the genre)
+///   `planet_rocky_eyeballHot` → `"Rocky eyeball hot"`
+/// The locale.json file has no friendlier mapping for these ids, so the
+/// renderer derives one structurally: strip the `planet_` prefix, split on
+/// underscores, split camelCase tokens (eyeballHot, desertCold), then
+/// lowercase everything and capitalize only the first word. The
+/// awkward `gas_gasgiant` compound is collapsed up-front to a single
+/// "gas giant" before tokenization.
+fn humanize_planet_type(id: &str) -> String {
+    let core = id.strip_prefix("planet_").unwrap_or(id);
+    // Collapse the redundant `gas_gasgiant` pair to a single "gas giant"
+    // — the dump has both `gas_gasgiant` and `gas_ice` under the `planet_gas_*`
+    // family, and the former reads doubly when split naively.
+    let core = core.replace("gas_gasgiant", "gas giant");
+    let mut words: Vec<String> = Vec::new();
+    for raw in core.split(|c: char| c == '_' || c == ' ') {
+        if raw.is_empty() { continue; }
+        for w in split_camel(raw).split_whitespace() {
+            words.push(w.to_ascii_lowercase());
+        }
+    }
+    // Capitalize the first word only — these are short tag-style labels, not titles.
+    if let Some(first) = words.first_mut() {
+        let mut chars = first.chars();
+        if let Some(c) = chars.next() {
+            *first = c.to_ascii_uppercase().to_string() + chars.as_str();
+        }
+    }
+    words.join(" ")
+}
+
+/// Split a camelCase token into space-separated lowercase words. Used to
+/// turn `eyeballHot` → `"eyeball Hot"` so `humanize_planet_type` can re-join
+/// after lowercasing.
+fn split_camel(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 4);
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && c.is_ascii_uppercase() {
+            out.push(' ');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// Render the exoplanet systems page. One H2 per system with a body-data
+/// table; pulls exclusively from `sirenix.exoplanet_systems` so the page is
+/// data-first and survives `git checkout HEAD -- docs/celestial-bodies/`
+/// (which restores the Sol bodies but leaves this fresh file alone).
+fn page_exoplanets_systems(sirenix: &Sirenix) -> String {
+    if sirenix.exoplanet_systems.is_empty() {
+        return "# Exoplanet Systems\n\n\
+            Exoplanet system data is not available — re-run the extraction pipeline against a current sirenix-dump.json.\n"
+            .into();
+    }
+
+    let mut out = String::new();
+    out.push_str("# Exoplanet Systems\n\n");
+    out.push_str(
+        "Four star systems reachable only through interstellar travel, via a\n\
+         generation ship constructed in the late game. Each section below lists\n\
+         every body the game generates in the destination system, with its mass,\n\
+         radius, and orbital elements around the host star.\n\n\
+         _Semi-major axis here is measured around the host star, not the Sun._\n\n",
+    );
+
+    for sys in &sirenix.exoplanet_systems {
+        let star_label = match &sys.second_star_type {
+            Some(s2) => format!("{} + {}", sys.star_type, s2),
+            None => sys.star_type.clone(),
+        };
+        out.push_str(&format!(
+            "## {name}\n\n\
+             **Host star:** {star} · **System age:** {age} · **Bodies:** {count}\n\n",
+            name = sys.name,
+            star = star_label,
+            age = sys.system_age,
+            count = sys.bodies.len(),
+        ));
+        let rows: Vec<Vec<String>> = sys
+            .bodies
+            .iter()
+            .map(|b| {
+                vec![
+                    format!("**{}**", b.name),
+                    humanize_planet_type(&b.planet_type),
+                    format!("{:.4}", b.semi_major_axis_au),
+                    format!("{:.4}", b.eccentricity),
+                    format!("{:.2}", b.inclination_deg),
+                    fmt_mass(Some(b.mass_1e24_kg)),
+                    fmt_radius(Some(b.radius_km)),
+                ]
+            })
+            .collect();
+        let table = md_table(
+            &[
+                "Body",
+                "Type",
+                "Semi-major axis (AU)",
+                "Eccentricity",
+                "Inclination (°)",
+                "Mass (×10²⁴ kg)",
+                "Radius (km)",
+            ],
+            &rows,
+        );
+        out.push_str(&table);
+        out.push('\n');
+    }
+
+    out.push_str(
+        "## See also\n\n\
+         - [Celestial Bodies overview](../celestial-bodies/) — Sol's planets, moons, asteroids, comets.\n\
+         - [Planets](../celestial-bodies/planets.md) — the nine Sol planets.\n",
+    );
+    out
 }
 
 #[cfg(test)]
@@ -8022,28 +8166,12 @@ mod tests {
         );
     }
 
-    // ── Asteroid taxonomy page ────────────────────────────────────────────
     fn asteroid_taxonomy_locale() -> Locale {
         let mut locale = nav_fixture_locale();
-        // Mirror the in-game locale: id_resource_volatile renders as
-        // "Carbon" (yes, the volatiles resource is player-facing-named
-        // Carbon — see locale.json).
-        locale.resources.push(ResourceEntry {
-            id: "volatile".into(),
-            name: "Carbon".into(),
-        });
-        locale.resources.push(ResourceEntry {
-            id: "metal".into(),
-            name: "Metals".into(),
-        });
-        locale.resources.push(ResourceEntry {
-            id: "water".into(),
-            name: "Water".into(),
-        });
-        locale.resources.push(ResourceEntry {
-            id: "silicon".into(),
-            name: "Silicon".into(),
-        });
+        locale.resources.push(ResourceEntry { id: "volatile".into(), name: "Carbon".into() });
+        locale.resources.push(ResourceEntry { id: "metal".into(), name: "Metals".into() });
+        locale.resources.push(ResourceEntry { id: "water".into(), name: "Water".into() });
+        locale.resources.push(ResourceEntry { id: "silicon".into(), name: "Silicon".into() });
         locale
     }
 
@@ -8053,27 +8181,48 @@ mod tests {
             tiers: vec![
                 AsteroidTierStat {
                     category: "High".into(),
-                    rolls: vec![AsteroidRollStat {
-                        resource_id: "volatile".into(),
-                        probability: 1.0,
-                    }],
+                    rolls: vec![AsteroidRollStat { resource_id: "volatile".into(), probability: 1.0 }],
                 },
                 AsteroidTierStat {
                     category: "Low".into(),
                     rolls: vec![
-                        AsteroidRollStat {
-                            resource_id: "metal".into(),
-                            probability: 0.45,
-                        },
-                        AsteroidRollStat {
-                            resource_id: "water".into(),
-                            probability: 0.45,
-                        },
-                        AsteroidRollStat {
-                            resource_id: "silicon".into(),
-                            probability: 0.10,
-                        },
+                        AsteroidRollStat { resource_id: "metal".into(), probability: 0.45 },
+                        AsteroidRollStat { resource_id: "water".into(), probability: 0.45 },
+                        AsteroidRollStat { resource_id: "silicon".into(), probability: 0.10 },
                     ],
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn humanize_planet_type_strips_prefix_and_capitalizes() {
+        assert_eq!(humanize_planet_type("planet_rocky_volcanic"), "Rocky volcanic");
+        assert_eq!(humanize_planet_type("planet_rocky_barren"), "Rocky barren");
+        assert_eq!(humanize_planet_type("planet_gas_gasgiant"), "Gas giant");
+        assert_eq!(humanize_planet_type("planet_gas_ice"), "Gas ice");
+        assert_eq!(humanize_planet_type("planet_rocky_eyeballHot"), "Rocky eyeball hot");
+    }
+
+    fn trappist_fixture_system() -> ExoplanetSystemStat {
+        ExoplanetSystemStat {
+            name: "Trappist-1".into(),
+            id: "PlanetarySystem_Trappist".into(),
+            star_type: "M8".into(),
+            second_star_type: None,
+            system_age: "Mature".into(),
+            bodies: vec![
+                ExoplanetBodyStat {
+                    name: "TRAPPIST-1b".into(),
+                    planet_type: "planet_rocky_volcanic".into(),
+                    semi_major_axis_au: 0.0115, eccentricity: 0.02, inclination_deg: 1.0,
+                    mass_1e24_kg: 8.18164, radius_km: 7390.36,
+                },
+                ExoplanetBodyStat {
+                    name: "TRAPPIST-1c".into(),
+                    planet_type: "planet_rocky_barren".into(),
+                    semi_major_axis_au: 0.0158, eccentricity: 0.01, inclination_deg: 0.85,
+                    mass_1e24_kg: 7.811376, radius_km: 6988.987,
                 },
             ],
         }
@@ -8087,20 +8236,24 @@ mod tests {
             ..Default::default()
         };
         let page = page_asteroid_taxonomy(&locale, &sirenix);
-        assert!(
-            page.contains("# Asteroid Taxonomy"),
-            "page should start with the H1 heading:\n{page}"
-        );
-        assert!(
-            page.contains("## Carbon Asteroid"),
-            "page should have a section heading per class:\n{page}"
-        );
-        // The High tier row should resolve `volatile` → "Carbon" via the locale
-        // and format 1.0 as "100%".
-        assert!(
-            page.contains("| High | Carbon | 100% |"),
-            "High tier row should show Carbon at 100%:\n{page}"
-        );
+        assert!(page.contains("# Asteroid Taxonomy"), "page should start with the H1 heading:\n{page}");
+        assert!(page.contains("## Carbon Asteroid"), "page should have a section heading per class:\n{page}");
+        assert!(page.contains("| High | Carbon | 100% |"), "High tier row should show Carbon at 100%:\n{page}");
+    }
+
+    #[test]
+    fn exoplanets_page_renders_trappist_with_humanized_types_and_eccentricity() {
+        let sirenix = Sirenix {
+            exoplanet_systems: vec![trappist_fixture_system()],
+            ..Sirenix::default()
+        };
+        let page = page_exoplanets_systems(&sirenix);
+        assert!(page.contains("# Exoplanet Systems"));
+        assert!(page.contains("## Trappist-1"));
+        assert!(page.contains("Rocky barren"));
+        assert!(page.contains("Rocky volcanic"));
+        assert!(page.contains("0.0100"));
+        assert!(page.contains("**Host star:** M8"));
     }
 
     #[test]
@@ -8195,6 +8348,14 @@ mod tests {
             "Helium3 class should render as Helium-3 Asteroid:\n{page}"
         );
     }
+
+    #[test]
+    fn exoplanets_page_with_no_data_falls_back_to_explanatory_stub() {
+        let sirenix = Sirenix::default();
+        let page = page_exoplanets_systems(&sirenix);
+        assert!(page.starts_with("# Exoplanet Systems"));
+        assert!(page.contains("not available"), "empty-data page must explain the situation:\n{page}");
+    }
 }
 
 fn main() -> Result<()> {
@@ -8239,11 +8400,8 @@ fn main() -> Result<()> {
     write_file(&wiki_root, "contracts/README.md", &page_contracts(&locale, &sirenix))?;
     write_file(&wiki_root, "research/README.md", &page_research(&locale, &sirenix))?;
     write_file(&wiki_root, "missions/README.md", &page_missions(&locale, &sirenix))?;
-    write_file(
-        &wiki_root,
-        "asteroid-taxonomy/README.md",
-        &page_asteroid_taxonomy(&locale, &sirenix),
-    )?;
+    write_file(&wiki_root, "asteroid-taxonomy/README.md", &page_asteroid_taxonomy(&locale, &sirenix))?;
+    write_file(&wiki_root, "exoplanets/README.md", &page_exoplanets_systems(&sirenix))?;
 
     // Site metadata for the footer (Jekyll auto-loads _data/*.yml).
     let now = std::time::SystemTime::now()
