@@ -26,10 +26,12 @@ the names, descriptions, and stat tables here match exactly what you see in-game
 
 ## How to use this wiki
 
-Every page is plain Markdown. Jekyll renders the site on GitHub Pages, with a
-custom layout, a sortable-table snippet, and three small browser-side modules
-that power the launch-window, gravity-assist, and corporation-comparison
-calculators. Browse by clicking section links above.
+- **Find data fast.** Bodies (planets, moons, asteroids, comets, exoplanets) live under [Celestial Bodies](celestial-bodies/) — radius, semi-major axis, eccentricity, inclination, parent. Fleet planning lives under [Spacecraft](spacecraft/) and [Launch Vehicles](launch-vehicles/) — dry mass, cargo, fuel, thrust, exhaust velocity, build cost. What-to-build prompts and the workforce / energy / resource math behind each structure are on [Facilities](facilities/). The tech tree — costs, prereqs, and what each node unlocks — is on [Research](research/).
+- **Plan progression.** [Contracts](contracts/) is the in-game contracts tab, ordered by their root tree, with rewards and follow-on links. [Missions](missions/) walks the Plan Mission flow and points at launch-window data. [Achievements](achievements/) lists every Steam achievement keyed to the contract, spacecraft, or launch vehicle that earns it.
+- **Compare scenario starts.** [Corporations](corporations/) is a side-by-side table of the playable factions — starting cash, starting research, starting fleet, starting facilities — so you can pick the run you want.
+- **Understand the economy.** [Resources](resources/) lists every resource (water, metals, fissiles, He-3, supplies, exotic alloys), what produces it, what consumes it, and per-body mining license fees.  [Asteroid Taxonomy](asteroid-taxonomy/) shows the resource roll table for each of the five asteroid classes (Carbon, Dark, Helium-3, Metal, Stone) so you know what mining a given asteroid will yield.
+- **Tables are sortable.** Click any column header to sort by that column; click again to reverse.  Hover a column header for a tooltip explaining its units or source data.
+- **Calculator.** Several pages embed a small Calculator that computes a fleet's total payload and crew capacity for trip planning — change the inputs and the totals update live.
 
 ## Contributing
 
