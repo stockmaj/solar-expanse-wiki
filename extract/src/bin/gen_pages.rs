@@ -207,6 +207,16 @@ struct ContractObjectiveStat {
     target: Option<String>,
 }
 
+/// Mirror of `parse_sirenix::HabitatConstraint`. Each entry says "the body's
+/// reading on `parameter` must lie within `[min, max]` for this facility to
+/// be buildable here".
+#[derive(Deserialize, Clone)]
+struct HabitatConstraintStat {
+    parameter: String,
+    min: f64,
+    max: f64,
+}
+
 #[derive(Deserialize, Clone)]
 struct FacilityStat {
     id: String,
@@ -243,6 +253,13 @@ struct FacilityStat {
     /// Radiation, Magnetic field, …). Empty for non-terraforming facilities.
     #[serde(default)]
     habitability_deltas: Vec<(String, f64)>,
+    /// Per-body build gates from `canBuildParameter.terraformParameterCanBuild`.
+    /// Each entry pins a habitability parameter (Pressure / Temperature /
+    /// Gravity / Radiation / Water / Composition / InternalFlux) to a
+    /// `[min, max]` range the body must satisfy for construction.
+    /// Empty for the vast majority of facilities.
+    #[serde(default)]
+    habitat_constraints: Vec<HabitatConstraintStat>,
     /// Resources this facility outputs per day. Pulled by `parse_sirenix` from
     /// structured `refinerData.output`, `energyProductionData`, `resourcesToMine`,
     /// and `byproducts` — never from description text. Drives the resources-page
@@ -3478,6 +3495,71 @@ fn fmt_habitability_deltas(deltas: &[(String, f64)]) -> String {
         .join(", ")
 }
 
+/// Render the habitability *build constraints* — the per-body gates a
+/// facility imposes on where it can be constructed. The dump exposes these
+/// as `(parameter, min, max)` triples on
+/// `canBuildParameter.terraformParameterCanBuild.list`.
+///
+/// We pick a player-facing label per parameter. Two special-cased pressure
+/// ranges are recognised because the game treats the 0.0001 atm threshold as
+/// the vacuum/atmosphere boundary:
+///   * `min == 0` and `max <= 0.0001` → "Vacuum only"
+///   * `min >= 0.0001` and `max >= 2` → "Atmosphere required"
+/// Anything else falls back to a generic `{Parameter} {min}–{max}` so we
+/// never lie about an unfamiliar range.
+fn fmt_habitat_constraint(c: &HabitatConstraintStat) -> String {
+    // Trim up to 4 decimals and drop trailing zeros — keeps cells narrow while
+    // still showing the 0.0001 thresholds verbatim when we fall back.
+    let fmt = |n: f64| -> String {
+        if n == 0.0 {
+            return "0".to_string();
+        }
+        let s = format!("{:.4}", n);
+        // Strip trailing zeros and the dot if the number is integral.
+        let trimmed = s.trim_end_matches('0').trim_end_matches('.');
+        if trimmed.is_empty() {
+            "0".to_string()
+        } else {
+            trimmed.to_string()
+        }
+    };
+    // Object-kind gates are encoded with a synthetic `ObjectType:<Kind>`
+    // parameter; we render them as a body-kind requirement rather than a
+    // numeric range. Currently only "Asteroid" is used in the dump.
+    if let Some(kind) = c.parameter.strip_prefix("ObjectType:") {
+        return match kind {
+            "Asteroid" => "Asteroid only".to_string(),
+            other => format!("{other} only"),
+        };
+    }
+    match c.parameter.as_str() {
+        "Pressure" => {
+            if c.min == 0.0 && c.max <= 0.0001 {
+                "Vacuum only".to_string()
+            } else if c.min >= 0.0001 && c.max >= 2.0 {
+                "Atmosphere required".to_string()
+            } else {
+                format!("Pressure {}–{}", fmt(c.min), fmt(c.max))
+            }
+        }
+        // For every other parameter (Temperature, Gravity, Radiation, Water,
+        // Composition, InternalFlux) we render generically rather than guess
+        // at a player-friendly label. The label itself is the raw enum name
+        // straight from the dump.
+        param => format!("{} {}–{}", param, fmt(c.min), fmt(c.max)),
+    }
+}
+
+fn fmt_habitat_constraints(cs: &[HabitatConstraintStat]) -> String {
+    if cs.is_empty() {
+        return "—".to_string();
+    }
+    cs.iter()
+        .map(fmt_habitat_constraint)
+        .collect::<Vec<_>>()
+        .join("<br>")
+}
+
 fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
     let facility_name: BTreeMap<&str, &str> = locale
         .facilities
@@ -3619,6 +3701,7 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
         let role = fmt_facility_role(f.role.as_deref(), f.role_magnitude);
         let launch_bonus = fmt_launch_bonus(f.bonus_data.as_ref());
         let terraforming = fmt_habitability_deltas(&f.habitability_deltas);
+        let habitat_req = fmt_habitat_constraints(&f.habitat_constraints);
         vec![
             name_cell,
             f.facility_type.clone(),
@@ -3630,6 +3713,7 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
             maint,
             launch_bonus,
             terraforming,
+            habitat_req,
             prereq,
             escape_cell(desc),
         ]
@@ -3646,6 +3730,7 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
         "Maint",
         "Launch bonus",
         "Terraforming",
+        "Habitat req.",
         "Prereq",
         "Description",
     ];
@@ -3659,7 +3744,7 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
         .map(|f| row_for(f, &facility_name, &research_name, &resource_name))
         .collect();
 
-    let header_tips: [Option<&str>; 12] = [
+    let header_tips: [Option<&str>; 13] = [
         None,
         Some("Facility category — Production / Mining / Power / Habitation / …"),
         Some("Resources required to construct"),
@@ -3670,6 +3755,7 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
         Some("Daily maintenance cost"),
         Some("Bonus granted to launches that originate here"),
         Some("Per-day deltas applied to the planet's habitability parameters"),
+        Some("Habitability constraints — pressure/temperature/etc. ranges this facility requires on the body it's built on."),
         Some("Research that unlocks this facility"),
         None,
     ];
@@ -3736,6 +3822,7 @@ Facilities are split into two families:\n\n\
 - **Maintenance** is the per-day cash upkeep while the facility is active.\n\
 - **Launch bonus** appears only for launch facilities — it describes the discount or capacity gain applied to launches that originate from this facility.\n\
 - **Terraforming** lists the per-day deltas the facility applies to a body's habitability parameters (temperature, atmosphere, gravity, radiation, magnetic field). Empty for everything except a handful of dedicated terraforming structures.\n\
+- **Habitat req.** is a hard prerequisite on the body itself — \"Vacuum only\" for mass drivers, \"Atmosphere required\" for magnetic launch rails, gravity/radiation/pressure envelopes for habitats, etc. The game blocks construction if the body's reading is outside the listed range. `—` means the facility has no body-side requirement.\n\
 - **Research prereq** is the research that unlocks construction; `—` means it's available from the start (or the prereq lives outside the standard `lockByHelpNotUse` field, which a few specialist facilities use).\n\n\
 <script src=\"{{{{ '/assets/js/facilities.js' | relative_url }}}}?v={{{{ site.github.build_revision | default: 'dev' }}}}\" defer></script>\n"
     )
@@ -5752,6 +5839,11 @@ mod tests {
                     name: "Research Lab".into(),
                     description: "Conducts research.".into(),
                 },
+                Facility {
+                    id: "launch_magrails".into(),
+                    name: "Magnetic Launch Rails".into(),
+                    description: "Long ramp built atop suitable terrain.".into(),
+                },
             ],
             habitability_scales: BTreeMap::new(),
             cargo: vec![],
@@ -5777,6 +5869,7 @@ mod tests {
             role: None,
             role_magnitude: 0.0,
             habitability_deltas: vec![],
+            habitat_constraints: vec![],
             produces: vec![],
             consumes: vec![],
         }
@@ -5897,6 +5990,130 @@ mod tests {
         assert!(
             row.contains("Magnetic field"),
             "row should mention Magnetic field: {row}"
+        );
+    }
+
+    #[test]
+    fn facilities_page_renders_atmosphere_required_for_magrails() {
+        // build_launch_magrails carries a single Pressure 0.0001..2 build
+        // constraint — the cell should surface a player-facing "Atmosphere
+        // required" label, never the raw enum or numeric thresholds (the
+        // 0.0001 lower bound is a "must not be vacuum" tell, not a number
+        // the player should have to interpret).
+        let locale = facility_fixture_locale();
+        let mut mr = facility_stat("build_launch_magrails", "LaunchFacility");
+        mr.habitat_constraints = vec![HabitatConstraintStat {
+            parameter: "Pressure".into(),
+            min: 0.0001,
+            max: 2.0,
+        }];
+        let sirenix = Sirenix {
+            facilities: vec![mr],
+            ..Default::default()
+        };
+        let page = page_facilities(&locale, &sirenix);
+        assert!(
+            page.contains("Habitat req."),
+            "facilities page is missing the Habitat req. column header:\n{page}"
+        );
+        let row = page
+            .lines()
+            .find(|l| l.contains("Magnetic Launch Rails"))
+            .expect("Magnetic Launch Rails row present");
+        assert!(
+            row.contains("Atmosphere required"),
+            "row should label the Pressure 0.0001..2 constraint as 'Atmosphere required': {row}"
+        );
+        // Raw enum name must not leak.
+        assert!(
+            !row.contains("Pressure 0.0001"),
+            "raw pressure range leaked instead of friendly label: {row}"
+        );
+    }
+
+    #[test]
+    fn facilities_page_renders_vacuum_only_for_pressure_zero() {
+        // Vacuum-only launch facilities (mass driver / magnetic catapult)
+        // carry a Pressure 0..0.0001 constraint — the cell should label
+        // that as "Vacuum only".
+        let locale = facility_fixture_locale();
+        let mut md = facility_stat("build_launch_pad", "LaunchFacility");
+        md.habitat_constraints = vec![HabitatConstraintStat {
+            parameter: "Pressure".into(),
+            min: 0.0,
+            max: 0.0001,
+        }];
+        let sirenix = Sirenix {
+            facilities: vec![md],
+            ..Default::default()
+        };
+        let page = page_facilities(&locale, &sirenix);
+        let row = page
+            .lines()
+            .find(|l| l.contains("Launchpad"))
+            .expect("Launchpad row present");
+        assert!(
+            row.contains("Vacuum only"),
+            "row should label the Pressure 0..0.0001 constraint as 'Vacuum only': {row}"
+        );
+    }
+
+    #[test]
+    fn facilities_page_labels_object_type_asteroid_gate() {
+        // Synthetic ObjectType:Asteroid constraint should render as
+        // "Asteroid only" — never leaking the raw synthetic key.
+        let mut locale = facility_fixture_locale();
+        locale.facilities.push(Facility {
+            id: "asteroid_engine_facility".into(),
+            name: "Asteroid Engine".into(),
+            description: "Pushes asteroids.".into(),
+        });
+        let mut ae = facility_stat("build_asteroid_engine_facility", "Other");
+        ae.habitat_constraints = vec![HabitatConstraintStat {
+            parameter: "ObjectType:Asteroid".into(),
+            min: 0.0,
+            max: 0.0,
+        }];
+        let sirenix = Sirenix {
+            facilities: vec![ae],
+            ..Default::default()
+        };
+        let page = page_facilities(&locale, &sirenix);
+        let row = page
+            .lines()
+            .find(|l| l.contains("Asteroid Engine"))
+            .expect("Asteroid Engine row present");
+        assert!(
+            row.contains("Asteroid only"),
+            "row should label the asteroid-only gate as 'Asteroid only': {row}"
+        );
+        // Synthetic raw key must NOT leak.
+        assert!(
+            !row.contains("ObjectType:"),
+            "raw synthetic key leaked: {row}"
+        );
+    }
+
+    #[test]
+    fn facilities_page_renders_dash_for_no_habitat_constraints() {
+        // A facility with an empty constraint list should render `—` in the
+        // Habitat req. column.
+        let locale = facility_fixture_locale();
+        let f = facility_stat("build_lab", "Other");
+        let sirenix = Sirenix {
+            facilities: vec![f],
+            ..Default::default()
+        };
+        let page = page_facilities(&locale, &sirenix);
+        let row = page
+            .lines()
+            .find(|l| l.contains("Research Lab"))
+            .expect("Research Lab row present");
+        // The Habitat req. column lives between Terraforming and Prereq —
+        // it should carry the standard em-dash placeholder.
+        assert!(
+            row.contains(" — "),
+            "row should carry an em-dash placeholder for missing habitat constraints: {row}"
         );
     }
 

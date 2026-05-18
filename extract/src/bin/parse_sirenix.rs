@@ -63,6 +63,20 @@ struct Research {
     contract_unlocks: Vec<String>,    // every contract id this research unlocks (from unlockData + unlockDataList)
 }
 
+/// One entry from a facility's `canBuildParameter.terraformParameterCanBuild.list`.
+/// Each entry is a *gate* on the body's current habitability state: the body's
+/// reading on `parameter` must lie within `[min, max]` for construction to be
+/// permitted. Real values in the dump cover Pressure (vacuum / atmosphere
+/// requirements on launch facilities), Gravity, Radiation, Temperature, Water,
+/// Composition, and InternalFlux (geothermal needs an active core).
+#[derive(Serialize, Debug, Default, PartialEq, Clone)]
+struct HabitatConstraint {
+    /// Habitability parameter the constraint gates on (e.g., "Pressure", "Temperature").
+    parameter: String,
+    min: f64,
+    max: f64,
+}
+
 #[derive(Serialize, Debug, Default, PartialEq)]
 struct Facility {
     id: String,
@@ -117,6 +131,15 @@ struct Facility {
     /// We surface only the player-facing numeric knobs, with friendly labels.
     /// Empty for everything except a handful of terraforming facilities.
     habitability_deltas: Vec<(String, f64)>,
+    /// Per-body build gates pulled from
+    /// `canBuildParameter.terraformParameterCanBuild.list`. Each entry says
+    /// "the body's `parameter` must read within `[min, max]` for this
+    /// facility to be buildable". Empty for the vast majority of facilities —
+    /// surfaces vacuum-only launch methods, geothermal's InternalFlux gate,
+    /// habitat gravity/radiation/pressure envelopes, the Earth-farm climate
+    /// envelope, etc.
+    #[serde(default)]
+    habitat_constraints: Vec<HabitatConstraint>,
 }
 
 #[derive(Serialize, Debug, Default, PartialEq)]
@@ -678,6 +701,62 @@ fn parse_facility(v: &Value, descriptor: &str) -> Option<Facility> {
         }
     }
 
+    // canBuildParameter — per-body build gates. We surface two flavors here:
+    //   * terraformParameterCanBuild.list[]: habitability-range gates
+    //     (Pressure / Temperature / Gravity / Radiation / Water /
+    //     Composition / InternalFlux), each with a [min, max] envelope.
+    //   * canBuildBy="ObjectTypes" + objectTypes!="Planet": object-kind
+    //     gates (currently only "Asteroid" — used by build_asteroid_engine_facility).
+    //     Modeled as a constraint with parameter="ObjectType" and the type
+    //     name folded into the min/max-less label downstream.
+    // Most facilities ship with no gates at all; we emit an empty list then.
+    let mut habitat_constraints: Vec<HabitatConstraint> = Vec::new();
+    if let Some(list) = v
+        .pointer("/canBuildParameter/terraformParameterCanBuild/list")
+        .and_then(|x| x.as_array())
+    {
+        for entry in list {
+            let Some(parameter) = entry
+                .get("terraformParameterSettingsCanBuild")
+                .and_then(|x| x.as_str())
+            else {
+                continue;
+            };
+            if parameter.is_empty() || parameter == "None" {
+                continue;
+            }
+            let min = entry.get("min").and_then(|x| x.as_f64()).unwrap_or(0.0);
+            let max = entry.get("max").and_then(|x| x.as_f64()).unwrap_or(0.0);
+            habitat_constraints.push(HabitatConstraint {
+                parameter: parameter.to_string(),
+                min,
+                max,
+            });
+        }
+    }
+    // Object-kind gate: when canBuildBy=="ObjectTypes" the facility is only
+    // buildable on the listed object type (e.g. Asteroid). We surface that
+    // with a synthetic "ObjectType" parameter so the renderer can pick a
+    // friendly label without leaking the raw canBuildBy enum.
+    let can_build_by = v
+        .pointer("/canBuildParameter/canBuildBy")
+        .and_then(|x| x.as_str())
+        .unwrap_or("");
+    if can_build_by == "ObjectTypes" {
+        if let Some(obj_type) = v
+            .pointer("/canBuildParameter/objectTypes")
+            .and_then(|x| x.as_str())
+        {
+            if !obj_type.is_empty() && obj_type != "None" && obj_type != "Planet" {
+                habitat_constraints.push(HabitatConstraint {
+                    parameter: format!("ObjectType:{obj_type}"),
+                    min: 0.0,
+                    max: 0.0,
+                });
+            }
+        }
+    }
+
     Some(Facility {
         id,
         descriptor: descriptor.to_string(),
@@ -698,6 +777,7 @@ fn parse_facility(v: &Value, descriptor: &str) -> Option<Facility> {
         role,
         role_magnitude,
         habitability_deltas,
+        habitat_constraints,
     })
 }
 
@@ -2398,6 +2478,120 @@ mod tests {
         });
         let f = parse_facility(&v, "Ground").expect("parses");
         assert!(f.habitability_deltas.is_empty());
+    }
+
+    #[test]
+    fn facility_parses_habitat_pressure_constraint() {
+        // Synthetic facility carrying one Pressure 0.0001..2 constraint —
+        // mirrors the shape used by `canBuildParameter.terraformParameterCanBuild`
+        // in the real dump.
+        let v = serde_json::json!({
+            "id": "build_pressure_synth",
+            "facilityType": "LaunchFacility",
+            "canBuildParameter": {
+                "terraformParameterCanBuild": {
+                    "list": [
+                        {
+                            "terraformParameterSettingsCanBuild": "Pressure",
+                            "min": 0.0001,
+                            "max": 2
+                        }
+                    ]
+                }
+            }
+        });
+        let f = parse_facility(&v, "Ground").expect("parses");
+        assert_eq!(f.habitat_constraints.len(), 1);
+        let c = &f.habitat_constraints[0];
+        assert_eq!(c.parameter, "Pressure");
+        assert_eq!(c.min, 0.0001);
+        assert_eq!(c.max, 2.0);
+    }
+
+    #[test]
+    fn facility_magrails_real_shape_parses_pressure_atmosphere() {
+        // Real-data shape from the Sirenix dump for build_launch_magrails:
+        // a single Pressure constraint with min=0.0001, max=2 (atmosphere only).
+        let v = serde_json::json!({
+            "id": "build_launch_magrails",
+            "facilityType": "LaunchFacility",
+            "possiblePlacement": "Surface",
+            "canBuildParameter": {
+                "terraformParameterCanBuild": {
+                    "list": [
+                        {
+                            "terraformParameterSettingsCanBuild": "Pressure",
+                            "min": 0.0001,
+                            "max": 2
+                        }
+                    ]
+                }
+            }
+        });
+        let f = parse_facility(&v, "Ground").expect("parses");
+        assert_eq!(
+            f.habitat_constraints,
+            vec![HabitatConstraint {
+                parameter: "Pressure".to_string(),
+                min: 0.0001,
+                max: 2.0,
+            }]
+        );
+    }
+
+    #[test]
+    fn facility_asteroid_only_gate_surfaces_as_object_type_constraint() {
+        // build_asteroid_engine_facility: canBuildBy="ObjectTypes", objectTypes="Asteroid".
+        // This is an object-kind gate, not a habitability range — we surface it
+        // through the same habitat_constraints vec with a synthetic parameter
+        // name so the renderer can pick a friendly label.
+        let v = serde_json::json!({
+            "id": "build_asteroid_engine_facility",
+            "facilityType": "Other",
+            "canBuildParameter": {
+                "canBuildBy": "ObjectTypes",
+                "objectTypes": "Asteroid",
+                "terraformParameterCanBuild": { "list": [] }
+            }
+        });
+        let f = parse_facility(&v, "Ground").expect("parses");
+        assert_eq!(f.habitat_constraints.len(), 1);
+        assert!(
+            f.habitat_constraints[0].parameter.starts_with("ObjectType:"),
+            "expected ObjectType:* synthetic parameter, got {:?}",
+            f.habitat_constraints[0]
+        );
+        assert!(f.habitat_constraints[0].parameter.contains("Asteroid"));
+    }
+
+    #[test]
+    fn facility_can_build_by_object_types_with_planet_kind_is_not_a_gate() {
+        // The default `objectTypes:"Planet"` (with canBuildBy != "ObjectTypes")
+        // is not a gate — most facilities have it. We must NOT emit a
+        // constraint for that.
+        let v = serde_json::json!({
+            "id": "build_lab",
+            "facilityType": "Other",
+            "canBuildParameter": {
+                "canBuildBy": "None",
+                "objectTypes": "Planet",
+                "terraformParameterCanBuild": { "list": [] }
+            }
+        });
+        let f = parse_facility(&v, "Ground").expect("parses");
+        assert!(f.habitat_constraints.is_empty());
+    }
+
+    #[test]
+    fn facility_without_can_build_parameter_has_empty_habitat_constraints() {
+        // Most facilities have no canBuildParameter — habitat_constraints
+        // must default to an empty Vec (serialized as []).
+        let v = serde_json::json!({
+            "id": "build_lab",
+            "facilityType": "Other",
+        });
+        let f = parse_facility(&v, "Ground").expect("parses");
+        assert!(f.habitat_constraints.is_empty());
     }
 
     #[test]
