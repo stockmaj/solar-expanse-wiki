@@ -115,6 +115,8 @@ struct Sirenix {
     asteroid_classes: Vec<AsteroidClassStat>,
     #[serde(default)]
     exoplanet_systems: Vec<ExoplanetSystemStat>,
+    #[serde(default)]
+    achievements: Vec<AchievementStat>,
 }
 
 #[derive(Deserialize, Clone, Default)]
@@ -160,6 +162,17 @@ struct ExoplanetBodyStat {
     inclination_deg: f64,
     mass_1e24_kg: f64,
     radius_km: f64,
+}
+
+#[derive(Deserialize, Clone, Default)]
+struct AchievementStat {
+    id: String,
+    #[serde(default)]
+    name: String,
+    source_type: String,
+    source_id: String,
+    #[serde(default)]
+    description: String,
 }
 
 #[derive(Deserialize, Clone, Default)]
@@ -4428,6 +4441,174 @@ research tree (Computing, Chemical Propulsion, Spacecraft, …).\n\n",
     out
 }
 
+/// Derive a player-facing achievement name from its `id_achievement_<CamelCase>`
+/// id.  No locale entries exist for achievements in `en-US.csv`, so we
+/// best-effort humanize the id by:
+///   1. stripping the `id_achievement_` prefix;
+///   2. inserting a space at every `lowercase → Uppercase` boundary.
+///
+/// A small explicit override table fixes up the handful of ids where the
+/// game concatenated lowercase connector words (`of`, `on`, `a`) with the
+/// preceding capitalized word — pure heuristic splitting on those produced
+/// false positives ("Beg in Terraforming", "Moonbase Alph a"), so we hand-pin
+/// the known offenders instead.  When the dump adds new ids the heuristic
+/// continues to apply and the wiki gracefully degrades to mildly-imperfect
+/// names rather than mangled ones.
+///
+/// If the id doesn't start with the expected prefix, return it unchanged
+/// — we'd rather show a slightly-ugly id than silently lose information.
+fn humanize_achievement_id(id: &str) -> String {
+    let core = id.strip_prefix("id_achievement_").unwrap_or(id);
+    if core == id {
+        // Caller passed something that didn't carry our prefix; preserve it
+        // verbatim rather than emit an empty string.
+        return id.to_string();
+    }
+    // Hand-curated overrides for ids where CamelCase splitting alone produces
+    // awkward results (lowercase connector words concatenated to the
+    // preceding word).  Keys are the *core* — i.e. the id with the
+    // `id_achievement_` prefix already stripped.
+    match core {
+        "HumansonMars" => return "Humans on Mars".to_string(),
+        "OnWindsofSunshine" => return "On Winds of Sunshine".to_string(),
+        "FancyWayofThrowingRocks" => return "Fancy Way of Throwing Rocks".to_string(),
+        "ThePowerofaStar" => return "The Power of a Star".to_string(),
+        "DoAstronautsDreamofElectricShip" => {
+            return "Do Astronauts Dream of Electric Ship".to_string()
+        }
+        _ => {}
+    }
+    // Fallback: insert spaces at lowercase→Uppercase boundaries.
+    let mut out = String::with_capacity(core.len() + 4);
+    let mut prev: Option<char> = None;
+    for c in core.chars() {
+        if let Some(p) = prev {
+            if p.is_lowercase() && c.is_uppercase() {
+                out.push(' ');
+            }
+        }
+        out.push(c);
+        prev = Some(c);
+    }
+    out
+}
+
+/// Steam achievements page.  Renders one section per source_type
+/// (`contract` / `spacecraft` / `launch_vehicle`), each with a stat table
+/// keyed on (achievement name, player-facing source name, description).
+///
+/// Source-name resolution is locale-first:
+///   * contract → `locale.contracts[].name`
+///   * spacecraft → `locale.spacecraft[].name`
+///   * launch_vehicle → `locale.launch_vehicles[].name`
+/// If the locale lookup fails (very rare — every id in the dump is in the
+/// locale) we fall back to the raw source id, but we never emit a raw
+/// `id_achievement_*` for the achievement column itself: the locale's
+/// `achievement_*` keys don't exist, so the renderer always uses
+/// `humanize_achievement_id` unless the upstream parser stamped a real
+/// `name` on the `AchievementStat`.
+///
+/// Sections with zero rows are omitted entirely (no point in showing
+/// "## By launch vehicle" if no LV currently binds an achievement).
+fn page_achievements(locale: &Locale, sirenix: &Sirenix) -> String {
+    let contract_name: BTreeMap<&str, &str> = locale
+        .contracts
+        .iter()
+        .map(|c| (c.id.as_str(), c.name.as_str()))
+        .collect();
+    let sc_name: BTreeMap<&str, &str> = locale
+        .spacecraft
+        .iter()
+        .map(|s| (s.id.as_str(), s.name.as_str()))
+        .collect();
+    let lv_name: BTreeMap<&str, &str> = locale
+        .launch_vehicles
+        .iter()
+        .map(|s| (s.id.as_str(), s.name.as_str()))
+        .collect();
+
+    // The player-facing achievement name: prefer the locale-derived `name`
+    // on the AchievementStat if non-empty, otherwise humanize the id.
+    let render_name = |a: &AchievementStat| -> String {
+        if !a.name.is_empty() {
+            a.name.clone()
+        } else {
+            humanize_achievement_id(&a.id)
+        }
+    };
+
+    // Resolve the source's player-facing name; fall back to the raw id
+    // only as a last resort (and log it in the rendered cell so a wiki
+    // reader can still recognize it).
+    let render_source = |source_type: &str, source_id: &str| -> String {
+        let name = match source_type {
+            "contract" => contract_name.get(source_id).copied(),
+            "spacecraft" => sc_name.get(source_id).copied(),
+            "launch_vehicle" => lv_name.get(source_id).copied(),
+            _ => None,
+        };
+        match name.filter(|s| !s.is_empty()) {
+            Some(n) => n.to_string(),
+            None => source_id.to_string(),
+        }
+    };
+
+    let mut out = String::new();
+    out.push_str(
+        "# Achievements\n\n\
+Steam achievements available in **Solar Expanse**, with how to earn each.\n\
+Sourced from the game's `ContractDefinition`, `SpacecraftType`, and\n\
+`LaunchVehicleType` tables — every binding here corresponds to an in-game\n\
+trigger that awards the achievement.\n\n",
+    );
+
+    let section = |out: &mut String,
+                   header: &str,
+                   label: &str,
+                   filter_type: &str,
+                   trigger_header: &str| {
+        let rows: Vec<Vec<String>> = sirenix
+            .achievements
+            .iter()
+            .filter(|a| a.source_type == filter_type)
+            .map(|a| {
+                let how = format!("{} ({})", render_source(&a.source_type, &a.source_id), label);
+                let desc = if a.description.is_empty() {
+                    "—".to_string()
+                } else {
+                    escape_cell(&a.description)
+                };
+                vec![escape_cell(&render_name(a)), escape_cell(&how), desc]
+            })
+            .collect();
+        if rows.is_empty() {
+            return;
+        }
+        out.push_str(&format!("## {header}\n\n"));
+        out.push_str(&md_table(
+            &["Achievement", trigger_header, "Description"],
+            &rows,
+        ));
+        out.push('\n');
+    };
+
+    section(&mut out, "By contract", "contract", "contract", "How to earn (contract)");
+    section(&mut out, "By spacecraft", "spacecraft", "spacecraft", "Trigger spacecraft");
+    section(&mut out, "By launch vehicle", "launch vehicle", "launch_vehicle", "Trigger launch vehicle");
+
+    out.push_str(
+        "## Notes\n\n\
+- Some contracts bind more than one achievement (e.g. *Interstellar 2* awards\n  both *To Infinity* and *Wanderlust* — the latter only if completed before\n  the year 2400).  Each binding appears as its own row.\n\
+- Spacecraft-bound achievements typically fire the first time you operate a\n  craft of that propulsion class — building, fueling, or launching one\n  depending on the achievement.\n\
+- Achievement names are derived from the in-game id when no localized\n  display name is available; the in-game UI may polish the wording further.\n\n\
+## See also\n\n\
+- [Contracts](../contracts/) — full contract list and dependency chain\n\
+- [Spacecraft](../spacecraft/)\n\
+- [Launch Vehicles](../launch-vehicles/)\n",
+    );
+    out
+}
+
 fn page_missions(_locale: &Locale, _sirenix: &Sirenix) -> String {
     // The Missions page is a *Plan Mission* primer: destination →
     // spacecraft → cargo → launch vehicle → flight plan, plus the
@@ -4485,6 +4666,7 @@ the names, descriptions, and stat tables here match exactly what you see in-game
 | [Research](research/) | Tech tree — chemical, electric, nuclear, fusion propulsion, life support, materials, computing. |\n\
 | [Missions](missions/) | Mission planning — Plan Mission walk-through, mission types, launch-window pointer. |\n\
 | [Contracts](contracts/) | Story and freelance contracts — the in-game Contracts tab — that drive progression. |\n\
+| [Achievements](achievements/) | Steam achievements and how to earn each — keyed to contracts, spacecraft, and launch vehicles. |\n\
 | [Resources](resources/) | The 20+ resource types — water, metals, fissiles, He-3, supplies, exotic alloys. |\n\
 | [Asteroid Taxonomy](asteroid-taxonomy/) | The five asteroid classes (Carbon, Dark, Helium-3, Metal, Stone) and the per-class resource roll table the game uses when you mine a deposit. |\n\
 | [Corporations](corporations/) | Playable starting factions — SoleX, NASA, ESA, CNSA, Roscosmos. |\n\n\
@@ -8195,6 +8377,148 @@ mod tests {
         }
     }
 
+    // ---------- Achievements page ----------
+
+    #[test]
+    fn humanize_strips_prefix_and_splits_camel_case() {
+        assert_eq!(humanize_achievement_id("id_achievement_NotToday"), "Not Today");
+        assert_eq!(humanize_achievement_id("id_achievement_FirstOrbit"), "First Orbit");
+        assert_eq!(humanize_achievement_id("id_achievement_LunarLanding"), "Lunar Landing");
+    }
+
+    #[test]
+    fn humanize_handles_three_word_camel_case() {
+        assert_eq!(
+            humanize_achievement_id("id_achievement_AsteroidColony"),
+            "Asteroid Colony"
+        );
+        assert_eq!(
+            humanize_achievement_id("id_achievement_GravitationalSlingshot"),
+            "Gravitational Slingshot"
+        );
+    }
+
+    #[test]
+    fn humanize_splits_stuck_connectors_against_preceding_word() {
+        // Real ids in the dump jam lowercase connectors ("of", "on", "a")
+        // against the preceding capitalized word.  The humanize helper
+        // recognizes a fixed connector set and splits them off.
+        assert_eq!(
+            humanize_achievement_id("id_achievement_HumansonMars"),
+            "Humans on Mars"
+        );
+        assert_eq!(
+            humanize_achievement_id("id_achievement_OnWindsofSunshine"),
+            "On Winds of Sunshine"
+        );
+        assert_eq!(
+            humanize_achievement_id("id_achievement_FancyWayofThrowingRocks"),
+            "Fancy Way of Throwing Rocks"
+        );
+        assert_eq!(
+            humanize_achievement_id("id_achievement_ThePowerofaStar"),
+            "The Power of a Star"
+        );
+        assert_eq!(
+            humanize_achievement_id("id_achievement_DoAstronautsDreamofElectricShip"),
+            "Do Astronauts Dream of Electric Ship"
+        );
+    }
+
+    #[test]
+    fn humanize_returns_id_when_no_prefix() {
+        // Defensive: any future id that doesn't start with the prefix should
+        // round-trip unchanged rather than corrupt-rename to "".
+        assert_eq!(humanize_achievement_id("unexpected_id"), "unexpected_id");
+    }
+
+    #[test]
+    fn humanize_does_not_mangle_words_that_end_in_connector_letters() {
+        // Earlier heuristics tried to split on stuck connectors via pattern
+        // matching, which produced "Beg in Terraforming" and "Moonbase Alph a".
+        // The current implementation uses an override table for the known
+        // concatenated ids and a plain CamelCase split for everything else —
+        // so words like "Begin" and "Alpha" must come through intact.
+        assert_eq!(
+            humanize_achievement_id("id_achievement_BeginTerraforming"),
+            "Begin Terraforming"
+        );
+        assert_eq!(
+            humanize_achievement_id("id_achievement_MoonbaseAlpha"),
+            "Moonbase Alpha"
+        );
+    }
+
+    fn achievements_fixture_sirenix() -> Sirenix {
+        Sirenix {
+            achievements: vec![
+                AchievementStat {
+                    id: "id_achievement_NotToday".into(),
+                    name: String::new(),
+                    source_type: "contract".into(),
+                    source_id: "contract_asteroid_impact".into(),
+                    description: String::new(),
+                },
+                AchievementStat {
+                    id: "id_achievement_FirstOrbit".into(),
+                    name: String::new(),
+                    source_type: "contract".into(),
+                    source_id: "contract_tutorial_firstorbit".into(),
+                    description: String::new(),
+                },
+                AchievementStat {
+                    id: "id_achievement_ThePowerofaStar".into(),
+                    name: String::new(),
+                    source_type: "spacecraft".into(),
+                    source_id: "spacecraft_fusion_large".into(),
+                    description: String::new(),
+                },
+                AchievementStat {
+                    id: "id_achievement_HeavyLifter".into(),
+                    name: String::new(),
+                    source_type: "launch_vehicle".into(),
+                    source_id: "lv_chem_seadragon".into(),
+                    description: String::new(),
+                },
+            ],
+            ..Sirenix::default()
+        }
+    }
+
+    fn achievements_fixture_locale() -> Locale {
+        Locale {
+            celestial_bodies: vec![],
+            spacecraft: vec![NameDesc {
+                id: "spacecraft_fusion_large".into(),
+                name: "Sirius".into(),
+                description: String::new(),
+            }],
+            launch_vehicles: vec![NameDesc {
+                id: "lv_chem_seadragon".into(),
+                name: "Albatross".into(),
+                description: String::new(),
+            }],
+            research: vec![],
+            corporations: vec![],
+            contracts: vec![
+                NameDesc {
+                    id: "contract_asteroid_impact".into(),
+                    name: "Asteroid Impact".into(),
+                    description: String::new(),
+                },
+                NameDesc {
+                    id: "contract_tutorial_firstorbit".into(),
+                    name: "First Orbit".into(),
+                    description: String::new(),
+                },
+            ],
+            resources: vec![],
+            facilities: vec![],
+            habitability_scales: BTreeMap::new(),
+            cargo: vec![],
+        }
+    }
+
     #[test]
     fn humanize_planet_type_strips_prefix_and_capitalizes() {
         assert_eq!(humanize_planet_type("planet_rocky_volcanic"), "Rocky volcanic");
@@ -8356,6 +8680,119 @@ mod tests {
         assert!(page.starts_with("# Exoplanet Systems"));
         assert!(page.contains("not available"), "empty-data page must explain the situation:\n{page}");
     }
+    fn achievements_page_has_one_section_per_source_type() {
+        let locale = achievements_fixture_locale();
+        let sirenix = achievements_fixture_sirenix();
+        let page = page_achievements(&locale, &sirenix);
+        assert!(page.starts_with("# Achievements"), "got:\n{page}");
+        assert!(page.contains("## By contract"), "missing contract section:\n{page}");
+        assert!(page.contains("## By spacecraft"), "missing spacecraft section:\n{page}");
+        assert!(page.contains("## By launch vehicle"), "missing LV section:\n{page}");
+    }
+
+    #[test]
+    fn achievements_page_resolves_contract_source_via_locale() {
+        // The "How to earn" cell shows the player-facing contract name from
+        // locale, NOT the raw `contract_*` id.
+        let locale = achievements_fixture_locale();
+        let sirenix = achievements_fixture_sirenix();
+        let page = page_achievements(&locale, &sirenix);
+        assert!(page.contains("Asteroid Impact"), "missing contract name:\n{page}");
+        assert!(page.contains("First Orbit"), "missing First Orbit:\n{page}");
+        assert!(
+            !page.contains("contract_asteroid_impact"),
+            "leaked raw contract id:\n{page}"
+        );
+    }
+
+    #[test]
+    fn achievements_page_resolves_spacecraft_source_via_locale() {
+        let locale = achievements_fixture_locale();
+        let sirenix = achievements_fixture_sirenix();
+        let page = page_achievements(&locale, &sirenix);
+        assert!(page.contains("Sirius"), "missing spacecraft name:\n{page}");
+        assert!(
+            !page.contains("spacecraft_fusion_large"),
+            "leaked raw spacecraft id:\n{page}"
+        );
+    }
+
+    #[test]
+    fn achievements_page_resolves_launch_vehicle_source_via_locale() {
+        let locale = achievements_fixture_locale();
+        let sirenix = achievements_fixture_sirenix();
+        let page = page_achievements(&locale, &sirenix);
+        assert!(page.contains("Albatross"), "missing LV name:\n{page}");
+        assert!(
+            !page.contains("lv_chem_seadragon"),
+            "leaked raw LV id:\n{page}"
+        );
+    }
+
+    #[test]
+    fn achievements_page_uses_humanized_achievement_id_when_no_locale_name() {
+        // With no locale name available, the Achievement column should show a
+        // humanized form of the id (split camelCase), not the raw id.
+        let locale = achievements_fixture_locale();
+        let sirenix = achievements_fixture_sirenix();
+        let page = page_achievements(&locale, &sirenix);
+        assert!(page.contains("Not Today"), "missing 'Not Today':\n{page}");
+        assert!(page.contains("First Orbit"), "missing 'First Orbit':\n{page}");
+        assert!(
+            !page.contains("id_achievement_NotToday"),
+            "leaked raw achievement id:\n{page}"
+        );
+    }
+
+    #[test]
+    fn achievements_page_omits_empty_sections() {
+        // When no LV achievements exist (real-world state of the dump as of
+        // writing), the LV section should not render at all.
+        let locale = achievements_fixture_locale();
+        let sirenix = Sirenix {
+            achievements: vec![AchievementStat {
+                id: "id_achievement_NotToday".into(),
+                name: String::new(),
+                source_type: "contract".into(),
+                source_id: "contract_asteroid_impact".into(),
+                description: String::new(),
+            }],
+            ..Sirenix::default()
+        };
+        let page = page_achievements(&locale, &sirenix);
+        assert!(page.contains("## By contract"));
+        assert!(!page.contains("## By spacecraft"), "should skip empty SC section:\n{page}");
+        assert!(!page.contains("## By launch vehicle"), "should skip empty LV section:\n{page}");
+    }
+
+    #[test]
+    fn achievements_page_preferred_uses_locale_name_over_humanized_id() {
+        // If a future dump *does* surface a locale name for the achievement,
+        // the page should prefer it over the humanized id.  We seed the
+        // `name` field directly on the AchievementStat to simulate this.
+        let locale = achievements_fixture_locale();
+        let sirenix = Sirenix {
+            achievements: vec![AchievementStat {
+                id: "id_achievement_NotToday".into(),
+                name: "Not Today!".into(), // synthetic locale name w/ punctuation
+                source_type: "contract".into(),
+                source_id: "contract_asteroid_impact".into(),
+                description: String::new(),
+            }],
+            ..Sirenix::default()
+        };
+        let page = page_achievements(&locale, &sirenix);
+        assert!(page.contains("Not Today!"), "expected locale name:\n{page}");
+    }
+
+    #[test]
+    fn root_readme_links_to_achievements_page() {
+        let root = page_root();
+        assert!(
+            root.contains("achievements/"),
+            "root README must link to achievements page:\n{root}"
+        );
+    }
 }
 
 fn main() -> Result<()> {
@@ -8398,6 +8835,7 @@ fn main() -> Result<()> {
     write_file(&wiki_root, "corporations/README.md", &page_corporations(&locale, &sirenix))?;
     write_file(&wiki_root, "resources/README.md", &page_resources(&locale, &sirenix))?;
     write_file(&wiki_root, "contracts/README.md", &page_contracts(&locale, &sirenix))?;
+    write_file(&wiki_root, "achievements/README.md", &page_achievements(&locale, &sirenix))?;
     write_file(&wiki_root, "research/README.md", &page_research(&locale, &sirenix))?;
     write_file(&wiki_root, "missions/README.md", &page_missions(&locale, &sirenix))?;
     write_file(&wiki_root, "asteroid-taxonomy/README.md", &page_asteroid_taxonomy(&locale, &sirenix))?;
