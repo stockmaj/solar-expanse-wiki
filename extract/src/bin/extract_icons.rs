@@ -6,8 +6,41 @@ use std::path::{Path, PathBuf};
 
 const TARGET_SIZE: u32 = 24;
 
-/// Map each resource id (e.g. "steel", "water", "hel3") to a small PNG icon
-/// cropped out of the game's resource sprite atlas.
+/// A category of icons to crop from the game's sprite atlas — drives the
+/// per-prefix loop in `main()`.  Each category names the MonoBehaviour prefix
+/// (e.g. `id_resource_`), the YAML field that carries the Sprite GUID, the
+/// subdirectory under the output root, and an optional prefix-strip for the
+/// output filename so e.g. `id_resource_HEL3.asset` → `hel3.png`.
+struct Category {
+    monob_prefix: &'static str,
+    sprite_field: &'static str,
+    out_subdir: &'static str,
+    strip_prefix: &'static str,
+}
+
+const CATEGORIES: &[Category] = &[
+    Category {
+        monob_prefix: "id_resource_",
+        sprite_field: "sprite2",
+        out_subdir: "resources",
+        strip_prefix: "id_resource_",
+    },
+    Category {
+        monob_prefix: "research_",
+        sprite_field: "sprite",
+        out_subdir: "research",
+        strip_prefix: "",
+    },
+    Category {
+        monob_prefix: "planet_",
+        sprite_field: "sprite",
+        out_subdir: "planet-types",
+        strip_prefix: "",
+    },
+];
+
+/// Crop sprite icons out of `solar_expanse_icons.png` for each category in
+/// `CATEGORIES` and write them as small PNGs under `<output dir>/<subdir>/`.
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     if args.len() != 3 {
@@ -31,7 +64,7 @@ fn main() -> Result<()> {
         .with_context(|| format!("opening atlas {}", atlas_path.display()))?;
     let atlas_h = atlas.height();
 
-    // Build guid → Sprite-asset-path map.
+    // Build guid → Sprite-asset-path map (shared across categories).
     let mut guid_to_sprite: HashMap<String, PathBuf> = HashMap::new();
     for entry in fs::read_dir(&sprite_dir)? {
         let path = entry?.path();
@@ -43,7 +76,14 @@ fn main() -> Result<()> {
         }
     }
 
-    let mut written = 0;
+    // Walk MonoBehaviour/ once, dispatching each matching file to its
+    // category's output dir.  Skipping non-matching files keeps the loop O(n).
+    let mut written_per_cat: HashMap<&str, u32> = HashMap::new();
+    for cat in CATEGORIES {
+        fs::create_dir_all(out_dir.join(cat.out_subdir))?;
+        written_per_cat.insert(cat.out_subdir, 0);
+    }
+
     for entry in fs::read_dir(&monob_dir)? {
         let path = entry?.path();
         if path.extension().and_then(|e| e.to_str()) != Some("asset") {
@@ -53,19 +93,24 @@ fn main() -> Result<()> {
             Some(n) => n,
             None => continue,
         };
-        let resource_id = match name.strip_prefix("id_resource_") {
-            // Lowercase so the icon filename matches the locale's lowercase id
-            // (game-side files use mixed case for a handful of resources, e.g.
-            // `id_resource_HEL3.asset` while the locale carries `hel3`).
-            Some(s) => s.to_ascii_lowercase(),
+        // Find which category this file belongs to (first match wins).
+        let cat = match CATEGORIES.iter().find(|c| name.starts_with(c.monob_prefix)) {
+            Some(c) => c,
             None => continue,
         };
-        if resource_id == "empty" {
+        let out_name: String = if cat.strip_prefix.is_empty() {
+            name.to_ascii_lowercase()
+        } else {
+            name.strip_prefix(cat.strip_prefix)
+                .unwrap_or(name)
+                .to_ascii_lowercase()
+        };
+        if out_name.is_empty() || out_name == "empty" {
             continue;
         }
 
         let text = fs::read_to_string(&path)?;
-        let sprite_guid = match parse_sprite2_guid(&text) {
+        let sprite_guid = match parse_sprite_guid(&text, cat.sprite_field) {
             Some(g) => g,
             None => continue,
         };
@@ -89,19 +134,23 @@ fn main() -> Result<()> {
 
         let cropped = atlas.crop_imm(x, y_from_top, w, h);
         let resized = cropped.resize(TARGET_SIZE, TARGET_SIZE, FilterType::Lanczos3);
-        let out_path = out_dir.join(format!("{resource_id}.png"));
+        let out_path = out_dir.join(cat.out_subdir).join(format!("{out_name}.png"));
         resized.save(&out_path)
             .with_context(|| format!("writing {}", out_path.display()))?;
-        written += 1;
+        *written_per_cat.entry(cat.out_subdir).or_insert(0) += 1;
     }
 
-    eprintln!(
-        "wrote {} resource icons to {} ({} × {} px each)",
-        written,
-        out_dir.display(),
-        TARGET_SIZE,
-        TARGET_SIZE
-    );
+    for cat in CATEGORIES {
+        let n = written_per_cat.get(cat.out_subdir).copied().unwrap_or(0);
+        eprintln!(
+            "wrote {} {} icons to {}/ ({} × {} px each)",
+            n,
+            cat.out_subdir,
+            out_dir.join(cat.out_subdir).display(),
+            TARGET_SIZE,
+            TARGET_SIZE
+        );
+    }
     Ok(())
 }
 
@@ -115,12 +164,19 @@ fn read_meta_guid(p: &Path) -> Result<Option<String>> {
     Ok(None)
 }
 
-fn parse_sprite2_guid(asset_yaml: &str) -> Option<String> {
+fn parse_sprite_guid(asset_yaml: &str, field_name: &str) -> Option<String> {
+    let needle = format!("{field_name}:");
     for line in asset_yaml.lines() {
         let trimmed = line.trim_start();
-        if let Some(rest) = trimmed.strip_prefix("sprite2:") {
+        if let Some(rest) = trimmed.strip_prefix(&needle) {
+            // Stop matching if the line is a nested-key match (rest should
+            // start with whitespace or `{`).
+            let rest = rest.trim_start();
+            if !rest.starts_with('{') {
+                continue;
+            }
             // value looks like `{fileID: 21300000, guid: adc58c..., type: 2}`
-            for kv in rest.trim_start().trim_start_matches('{').split(',') {
+            for kv in rest.trim_start_matches('{').split(',') {
                 let kv = kv.trim().trim_end_matches('}');
                 if let Some(g) = kv.strip_prefix("guid:") {
                     return Some(g.trim().to_string());
@@ -129,6 +185,11 @@ fn parse_sprite2_guid(asset_yaml: &str) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(test)]
+fn parse_sprite2_guid(asset_yaml: &str) -> Option<String> {
+    parse_sprite_guid(asset_yaml, "sprite2")
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -185,6 +246,38 @@ mod tests {
             parse_sprite2_guid(yaml).as_deref(),
             Some("adc58c1864171cb47aed1bc9183ff9a2")
         );
+    }
+
+    #[test]
+    fn parse_sprite_guid_handles_single_sprite_field() {
+        let yaml = "  sprite: {fileID: 21300000, guid: 05492b93a04f15543b966a910f7ef85d, type: 2}";
+        assert_eq!(
+            parse_sprite_guid(yaml, "sprite").as_deref(),
+            Some("05492b93a04f15543b966a910f7ef85d")
+        );
+    }
+
+    #[test]
+    fn parse_sprite_guid_does_not_confuse_sprite_with_sprite2() {
+        // Looking for `sprite:` should NOT match `sprite2:` (or vice versa).
+        let yaml = "  sprite2: {fileID: 21300000, guid: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, type: 2}\n  sprite: {fileID: 21300000, guid: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, type: 2}";
+        assert_eq!(
+            parse_sprite_guid(yaml, "sprite").as_deref(),
+            Some("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+        );
+        assert_eq!(
+            parse_sprite_guid(yaml, "sprite2").as_deref(),
+            Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        );
+    }
+
+    #[test]
+    fn parse_sprite_guid_skips_unset_field() {
+        // A `sprite: {fileID: 0}` ref means "no sprite assigned" — we must
+        // NOT return that as a real guid (the loop should keep scanning or
+        // give up).
+        let yaml = "  sprite: {fileID: 0}";
+        assert_eq!(parse_sprite_guid(yaml, "sprite"), None);
     }
 
     #[test]

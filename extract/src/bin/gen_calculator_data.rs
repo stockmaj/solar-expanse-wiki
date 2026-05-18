@@ -315,7 +315,7 @@ fn build_calculator_data(sirenix: &Sirenix, locale: &Locale) -> CalculatorData {
         .iter()
         .map(|c| CalcCrewTransport {
             id: c.id.clone(),
-            name: humanize_id(&c.id),
+            name: crew_display_name(&c.id),
             capacity: c.capacity,
             mass: c.mass,
             is_locked: c.is_locked,
@@ -360,6 +360,18 @@ fn build_calculator_data(sirenix: &Sirenix, locale: &Locale) -> CalculatorData {
         reductions,
         crew_transports,
         spacecraft,
+    }
+}
+
+/// Short display names for the three crew-transport modules. Game's raw ids
+/// — `module_crew_compartment` etc. — are unwieldy in tight UI spots like
+/// dropdown rows; these are the names shown in the calculator.
+fn crew_display_name(id: &str) -> String {
+    match id {
+        "module_crew_compartment" => "Crew Small".to_string(),
+        "module_crew_medium" => "Crew Med".to_string(),
+        "module_crew_large" => "Crew Large".to_string(),
+        _ => humanize_id(id),
     }
 }
 

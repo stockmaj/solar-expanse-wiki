@@ -4738,8 +4738,9 @@ research tree (Computing, Chemical Propulsion, Spacecraft, …).\n\n",
                             .join("<br>")
                     };
                     let name_cell = format!(
-                        "{anchor}**{name}**",
+                        "{anchor}<img src=\"../images/research/{id}.png\" width=\"16\" alt=\"\"/>&nbsp;**{name}**",
                         anchor = anchor_tag("research", &r.id),
+                        id = r.id,
                         name = escape_cell(&display)
                     );
                     vec![
@@ -5384,7 +5385,11 @@ fn page_exoplanets_systems(sirenix: &Sirenix) -> String {
             .map(|b| {
                 vec![
                     format!("**{}**", b.name),
-                    humanize_planet_type(&b.planet_type),
+                    format!(
+                        "<img src=\"../images/planet-types/{id}.png\" width=\"16\" alt=\"\"/>&nbsp;{label}",
+                        id = b.planet_type,
+                        label = humanize_planet_type(&b.planet_type),
+                    ),
                     format!("{:.4}", b.semi_major_axis_au),
                     format!("{:.4}", b.eccentricity),
                     format!("{:.2}", b.inclination_deg),
