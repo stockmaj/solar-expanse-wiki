@@ -2089,12 +2089,25 @@ fn page_resources(locale: &Locale, sirenix: &Sirenix) -> String {
 
     // Earth's per-resource license fees, sourced from the BepInEx mod's
     // runtime ObjectInfo walk. Earth is currently the only body that
-    // charges, so we only need that one entry; if it's missing (older
-    // dump or non-Earth-charging build) the column falls back to em-dashes.
+    // charges, so we only need that one entry. The mod records each
+    // ObjectInfo's `gameObject.name`, which in the live scene happens to
+    // be "View" for the body that carries Earth's fees (verified empirically
+    // — out of 150 ObjectInfo MonoBehaviours dumped, exactly one has any
+    // entries in `resourceMiningLicenseFeePerT`). Match by literal name
+    // "Earth" first; fall back to the single body with non-empty fees if
+    // the literal match misses. If none of the dump's bodies carry fees
+    // (older dump from before the mod rebuild), the column falls back to
+    // em-dashes everywhere.
     let earth_fees: Option<&BTreeMap<String, f64>> = sirenix
         .license_fees
         .iter()
         .find(|b| b.body_name == "Earth")
+        .or_else(|| {
+            sirenix
+                .license_fees
+                .iter()
+                .find(|b| !b.fees_per_t.is_empty())
+        })
         .map(|b| &b.fees_per_t);
 
     let rows: Vec<Vec<String>> = entries
