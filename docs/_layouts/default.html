@@ -12,18 +12,96 @@
     <div class="container">
       <a class="brand" href="{{ '/' | relative_url }}">Solar Expanse Wiki</a>
       <nav>
-        {% assign u = page.url | downcase %}
-        <a href="{{ '/celestial-bodies/' | relative_url }}"{% if u contains '/celestial-bodies' %} class="active"{% endif %}>Bodies</a>
-        <a href="{{ '/spacecraft/' | relative_url }}"{% if u contains '/spacecraft' %} class="active"{% endif %}>Spacecraft</a>
-        <a href="{{ '/launch-vehicles/' | relative_url }}"{% if u contains '/launch-vehicles' %} class="active"{% endif %}>Launch Vehicles</a>
-        <a href="{{ '/celestial-bodies/launch-windows.html' | relative_url }}"{% if u contains '/launch-windows' %} class="active"{% endif %}>Launch Windows</a>
-        <a href="{{ '/facilities/' | relative_url }}"{% if u contains '/facilities' %} class="active"{% endif %}>Facilities</a>
-        <a href="{{ '/research/' | relative_url }}"{% if u contains '/research' %} class="active"{% endif %}>Research</a>
-        <a href="{{ '/missions/' | relative_url }}"{% if u contains '/missions' %} class="active"{% endif %}>Missions</a>
-        <a href="{{ '/contracts/' | relative_url }}"{% if u contains '/contracts' %} class="active"{% endif %}>Contracts</a>
-        <a href="{{ '/resources/' | relative_url }}"{% if u contains '/resources' %} class="active"{% endif %}>Resources</a>
-        <a href="{{ '/corporations/' | relative_url }}"{% if u contains '/corporations' %} class="active"{% endif %}>Corporations</a>
-        <a href="{{ '/calculator.html' | relative_url }}"{% if u contains '/calculator' %} class="active"{% endif %}>Calculator</a>
+        {%- assign u = page.url | downcase -%}
+
+        {%- comment -%}
+        Nav is grouped into dropdowns so the bar doesn't get crowded as
+        new pages land. Each .nav-group owns a summary-style trigger and
+        a .nav-dropdown menu of child links. A group is marked .active
+        when any of its children matches the current page URL.
+
+        Active-state model:
+        - The Liquid below computes a per-group `_active` flag from the
+          URL fragments belonging to that group. Both the parent trigger
+          and the matching child link get class="active".
+        - We test URL fragments (e.g. '/spacecraft') rather than full
+          permalinks so trailing-slash variants and child pages both hit.
+        {%- endcomment -%}
+
+        {%- comment -%} ---- Worlds ----
+        Bodies is a parent dir that hosts Launch Windows and Scenario
+        State as sibling pages. We compute `bodies_active` separately so
+        the Bodies link doesn't also highlight when one of its siblings
+        is the active page (Liquid has no operator precedence + no
+        parentheses; doing this as intermediate assigns is the readable
+        way to express the exclusion).
+        {%- endcomment -%}
+        {%- assign worlds_active = false -%}
+        {%- if u contains '/celestial-bodies' or u contains '/asteroid-taxonomy' or u contains '/exoplanets' or u contains '/launch-windows' or u contains '/scenario-state' -%}{%- assign worlds_active = true -%}{%- endif -%}
+        {%- assign bodies_active = false -%}
+        {%- if u contains '/celestial-bodies' -%}
+          {%- assign bodies_active = true -%}
+          {%- if u contains '/launch-windows' -%}{%- assign bodies_active = false -%}{%- endif -%}
+          {%- if u contains '/scenario-state' -%}{%- assign bodies_active = false -%}{%- endif -%}
+          {%- if u contains '/exoplanets' -%}{%- assign bodies_active = false -%}{%- endif -%}
+        {%- endif -%}
+        <div class="nav-group{% if worlds_active %} active{% endif %}">
+          <button class="nav-trigger" type="button" aria-haspopup="true" aria-expanded="false">Worlds<span class="nav-caret" aria-hidden="true">▾</span></button>
+          <div class="nav-dropdown" role="menu">
+            <a href="{{ '/celestial-bodies/' | relative_url }}"{% if bodies_active %} class="active"{% endif %}>Bodies</a>
+            <a href="{{ '/asteroid-taxonomy/' | relative_url }}"{% if u contains '/asteroid-taxonomy' %} class="active"{% endif %}>Asteroid Taxonomy</a>
+            <a href="{{ '/exoplanets/' | relative_url }}"{% if u contains '/exoplanets' %} class="active"{% endif %}>Exoplanets</a>
+            <a href="{{ '/celestial-bodies/launch-windows.html' | relative_url }}"{% if u contains '/launch-windows' %} class="active"{% endif %}>Launch Windows</a>
+            <a href="{{ '/celestial-bodies/scenario-state.html' | relative_url }}"{% if u contains '/scenario-state' %} class="active"{% endif %}>Scenario State</a>
+          </div>
+        </div>
+
+        {%- comment -%} ---- Fleet ---- {%- endcomment -%}
+        {%- assign fleet_active = false -%}
+        {%- if u contains '/spacecraft' or u contains '/launch-vehicles' -%}{%- assign fleet_active = true -%}{%- endif -%}
+        <div class="nav-group{% if fleet_active %} active{% endif %}">
+          <button class="nav-trigger" type="button" aria-haspopup="true" aria-expanded="false">Fleet<span class="nav-caret" aria-hidden="true">▾</span></button>
+          <div class="nav-dropdown" role="menu">
+            <a href="{{ '/spacecraft/' | relative_url }}"{% if u contains '/spacecraft' %} class="active"{% endif %}>Spacecraft</a>
+            <a href="{{ '/launch-vehicles/' | relative_url }}"{% if u contains '/launch-vehicles' %} class="active"{% endif %}>Launch Vehicles</a>
+          </div>
+        </div>
+
+        {%- comment -%} ---- Build ---- {%- endcomment -%}
+        {%- assign build_active = false -%}
+        {%- if u contains '/facilities' or u contains '/resources' or u contains '/terraforming' -%}{%- assign build_active = true -%}{%- endif -%}
+        <div class="nav-group{% if build_active %} active{% endif %}">
+          <button class="nav-trigger" type="button" aria-haspopup="true" aria-expanded="false">Build<span class="nav-caret" aria-hidden="true">▾</span></button>
+          <div class="nav-dropdown" role="menu">
+            <a href="{{ '/facilities/' | relative_url }}"{% if u contains '/facilities' %} class="active"{% endif %}>Facilities</a>
+            <a href="{{ '/resources/' | relative_url }}"{% if u contains '/resources' %} class="active"{% endif %}>Resources</a>
+            <a href="{{ '/terraforming/' | relative_url }}"{% if u contains '/terraforming' %} class="active"{% endif %}>Terraforming</a>
+          </div>
+        </div>
+
+        {%- comment -%} ---- Progression ---- {%- endcomment -%}
+        {%- assign progression_active = false -%}
+        {%- if u contains '/research' or u contains '/missions' or u contains '/contracts' or u contains '/achievements' -%}{%- assign progression_active = true -%}{%- endif -%}
+        <div class="nav-group{% if progression_active %} active{% endif %}">
+          <button class="nav-trigger" type="button" aria-haspopup="true" aria-expanded="false">Progression<span class="nav-caret" aria-hidden="true">▾</span></button>
+          <div class="nav-dropdown" role="menu">
+            <a href="{{ '/research/' | relative_url }}"{% if u contains '/research' %} class="active"{% endif %}>Research</a>
+            <a href="{{ '/contracts/' | relative_url }}"{% if u contains '/contracts' %} class="active"{% endif %}>Contracts</a>
+            <a href="{{ '/missions/' | relative_url }}"{% if u contains '/missions' %} class="active"{% endif %}>Missions</a>
+            <a href="{{ '/achievements/' | relative_url }}"{% if u contains '/achievements' %} class="active"{% endif %}>Achievements</a>
+          </div>
+        </div>
+
+        {%- comment -%} ---- Compare ---- {%- endcomment -%}
+        {%- assign compare_active = false -%}
+        {%- if u contains '/corporations' or u contains '/calculator' -%}{%- assign compare_active = true -%}{%- endif -%}
+        <div class="nav-group{% if compare_active %} active{% endif %}">
+          <button class="nav-trigger" type="button" aria-haspopup="true" aria-expanded="false">Compare<span class="nav-caret" aria-hidden="true">▾</span></button>
+          <div class="nav-dropdown" role="menu">
+            <a href="{{ '/corporations/' | relative_url }}"{% if u contains '/corporations' %} class="active"{% endif %}>Corporations</a>
+            <a href="{{ '/calculator.html' | relative_url }}"{% if u contains '/calculator' %} class="active"{% endif %}>Calculator</a>
+          </div>
+        </div>
       </nav>
     </div>
   </header>
