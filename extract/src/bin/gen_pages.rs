@@ -6,6 +6,48 @@ use std::path::{Path, PathBuf};
 
 const AU_IN_KM: f64 = 149_597_870.7;
 
+// ---------------------------------------------------------------------------
+// TerraformationData — emitted by `parse-terraformation-config`. Mirrors the
+// structs in `parse_terraformation_config.rs`; we keep a lean Deserialize-only
+// view here so a missing/empty file degrades gracefully.
+// ---------------------------------------------------------------------------
+
+/// Score → input-value bucket for one habitability parameter, as exported
+/// from the gradient + curve inverse-lookup in
+/// `parse_terraformation_config::build_label_thresholds`.
+#[derive(Deserialize, Clone, Default, Debug)]
+struct TerraLabelThreshold {
+    /// Habitability score at the bucket midpoint (post-curve), used for
+    /// labelling the bucket (e.g. score≈95 → "Temperate"; score<0 → "Melting
+    /// Hot"). `score_min == score_max` in the current encoding.
+    #[serde(default)]
+    score_min: f64,
+    /// Sorted-ascending value boundaries — a `[lo, hi]` pair in the input
+    /// unit of the parameter (°C, atm, m/s², …).
+    #[serde(default)]
+    value_ranges: Vec<f64>,
+}
+
+/// Per-parameter terraforming bucket data — one entry for each of
+/// temperature, pressure, gravity, magnetosphere, composition, water.
+#[derive(Deserialize, Clone, Default, Debug)]
+struct TerraParameter {
+    /// Display unit ("°C", "atm", …).
+    unit: String,
+    /// Buckets in input-value order (ascending). Renderers display them
+    /// left-to-right as the player would experience the parameter sweeping
+    /// from its low extreme to its high extreme.
+    #[serde(default)]
+    label_thresholds: Vec<TerraLabelThreshold>,
+}
+
+#[derive(Deserialize, Default, Debug)]
+struct TerraformationData {
+    /// Keyed by parameter name (temperature, pressure, gravity, …).
+    #[serde(default)]
+    parameters: BTreeMap<String, TerraParameter>,
+}
+
 #[derive(Deserialize)]
 struct Locale {
     celestial_bodies: Vec<CelestialBody>,
@@ -2567,6 +2609,102 @@ types exist:\n\n\
     )
 }
 
+/// Format a value for the bucket-boundary cell. We use compact rendering:
+/// integers print without trailing zeros, small fractions keep up to 3
+/// significant decimals, very small numbers fall back to 2 decimal places.
+fn fmt_bucket_value(v: f64, unit: &str) -> String {
+    if !v.is_finite() {
+        return "—".to_string();
+    }
+    // Special-case °C → strip the unit from the cell (it lives in the
+    // column header) and round to whole degrees.
+    let body = if unit == "°C" {
+        format!("{:.0}", v.round())
+    } else if v.abs() >= 100.0 {
+        format!("{:.0}", v.round())
+    } else if v.abs() >= 10.0 {
+        format!("{:.1}", v)
+    } else if v.abs() >= 1.0 {
+        format!("{:.2}", v)
+    } else if v.abs() >= 0.001 {
+        format!("{:.3}", v)
+    } else if v.abs() == 0.0 {
+        "0".to_string()
+    } else {
+        format!("{:.1e}", v)
+    };
+    body
+}
+
+/// Pick a player-facing label for a bucket given its score midpoint and the
+/// locale's habitability_scales list (6 labels per parameter, ordered
+/// worst→best for "Atmosphere"/"Radiation" but worst→best→worst for
+/// "Temperature"/"Gravitation"). The label list shape is:
+///
+///   * **temperature**: \[Extremely Cold, Cold, Temperate, Hot, Extremely Hot,
+///     Melting Hot\] — buckets sweep cold-side up to peak, then hot-side
+///     down. The same logical buckets ("Extremely Cold" and "Melting Hot")
+///     each occupy ONE bucket; "Cold" and "Extremely Hot" each one bucket;
+///     "Temperate" straddles the peak (two buckets near score=100).
+///   * **gravitation**: \[Extreme, High, Standard, Low, Minimal, 0g\] —
+///     ordered from worst to best as gravity DECREASES (Earth = Standard,
+///     more gravity = worse, less gravity = also worse).
+///   * **atmosphere**: \[No Atmosphere, Thin, Earth-like, Non-breathable,
+///     High Pressure, Extreme Pressure\] — ordered by increasing pressure.
+///   * **radiation** (not yet covered by an in-config curve): \[No, Minor,
+///     Noticeable, Significant, Serious hazard, Extreme hazard\].
+///
+/// Because the bucket count from the gradient (~7) doesn't cleanly match
+/// the locale's six labels, we map by INPUT-VALUE ORDER: ith bucket gets
+/// the ith locale label, with a fallback label for any tail bucket past the
+/// locale list ("Hostile").
+fn bucket_label(parameter: &str, index: usize, labels: &[String]) -> String {
+    if let Some(l) = labels.get(index) {
+        return l.clone();
+    }
+    // Fallback when the curve produces more buckets than locale labels —
+    // the trailing bucket is always the worst (score < 0 region).
+    let _ = parameter;
+    "Hostile".to_string()
+}
+
+/// Collapse adjacent buckets that share roughly the same midpoint
+/// habitability score. The terraformation parser emits a separate bucket
+/// for each rising/falling crossing of a gradient transition; non-monotonic
+/// curves (temperature, gravity) place two buckets near the peak that
+/// carry effectively the same habitability — merge them so the row count
+/// lines up with the locale's 6-label ladder.
+///
+/// Two scores are treated as equivalent when their absolute difference is
+/// within 10 units. That tolerance is wide enough to absorb gravity's
+/// 83/89 peak-adjacent buckets (where the curve has a secondary keyframe
+/// near 16 m/s² that splits the high-score zone into two buckets with
+/// nearly-identical habitability) but narrow enough to preserve the real
+/// boundary between e.g. score 50 and score 83.
+fn merge_peak_buckets(buckets: &[TerraLabelThreshold]) -> Vec<TerraLabelThreshold> {
+    const MERGE_SCORE_TOLERANCE: f64 = 10.0;
+    let mut out: Vec<TerraLabelThreshold> = Vec::new();
+    for b in buckets {
+        match out.last_mut() {
+            Some(prev) if (prev.score_min - b.score_min).abs() < MERGE_SCORE_TOLERANCE => {
+                // Merge: extend the previous bucket's value range and bump
+                // the score up to the higher of the two (so the merged
+                // bucket still reads as "best of the pair").
+                if b.score_min > prev.score_min {
+                    prev.score_min = b.score_min;
+                }
+                if let Some(b_hi) = b.value_ranges.last().copied() {
+                    if prev.value_ranges.len() >= 2 {
+                        *prev.value_ranges.last_mut().unwrap() = b_hi;
+                    }
+                }
+            }
+            _ => out.push(b.clone()),
+        }
+    }
+    out
+}
+
 /// Render the terraforming page: one row per resource with real thermal /
 /// phase constants from `terraformationInfo`. Resources whose info is `None`
 /// (the C# all-1.0 placeholder — energy, human, supplies, antimatter, …)
@@ -2575,7 +2713,11 @@ types exist:\n\n\
 ///
 /// Sorting: alphabetically by player-facing display name (locale-resolved),
 /// matching the convention used elsewhere on the wiki.
-fn page_terraforming(locale: &Locale, sirenix: &Sirenix) -> String {
+fn page_terraforming(
+    locale: &Locale,
+    sirenix: &Sirenix,
+    terraformation: &TerraformationData,
+) -> String {
     let res_name: BTreeMap<&str, &str> = locale
         .resources
         .iter()
@@ -2669,6 +2811,134 @@ fn page_terraforming(locale: &Locale, sirenix: &Sirenix) -> String {
         .collect();
     terra_facs.sort_by(|a, b| a.1.cmp(&b.1));
 
+    // ---- Per-parameter habitability bucket ranges -------------------------
+    // The `TerraformationConfig.asset` ships an AnimationCurve+Gradient pair
+    // for each parameter; `parse-terraformation-config` inverse-looks-up the
+    // curve at each gradient transition to get the input-value boundaries
+    // between habitability buckets. Surface one compact table per parameter
+    // so the player can read "Temperate = -16°C to 22°C" directly off the
+    // page instead of inferring it from the in-game color bar.
+    //
+    // Parameter display order: temperature → pressure → gravity →
+    // magnetosphere → composition → water. Matches the order the in-game
+    // Object Info window stacks the axes.
+    // We surface the three axes whose locale label list cleanly maps to the
+    // curve+gradient buckets the parser produces:
+    //   * temperature → Tooltip.UIBasicInfoPlanetCharacteristic.Temperature*
+    //   * pressure    → ...Atmosphere*
+    //   * gravity     → ...Gravitation*
+    //
+    // The TerraformationConfig also ships curves for `magnetosphere`,
+    // `composition`, and `water`, but those aren't axes the player-facing UI
+    // labels in the same way (radiation is computed from a separate scalar,
+    // composition tracks oxygen fraction, water tracks ocean coverage), so
+    // we leave them out of the rendered tables. The raw curve/gradient data
+    // for those parameters is still in `terraformation.json` for
+    // downstream consumers.
+    //
+    // The `reverse_labels` flag handles a quirk: the locale lists labels in
+    // "subjective bad → ... → bad" order, which for temperature/pressure
+    // happens to match value-ascending order, but for gravity is REVERSED
+    // (Extreme Gravity = highest m/s² comes FIRST in the locale list, so we
+    // need to flip the list to align with bucket index 0 = lowest m/s²).
+    //
+    // The `merge` flag controls peak-bucket merging — useful when the
+    // curve emits two near-identical-score buckets straddling the peak and
+    // the locale label list would otherwise drift out of alignment. For
+    // gravity the locale list is asymmetric (3 above-peak labels vs 2
+    // below) so merging would shift the peak to the wrong row; we leave
+    // gravity unmerged and trail with a "Hostile" label for the
+    // out-of-range 7th bucket.
+    let param_order: &[(&str, &str, &str, bool, bool)] = &[
+        // (asset_key, display, locale_key, reverse_labels, merge_peak)
+        ("temperature", "Temperature", "temperature", false, true),
+        ("pressure", "Atmosphere (pressure)", "atmosphere", false, true),
+        ("gravity", "Gravity", "gravitation", true, false),
+    ];
+    let mut thresholds_section = String::new();
+    let mut any_param = false;
+    for (asset_key, display, locale_key, reverse, merge_peak) in param_order {
+        let param = match terraformation.parameters.get(*asset_key) {
+            Some(p) if !p.label_thresholds.is_empty() => p,
+            _ => continue,
+        };
+        any_param = true;
+        let locale_labels: Vec<String> = locale
+            .habitability_scales
+            .get(*locale_key)
+            .cloned()
+            .unwrap_or_default();
+        let labels_vec: Vec<String> = if *reverse {
+            let mut v = locale_labels.clone();
+            v.reverse();
+            v
+        } else {
+            locale_labels.clone()
+        };
+        let labels: &[String] = labels_vec.as_slice();
+        // Merge adjacent buckets that straddle the curve's peak — they
+        // share the same habitability score (e.g. temperature's two
+        // ~95-score buckets at ±a few degrees of 13 °C). Without merging,
+        // the locale's 6-label ladder doesn't line up with the parser's 7
+        // buckets; with merging, the two "Temperate" buckets collapse into
+        // one row spanning the full Temperate range. For parameters whose
+        // locale labels are asymmetric around the peak (gravity), we skip
+        // the merge and let the 7th bucket fall through to the "Hostile"
+        // tail label.
+        let merged = if *merge_peak {
+            merge_peak_buckets(&param.label_thresholds)
+        } else {
+            param.label_thresholds.clone()
+        };
+        let rows: Vec<Vec<String>> = merged
+            .iter()
+            .enumerate()
+            .map(|(i, lt)| {
+                let lo = lt.value_ranges.first().copied().unwrap_or(f64::NAN);
+                let hi = lt.value_ranges.last().copied().unwrap_or(f64::NAN);
+                let label = bucket_label(asset_key, i, labels);
+                let score = lt.score_min;
+                vec![
+                    label,
+                    fmt_bucket_value(lo, &param.unit),
+                    fmt_bucket_value(hi, &param.unit),
+                    if score.is_finite() {
+                        format!("{:.0}", score)
+                    } else {
+                        "—".to_string()
+                    },
+                ]
+            })
+            .collect();
+        let range_header = format!("Range ({})", param.unit);
+        let table = md_table(
+            &[
+                "Bucket",
+                &format!("Low {}", param.unit),
+                &format!("High {}", param.unit),
+                "Score",
+            ],
+            &rows,
+        );
+        thresholds_section.push_str(&format!("### {display}\n\n{table}\n"));
+        let _ = range_header; // (kept for potential future header use)
+    }
+    let thresholds_section = if any_param {
+        format!(
+            "## Habitability bucket ranges\n\n\
+The in-game Object Info window grades each body on four habitability axes \
+(Temperature, Atmosphere, Gravitation, Radiation/Magnetic field) using a \
+six-step label scale. The tables below show the numeric `(low, high)` input \
+range that produces each bucket — derived from the `AnimationCurve` and \
+`Gradient` pairs inside `TerraformationConfig.asset`. The **Score** column \
+shows the curve's habitability score at the bucket midpoint, where 100 is \
+\"perfect\" and negative scores are hostile.\n\n\
+{thresholds_section}"
+        )
+    } else {
+        String::new()
+    };
+
     let facilities_section = if terra_facs.is_empty() {
         String::new()
     } else {
@@ -2717,6 +2987,7 @@ per-resource thermal properties. Use these tables to understand:\n\n\
 - which resources contribute to greenhouse warming (optical depth) and surface heating\n\n\
 ## Resource thermal properties\n\n\
 {table}\n\
+{thresholds_section}\
 {facilities_section}\
 ## Reading the table\n\n\
 - **Melting / Boiling** are the phase-change temperatures the body's average surface temperature must cross to keep the resource solid, liquid, or gas at reference pressure. Both columns show kelvin first with the celsius equivalent in parentheses.\n\
@@ -6365,7 +6636,7 @@ mod tests {
             resources: vec![water],
             ..Default::default()
         };
-        let page = page_terraforming(&locale, &sirenix);
+        let page = page_terraforming(&locale, &sirenix, &TerraformationData::default());
         // Header is present.
         assert!(page.starts_with("# Terraforming"), "page must start with title:\n{page}");
         // Water row anchor + display name.
@@ -6406,7 +6677,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        let page = page_terraforming(&locale, &sirenix);
+        let page = page_terraforming(&locale, &sirenix, &TerraformationData::default());
         assert!(
             !page.contains("terraforming-energy"),
             "energy row must not appear when TI is None:\n{page}"
@@ -6440,7 +6711,7 @@ mod tests {
             resources: vec![water, hydrogen],
             ..Default::default()
         };
-        let page = page_terraforming(&locale, &sirenix);
+        let page = page_terraforming(&locale, &sirenix, &TerraformationData::default());
         let h_idx = page.find("terraforming-hydrogen").expect("hydrogen row");
         let w_idx = page.find("terraforming-water").expect("water row");
         assert!(h_idx < w_idx, "Hydrogen must sort before Water in the table");
@@ -6457,7 +6728,7 @@ mod tests {
             resources: vec![water],
             ..Default::default()
         };
-        let page = page_terraforming(&locale, &sirenix);
+        let page = page_terraforming(&locale, &sirenix, &TerraformationData::default());
         assert!(
             page.contains("## Reading the table"),
             "missing reading section:\n{page}"
@@ -6483,7 +6754,7 @@ mod tests {
             resources: vec![water],
             ..Default::default()
         };
-        let page = page_terraforming(&locale, &sirenix);
+        let page = page_terraforming(&locale, &sirenix, &TerraformationData::default());
         assert!(
             page.contains("../resources/"),
             "page must link back to the resources page:\n{page}"
@@ -6510,7 +6781,7 @@ mod tests {
             facilities: vec![mag],
             ..Default::default()
         };
-        let page = page_terraforming(&locale, &sirenix);
+        let page = page_terraforming(&locale, &sirenix, &TerraformationData::default());
         // Section header is present.
         assert!(
             page.contains("## Terraforming facilities"),
@@ -6563,7 +6834,7 @@ mod tests {
             facilities: vec![f_empty, f_zero],
             ..Default::default()
         };
-        let page = page_terraforming(&locale, &sirenix);
+        let page = page_terraforming(&locale, &sirenix, &TerraformationData::default());
         let after_header = page
             .split("## Terraforming facilities")
             .nth(1)
@@ -6598,7 +6869,7 @@ mod tests {
             facilities: vec![mag, atmo],
             ..Default::default()
         };
-        let page = page_terraforming(&locale, &sirenix);
+        let page = page_terraforming(&locale, &sirenix, &TerraformationData::default());
         let after_header = page
             .split("## Terraforming facilities")
             .nth(1)
@@ -6612,6 +6883,217 @@ mod tests {
         assert!(
             atmo_idx < mag_idx,
             "Atmospheric Greenhouse must sort before Magnetic Field Generator:\n{after_header}"
+        );
+    }
+
+    // ---- Terraformation bucket-range tables ------------------------------
+
+    /// Build a synthetic `TerraformationData` carrying just the temperature
+    /// parameter's bucket thresholds — enough to exercise the renderer.
+    fn temperature_terra_fixture() -> TerraformationData {
+        let buckets = vec![
+            (23.0, -273.0, -144.0),
+            (68.0, -144.0, -16.0),
+            (95.0, -16.0, 13.0),
+            (95.0, 13.0, 22.0),
+            (68.0, 22.0, 61.0),
+            (23.0, 61.0, 100.0),
+            (-50.0, 100.0, 700.0),
+        ];
+        let param = TerraParameter {
+            unit: "°C".to_string(),
+            label_thresholds: buckets
+                .into_iter()
+                .map(|(score, lo, hi)| TerraLabelThreshold {
+                    score_min: score,
+                    value_ranges: vec![lo, hi],
+                })
+                .collect(),
+        };
+        let mut params = BTreeMap::new();
+        params.insert("temperature".to_string(), param);
+        TerraformationData { parameters: params }
+    }
+
+    fn terra_fixture_locale_with_labels() -> Locale {
+        // Reuse the resources fixture so the rest of the page (thermal
+        // table) is still well-formed, then attach the temperature label
+        // ladder the renderer reaches into.
+        let mut locale = resources_fixture_locale();
+        locale.resources.push(ResourceEntry {
+            id: "water".into(),
+            name: "Water".into(),
+        });
+        locale.habitability_scales.insert(
+            "temperature".to_string(),
+            vec![
+                "Extremely Cold".to_string(),
+                "Cold".to_string(),
+                "Temperate".to_string(),
+                "Hot".to_string(),
+                "Extremely Hot".to_string(),
+                "Melting Hot".to_string(),
+            ],
+        );
+        locale
+    }
+
+    #[test]
+    fn terraforming_page_renders_bucket_ranges_section_when_terra_data_present() {
+        let locale = terra_fixture_locale_with_labels();
+        let mut water = make_resource_stat("water", "Normal");
+        water.terraformation_info = Some(water_ti());
+        let sirenix = Sirenix {
+            resources: vec![water],
+            ..Default::default()
+        };
+        let terra = temperature_terra_fixture();
+        let page = page_terraforming(&locale, &sirenix, &terra);
+        assert!(
+            page.contains("## Habitability bucket ranges"),
+            "section header missing:\n{page}"
+        );
+        // Temperature sub-section
+        assert!(
+            page.contains("### Temperature"),
+            "Temperature sub-section missing:\n{page}"
+        );
+        // One bucket boundary from the fixture (Cold bucket ends at -16°C).
+        assert!(
+            page.contains("-16") || page.contains("−16"),
+            "expected the rising -16°C boundary in the table:\n{page}"
+        );
+        // The label for the first bucket should be "Extremely Cold".
+        let section = page
+            .split("### Temperature")
+            .nth(1)
+            .unwrap_or("");
+        assert!(
+            section.contains("Extremely Cold"),
+            "first bucket should be labelled Extremely Cold:\n{section}"
+        );
+        // The tail (hottest) bucket gets the last locale label after the
+        // two peak buckets collapse into one — for temperature that's
+        // "Melting Hot".
+        assert!(
+            section.contains("Melting Hot"),
+            "tail bucket should be labelled Melting Hot after peak-merge:\n{section}"
+        );
+    }
+
+    #[test]
+    fn terraforming_page_omits_bucket_section_when_terra_data_empty() {
+        // Existing tests in this file pass an empty TerraformationData;
+        // make sure they keep working — the page should NOT emit the
+        // bucket-ranges section when there's nothing to show.
+        let locale = terra_fixture_locale_with_labels();
+        let mut water = make_resource_stat("water", "Normal");
+        water.terraformation_info = Some(water_ti());
+        let sirenix = Sirenix {
+            resources: vec![water],
+            ..Default::default()
+        };
+        let page = page_terraforming(&locale, &sirenix, &TerraformationData::default());
+        assert!(
+            !page.contains("## Habitability bucket ranges"),
+            "empty terra data must not emit bucket section:\n{page}"
+        );
+    }
+
+    #[test]
+    fn terraforming_page_temperature_section_lists_buckets_in_value_order() {
+        // The renderer walks `label_thresholds` in dump order (which is
+        // sorted ascending by lower-bound input value), so the first
+        // bucket's low value should appear before the last bucket's high
+        // value in the rendered string.
+        let locale = terra_fixture_locale_with_labels();
+        let mut water = make_resource_stat("water", "Normal");
+        water.terraformation_info = Some(water_ti());
+        let sirenix = Sirenix {
+            resources: vec![water],
+            ..Default::default()
+        };
+        let terra = temperature_terra_fixture();
+        let page = page_terraforming(&locale, &sirenix, &terra);
+        let section = page
+            .split("### Temperature")
+            .nth(1)
+            .unwrap_or("");
+        // The leading bucket (-273 → -144) appears before the tail bucket (100 → 700).
+        let idx_lo = section.find("-273").expect("first bucket cold edge missing");
+        let idx_hi = section.find("700").expect("last bucket hot edge missing");
+        assert!(
+            idx_lo < idx_hi,
+            "buckets must render in value-ascending order:\n{section}"
+        );
+    }
+
+    #[test]
+    fn merge_peak_buckets_collapses_adjacent_same_score_buckets() {
+        // Temperature curve fixture: two ~95-score buckets straddle the
+        // peak. After merging, the table should carry exactly six rows
+        // (matching the six-label locale ladder), and the merged range
+        // should span both halves.
+        let buckets = vec![
+            TerraLabelThreshold { score_min: 23.0, value_ranges: vec![-273.0, -144.0] },
+            TerraLabelThreshold { score_min: 68.0, value_ranges: vec![-144.0, -16.0] },
+            TerraLabelThreshold { score_min: 95.0, value_ranges: vec![-16.0, 13.0] },
+            TerraLabelThreshold { score_min: 95.0, value_ranges: vec![13.0, 22.0] },
+            TerraLabelThreshold { score_min: 68.0, value_ranges: vec![22.0, 61.0] },
+            TerraLabelThreshold { score_min: 23.0, value_ranges: vec![61.0, 100.0] },
+            TerraLabelThreshold { score_min: -50.0, value_ranges: vec![100.0, 700.0] },
+        ];
+        let merged = merge_peak_buckets(&buckets);
+        // Two-bucket-peak collapses to one — final count is 6.
+        assert_eq!(merged.len(), 6, "expected 6 merged buckets: {:?}", merged);
+        // The merged Temperate bucket spans -16 to 22.
+        let temperate = &merged[2];
+        assert!((temperate.value_ranges[0] - (-16.0)).abs() < 1e-3);
+        assert!((temperate.value_ranges[1] - 22.0).abs() < 1e-3);
+        assert!((temperate.score_min - 95.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn merge_peak_buckets_leaves_distinct_scores_untouched() {
+        // Monotonic curves (gravity / pressure on the rising leg) have no
+        // adjacent buckets with the same score — merging should be a
+        // no-op.
+        let buckets = vec![
+            TerraLabelThreshold { score_min: 17.0, value_ranges: vec![0.0, 3.0] },
+            TerraLabelThreshold { score_min: 50.0, value_ranges: vec![3.0, 6.0] },
+            TerraLabelThreshold { score_min: 83.0, value_ranges: vec![6.0, 10.0] },
+        ];
+        let merged = merge_peak_buckets(&buckets);
+        assert_eq!(merged.len(), 3);
+    }
+
+    #[test]
+    fn terraforming_page_renders_score_column_with_curve_midpoint_score() {
+        let locale = terra_fixture_locale_with_labels();
+        let mut water = make_resource_stat("water", "Normal");
+        water.terraformation_info = Some(water_ti());
+        let sirenix = Sirenix {
+            resources: vec![water],
+            ..Default::default()
+        };
+        let terra = temperature_terra_fixture();
+        let page = page_terraforming(&locale, &sirenix, &terra);
+        let section = page
+            .split("### Temperature")
+            .nth(1)
+            .unwrap_or("");
+        // Score column has the per-bucket habitability score (the fixture
+        // sets the middle three buckets to ~95 and the cold/hot ends to ~23
+        // / ~68). Specifically the most-habitable buckets carry "95".
+        assert!(
+            section.contains("| 95 |"),
+            "Score column should surface the high-habitability score:\n{section}"
+        );
+        // The hostile tail uses the negative score, rendered without the
+        // unicode minus (we just use ASCII for the score column).
+        assert!(
+            section.contains("-50"),
+            "Score column should include the hostile tail's negative score:\n{section}"
         );
     }
 
@@ -10219,19 +10701,32 @@ fn auto_detect_game_version(stats_path: &Path) -> Option<String> {
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
-    if args.len() < 5 || args.len() > 6 {
+    // Accept either the legacy 4-input shape (locale, stats, sirenix,
+    // wiki-root [, game-version]) or the new 5-input shape that adds the
+    // optional terraformation.json. We detect by checking arg-count parity.
+    if args.len() < 5 || args.len() > 7 {
         return Err(anyhow!(
-            "usage: gen-pages <locale.json> <stats.json> <sirenix.json> <wiki-root> [game-version]"
+            "usage: gen-pages <locale.json> <stats.json> <sirenix.json> [terraformation.json] <wiki-root> [game-version]"
         ));
     }
     let locale_path = PathBuf::from(&args[1]);
     let stats_path = PathBuf::from(&args[2]);
     let sirenix_path = PathBuf::from(&args[3]);
-    let wiki_root = PathBuf::from(&args[4]);
+    // Heuristic: if args[4] ends with `.json`, treat it as terraformation
+    // input and shift the remaining slots; otherwise the legacy layout is
+    // in effect.
+    let (terraformation_path, wiki_root, game_version_arg): (Option<PathBuf>, PathBuf, Option<String>) =
+        if args[4].ends_with(".json") {
+            let wiki = PathBuf::from(&args[5]);
+            let gv = args.get(6).cloned();
+            (Some(PathBuf::from(&args[4])), wiki, gv)
+        } else {
+            let wiki = PathBuf::from(&args[4]);
+            let gv = args.get(5).cloned();
+            (None, wiki, gv)
+        };
     // Priority: explicit CLI arg → sibling ProjectSettings.asset → "unknown".
-    let game_version = args
-        .get(5)
-        .cloned()
+    let game_version = game_version_arg
         .or_else(|| auto_detect_game_version(&stats_path))
         .unwrap_or_else(|| "unknown".to_string());
 
@@ -10245,6 +10740,18 @@ fn main() -> Result<()> {
     } else {
         eprintln!("warning: {} not found; spacecraft page will be empty", sirenix_path.display());
         Sirenix::default()
+    };
+    let terraformation: TerraformationData = match &terraformation_path {
+        Some(p) if p.exists() => serde_json::from_str(&fs::read_to_string(p)?)
+            .with_context(|| format!("parsing {}", p.display()))?,
+        Some(p) => {
+            eprintln!(
+                "warning: {} not found; terraforming bucket-range tables will be skipped",
+                p.display()
+            );
+            TerraformationData::default()
+        }
+        None => TerraformationData::default(),
     };
     let ctx = WikiCtx::build(&locale, &stats);
 
@@ -10262,7 +10769,11 @@ fn main() -> Result<()> {
     write_file(&wiki_root, "facilities/README.md", &page_facilities(&locale, &sirenix))?;
     write_file(&wiki_root, "corporations/README.md", &page_corporations(&locale, &sirenix))?;
     write_file(&wiki_root, "resources/README.md", &page_resources(&locale, &sirenix))?;
-    write_file(&wiki_root, "terraforming/README.md", &page_terraforming(&locale, &sirenix))?;
+    write_file(
+        &wiki_root,
+        "terraforming/README.md",
+        &page_terraforming(&locale, &sirenix, &terraformation),
+    )?;
     write_file(&wiki_root, "contracts/README.md", &page_contracts(&locale, &sirenix))?;
     write_file(&wiki_root, "achievements/README.md", &page_achievements(&locale, &sirenix))?;
     write_file(&wiki_root, "research/README.md", &page_research(&locale, &sirenix))?;

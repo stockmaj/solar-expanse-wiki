@@ -30,6 +30,44 @@ per-resource thermal properties. Use these tables to understand:
 | <a id="terraforming-silicon"></a><img src="../images/resources/silicon.png" width="16" alt="Silicon"/>&nbsp;**[Silicon](../resources/#resource-silicon)** | 1687 / 1414 °C | 3538 / 3265 °C | 359000 | 705 | 1 | 1.0e-5 |
 | <a id="terraforming-water"></a><img src="../images/resources/water.png" width="16" alt="Water"/>&nbsp;**[Water](../resources/#resource-water)** | 220 / -53 °C | 373 / 100 °C | 50000 | 1860 | 0.002 | 0.00611 |
 
+## Habitability bucket ranges
+
+The in-game Object Info window grades each body on four habitability axes (Temperature, Atmosphere, Gravitation, Radiation/Magnetic field) using a six-step label scale. The tables below show the numeric `(low, high)` input range that produces each bucket — derived from the `AnimationCurve` and `Gradient` pairs inside `TerraformationConfig.asset`. The **Score** column shows the curve's habitability score at the bucket midpoint, where 100 is "perfect" and negative scores are hostile.
+
+### Temperature
+
+| Bucket | Low °C | High °C | Score |
+| --- | --- | --- | --- |
+| Extremely Cold | -273 | -144 | 23 |
+| Cold | -144 | -16 | 68 |
+| Temperate | -16 | 22 | 95 |
+| Hot | 22 | 61 | 68 |
+| Extremely Hot | 61 | 100 | 23 |
+| Melting Hot | 100 | 700 | -50 |
+
+### Atmosphere (pressure)
+
+| Bucket | Low atm | High atm | Score |
+| --- | --- | --- | --- |
+| No Atmosphere | 0 | 0.332 | 17 |
+| Thin Atmosphere | 0.332 | 0.668 | 50 |
+| Earth-like Atmosphere | 0.668 | 9.14 | 83 |
+| Non-breathable | 9.14 | 17.4 | 50 |
+| High Pressure | 17.4 | 25.5 | 17 |
+| Extreme Pressure | 25.5 | 50.0 | -50 |
+
+### Gravity
+
+| Bucket | Low m/s² | High m/s² | Score |
+| --- | --- | --- | --- |
+| 0g | 0 | 3.26 | 17 |
+| Minimal Gravity | 3.26 | 6.54 | 50 |
+| Low Gravity | 6.54 | 9.80 | 83 |
+| Standard Gravity | 9.80 | 23.6 | 89 |
+| High Gravity | 23.6 | 34.0 | 50 |
+| Extreme Gravity | 34.0 | 44.2 | 17 |
+| Hostile | 44.2 | 75.0 | -50 |
+
 ## Terraforming facilities
 
 Facilities that actively modify a planet's habitability parameters over time. See the [Facilities page](../facilities/) for build cost, prerequisites, and other stats.
