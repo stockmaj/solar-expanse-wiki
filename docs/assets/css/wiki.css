@@ -69,16 +69,145 @@ html, body {
   display: flex;
   gap: 4px 14px;
   flex-wrap: wrap;
+  align-items: center;
 }
-.site-header nav a {
+.site-header nav > a {
   color: var(--fg-muted);
   text-decoration: none;
   padding: 4px 6px;
   border-radius: 4px;
   font-size: 13px;
 }
-.site-header nav a:hover { color: var(--fg); background: rgba(255,255,255,0.04); }
-.site-header nav a.active { color: var(--accent); background: rgba(255,179,71,0.08); }
+.site-header nav > a:hover { color: var(--fg); background: rgba(255,255,255,0.04); }
+.site-header nav > a.active { color: var(--accent); background: rgba(255,179,71,0.08); }
+
+/* ---------- Grouped nav dropdowns ----------
+ *
+ * Each top-level item is a .nav-group containing a .nav-trigger button
+ * and a .nav-dropdown menu of links. Opens on:
+ *   - hover (pointer:fine devices — desktop mouse)
+ *   - focus-within (keyboard Tab through the button)
+ *   - tap (touch devices focus the button on tap → focus-within fires)
+ *
+ * Close happens automatically when focus/hover leaves; tapping anywhere
+ * else on the page moves focus away from the button.
+ *
+ * No JS required. The :hover gate is wrapped in @media (hover: hover) so
+ * touch devices don't fire phantom hover-stick states.
+ */
+.nav-group {
+  position: relative;
+  display: inline-block;
+}
+.nav-trigger {
+  background: transparent;
+  color: var(--fg-muted);
+  border: 0;
+  padding: 4px 6px;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.nav-trigger:hover,
+.nav-trigger:focus {
+  color: var(--fg);
+  background: rgba(255,255,255,0.04);
+  outline: none;
+}
+.nav-group.active > .nav-trigger {
+  color: var(--accent);
+  background: rgba(255,179,71,0.08);
+}
+.nav-caret {
+  font-size: 9px;
+  line-height: 1;
+  opacity: 0.7;
+}
+.nav-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  min-width: 180px;
+  background: var(--bg-elev);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 4px;
+  margin-top: 2px;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.45);
+  z-index: 20;
+  display: none;
+  flex-direction: column;
+  gap: 1px;
+}
+/* Open on hover (desktop only) or when the trigger / a child link has
+ * focus. focus-within covers keyboard nav and tap-to-open on touch. */
+@media (hover: hover) {
+  .nav-group:hover > .nav-dropdown {
+    display: flex;
+  }
+}
+.nav-group:focus-within > .nav-dropdown {
+  display: flex;
+}
+.nav-dropdown a {
+  color: var(--fg-muted);
+  text-decoration: none;
+  padding: 5px 10px;
+  border-radius: 3px;
+  font-size: 13px;
+  white-space: nowrap;
+  display: block;
+}
+.nav-dropdown a:hover,
+.nav-dropdown a:focus {
+  color: var(--fg);
+  background: rgba(255,255,255,0.04);
+  outline: none;
+}
+.nav-dropdown a.active {
+  color: var(--accent);
+  background: rgba(255,179,71,0.08);
+}
+
+/* Narrow viewports: dropdowns become full-width inline stacks instead
+ * of floating menus, so the nav doesn't overflow off-screen on phones.
+ * Each group is shown as its trigger plus an always-visible vertical
+ * list of its children. */
+@media (max-width: 720px) {
+  .site-header nav {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+  }
+  .nav-group {
+    display: block;
+  }
+  .nav-trigger {
+    width: 100%;
+    justify-content: space-between;
+    padding: 6px 8px;
+  }
+  .nav-dropdown {
+    position: static;
+    display: flex;
+    box-shadow: none;
+    border: 0;
+    border-left: 2px solid var(--rule);
+    border-radius: 0;
+    margin: 2px 0 4px 12px;
+    padding: 2px 0 2px 6px;
+    background: transparent;
+    min-width: 0;
+  }
+  .nav-group.active > .nav-dropdown {
+    border-left-color: var(--accent-dim);
+  }
+}
 
 /* ---------- Footer ---------- */
 
