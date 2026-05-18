@@ -37,3 +37,7 @@ types exist:
 - **License (Earth, $/t)** is the per-tonne fee Earth charges for extracting each resource. Earth is currently the only body that charges; other planets either don't charge at all or set their own rates per deposit (check the in-game tooltip on each deposit for non-Earth values).
 - **Market base ($/t)** is the starting clearing-price anchor used by the global market; supply and demand move actual prices around it.
 - **Producers** and **Consumers** are pulled from each facility's structured production data (`refinerData`, `energyProductionData`, `resourcesToMine`, `byproducts`) — not from tooltip text — so refineries don't get mis-credited as producing their inputs. Per-day rates aren't extractable from the static descriptors; the in-game tooltip remains the source of truth for rate numbers.
+
+## See also
+
+- [Terraforming](../terraforming/) — per-resource thermal / phase constants (boiling and melting points, latent heat, heat capacity, optical depth) that drive the atmosphere sim.

@@ -18,6 +18,7 @@ the names, descriptions, and stat tables here match exactly what you see in-game
 | [Missions](missions/) | Mission planning — Plan Mission walk-through, mission types, launch-window pointer. |
 | [Contracts](contracts/) | Story and freelance contracts — the in-game Contracts tab — that drive progression. |
 | [Resources](resources/) | The 20+ resource types — water, metals, fissiles, He-3, supplies, exotic alloys. |
+| [Terraforming](terraforming/) | Per-resource thermal / phase constants — boiling and melting points, latent heat, heat capacity, optical depth — that drive the atmosphere sim. |
 | [Corporations](corporations/) | Playable starting factions — SoleX, NASA, ESA, CNSA, Roscosmos. |
 
 ## How to use this wiki

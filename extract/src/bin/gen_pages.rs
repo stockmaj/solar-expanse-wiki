@@ -145,6 +145,19 @@ struct CorpStartStat {
     starting_facilities: Vec<(String, u32)>,
 }
 
+/// Mirror of `parse_sirenix::TerraformationInfo`. Field units are documented
+/// on the source struct; the renderer treats every value verbatim and only
+/// converts kelvin → celsius for display.
+#[derive(Deserialize, Clone, Default, Debug)]
+struct TerraformationInfoStat {
+    optical_depth_parameter: f64,
+    heat_capacity: f64,
+    vaporization_latent_heat: f64,
+    boiling_temperature_k: f64,
+    melting_temperature_k: f64,
+    pressure_triple_point: f64,
+}
+
 #[derive(Deserialize, Clone)]
 struct ResourceStat {
     id: String,
@@ -153,6 +166,11 @@ struct ResourceStat {
     show_on_ui: bool,
     #[allow(dead_code)]
     can_be_left_on_object: bool,
+    /// Thermal / phase constants surfaced on the terraforming page. `None`
+    /// for resources whose `terraformationInfo` is the C# placeholder
+    /// (energy, human, supplies, etc.) — parse_sirenix drops those.
+    #[serde(default)]
+    terraformation_info: Option<TerraformationInfoStat>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -2209,8 +2227,155 @@ types exist:\n\n\
 ## Reading the table\n\n\
 - **License (Earth, $/t)** is the per-tonne fee Earth charges for extracting each resource. Earth is currently the only body that charges; other planets either don't charge at all or set their own rates per deposit (check the in-game tooltip on each deposit for non-Earth values).\n\
 - **Market base ($/t)** is the starting clearing-price anchor used by the global market; supply and demand move actual prices around it.\n\
-- **Producers** and **Consumers** are pulled from each facility's structured production data (`refinerData`, `energyProductionData`, `resourcesToMine`, `byproducts`) — not from tooltip text — so refineries don't get mis-credited as producing their inputs. Per-day rates aren't extractable from the static descriptors; the in-game tooltip remains the source of truth for rate numbers.\n"
+- **Producers** and **Consumers** are pulled from each facility's structured production data (`refinerData`, `energyProductionData`, `resourcesToMine`, `byproducts`) — not from tooltip text — so refineries don't get mis-credited as producing their inputs. Per-day rates aren't extractable from the static descriptors; the in-game tooltip remains the source of truth for rate numbers.\n\n\
+## See also\n\n\
+- [Terraforming](../terraforming/) — per-resource thermal / phase constants (boiling and melting points, latent heat, heat capacity, optical depth) that drive the atmosphere sim.\n"
     )
+}
+
+/// Render the terraforming page: one row per resource with real thermal /
+/// phase constants from `terraformationInfo`. Resources whose info is `None`
+/// (the C# all-1.0 placeholder — energy, human, supplies, antimatter, …)
+/// are skipped so the table only carries species that actually participate
+/// in the atmosphere sim.
+///
+/// Sorting: alphabetically by player-facing display name (locale-resolved),
+/// matching the convention used elsewhere on the wiki.
+fn page_terraforming(locale: &Locale, sirenix: &Sirenix) -> String {
+    let res_name: BTreeMap<&str, &str> = locale
+        .resources
+        .iter()
+        .map(|r| (r.id.as_str(), r.name.as_str()))
+        .collect();
+
+    // Filter to resources that have real thermal physics. Drop everything
+    // else (parse_sirenix already filters the all-1.0 placeholder default).
+    let mut entries: Vec<(&ResourceStat, &TerraformationInfoStat)> = sirenix
+        .resources
+        .iter()
+        .filter_map(|r| r.terraformation_info.as_ref().map(|ti| (r, ti)))
+        .collect();
+    entries.sort_by(|a, b| {
+        let na = res_name.get(a.0.id.as_str()).copied().unwrap_or(a.0.id.as_str());
+        let nb = res_name.get(b.0.id.as_str()).copied().unwrap_or(b.0.id.as_str());
+        na.cmp(nb)
+    });
+
+    let rows: Vec<Vec<String>> = entries
+        .iter()
+        .map(|(r, ti)| {
+            let display = res_name.get(r.id.as_str()).copied().unwrap_or(r.id.as_str());
+            let anchor = anchor_tag("terraforming", &r.id);
+            // Icon matches the resources page convention.
+            let icon = format!(
+                "<img src=\"../images/resources/{id}.png\" width=\"16\" alt=\"{label}\"/>",
+                id = r.id,
+                label = escape_cell(display),
+            );
+            // Cross-link the name back to the resources page row.
+            let name_link = link_cross_page("resources", "resource", &r.id, &escape_cell(display));
+            vec![
+                format!("{anchor}{icon}&nbsp;**{name_link}**"),
+                fmt_phase_temperature(ti.melting_temperature_k),
+                fmt_phase_temperature(ti.boiling_temperature_k),
+                fmt_terraforming_number(ti.vaporization_latent_heat),
+                fmt_terraforming_number(ti.heat_capacity),
+                fmt_terraforming_number(ti.optical_depth_parameter),
+                fmt_terraforming_number(ti.pressure_triple_point),
+            ]
+        })
+        .collect();
+    let table = md_table_with_tips(
+        &[
+            "Resource",
+            "Melting (K / °C)",
+            "Boiling (K / °C)",
+            "Latent heat (J/mol)",
+            "Heat capacity (J/(kg·K))",
+            "Optical depth",
+            "Triple-point pressure (atm)",
+        ],
+        &[
+            None,
+            Some("Phase-change temperature where the resource transitions between solid and liquid. The body's surface temperature must cross this for the resource to melt or freeze."),
+            Some("Phase-change temperature where the resource transitions between liquid and gas at reference pressure. Crossing this is what gets a species into (or out of) the atmosphere."),
+            Some("Energy required to vaporize one mole of the resource. Drives how strongly evaporation cools the surface and condensation warms it."),
+            Some("Specific heat — how much energy the resource absorbs before warming. High values smooth out temperature swings."),
+            Some("Greenhouse strength: dimensionless coefficient (formerly `gasIRAbsorbtionCoefficient`) that scales how much outgoing infrared the gas traps."),
+            Some("Triple-point pressure: the minimum atmospheric pressure for a stable liquid phase. Below this, the resource sublimates directly between solid and gas."),
+        ],
+        &rows,
+    );
+    format!(
+        "# Terraforming\n\n\
+Solar Expanse simulates planetary atmospheres and surface conditions based on\n\
+per-resource thermal properties. Use these tables to understand:\n\n\
+- which resources will vaporize or freeze at a given temperature\n\
+- how heat capacity drives atmospheric warming and cooling\n\
+- which resources contribute to greenhouse warming (optical depth) and surface heating\n\n\
+## Resource thermal properties\n\n\
+{table}\n\
+## Reading the table\n\n\
+- **Melting / Boiling** are the phase-change temperatures the body's average surface temperature must cross to keep the resource solid, liquid, or gas at reference pressure. Both columns show kelvin first with the celsius equivalent in parentheses.\n\
+- **Latent heat (J/mol)** is the energy required to vaporize one mole of the resource. It drives how strongly evaporation cools the planet's surface and how strongly condensation warms it — the same constant feeds the Clausius-Clapeyron formula the sim uses to compute saturation pressures from temperature.\n\
+- **Heat capacity (J/(kg·K))** is how much energy the resource absorbs before its temperature rises. High values smooth out day/night and seasonal temperature swings, so atmospheres dominated by high-Cp species are stabler.\n\
+- **Optical depth** is the dimensionless greenhouse contribution. Higher values trap more outgoing infrared radiation — atmospheres dominated by high-optical-depth species (CO2, water vapor) warm.\n\
+- **Triple-point pressure (atm)** is the minimum atmospheric pressure at which a stable liquid phase exists. Below this, the resource sublimates directly between solid and gas (think Mars-pressure CO2 frost).\n\n\
+## See also\n\n\
+- [Resources](../resources/) — per-resource production / consumption, market prices, and Earth licensing fees.\n"
+    )
+}
+
+/// Format a kelvin temperature for the terraforming table. Shows both
+/// kelvin (rounded to the nearest whole degree, matching how the dump
+/// stores almost every value as an integer kelvin reading) and the
+/// celsius equivalent rounded to the nearest whole degree.
+///
+/// Water boils at 373 K → 100 °C (373 - 273.15 = 99.85, rounded);
+/// CO2 sublimates at 217 K → -56 °C (216.85 rounded).
+fn fmt_phase_temperature(k: f64) -> String {
+    if !k.is_finite() || k <= 0.0 {
+        return "—".to_string();
+    }
+    let c = k - 273.15;
+    let k_str = if (k - k.round()).abs() < 0.05 {
+        format!("{:.0}", k)
+    } else {
+        format!("{:.1}", k)
+    };
+    // Round celsius to the nearest whole degree for table readability —
+    // matches the way real-world phase-change tables print values.
+    let c_str = format!("{:.0}", c.round());
+    format!("{k_str} / {c_str} °C")
+}
+
+/// Compact f64 → string for the thermal-constant cells: integers print
+/// without trailing zeros, sub-integer values use up to four significant
+/// digits, and very small numbers fall back to scientific notation so
+/// optical-depth values like `1e-6` don't render as `0`.
+fn fmt_terraforming_number(v: f64) -> String {
+    if !v.is_finite() {
+        return "—".to_string();
+    }
+    if v == 0.0 {
+        return "0".to_string();
+    }
+    if v.abs() >= 1.0 && (v - v.round()).abs() < 0.05 {
+        return format!("{:.0}", v.round());
+    }
+    if v.abs() >= 1.0 {
+        return format!("{:.2}", v);
+    }
+    // Sub-1 values: stretch to 4 significant decimal places where useful,
+    // but switch to scientific notation when the magnitude is tiny.
+    if v.abs() < 0.0001 {
+        return format!("{:.1e}", v);
+    }
+    // For values like 0.0695, 0.00611, 0.002 keep 5 fractional digits then
+    // trim trailing zeros so 0.00200 → 0.002.
+    let s = format!("{:.5}", v);
+    let trimmed = s.trim_end_matches('0').trim_end_matches('.');
+    trimmed.to_string()
 }
 
 /// Truncate `s` to at most `max_chars` characters, ending at a word boundary
@@ -4114,6 +4279,7 @@ the names, descriptions, and stat tables here match exactly what you see in-game
 | [Missions](missions/) | Mission planning — Plan Mission walk-through, mission types, launch-window pointer. |\n\
 | [Contracts](contracts/) | Story and freelance contracts — the in-game Contracts tab — that drive progression. |\n\
 | [Resources](resources/) | The 20+ resource types — water, metals, fissiles, He-3, supplies, exotic alloys. |\n\
+| [Terraforming](terraforming/) | Per-resource thermal / phase constants — boiling and melting points, latent heat, heat capacity, optical depth — that drive the atmosphere sim. |\n\
 | [Corporations](corporations/) | Playable starting factions — SoleX, NASA, ESA, CNSA, Roscosmos. |\n\n\
 ## How to use this wiki\n\n\
 Every page is plain Markdown. Jekyll renders the site on GitHub Pages, with a\n\
@@ -4831,6 +4997,7 @@ mod tests {
             market_price_base: 11.5,
             show_on_ui: true,
             can_be_left_on_object: true,
+            terraformation_info: None,
         }
     }
 
@@ -5084,6 +5251,161 @@ mod tests {
         assert_eq!(
             license_cell, "—",
             "License (Earth) cell should fall back to em-dash when license_fees is empty:\n{alloy_row}"
+        );
+    }
+
+    // ---------- Terraforming page ----------
+
+    fn water_ti() -> TerraformationInfoStat {
+        // Real values from the Sirenix dump for water.
+        TerraformationInfoStat {
+            optical_depth_parameter: 0.002,
+            heat_capacity: 1860.0,
+            vaporization_latent_heat: 50000.0,
+            boiling_temperature_k: 373.0,
+            melting_temperature_k: 220.0,
+            pressure_triple_point: 0.00611,
+        }
+    }
+
+    #[test]
+    fn terraforming_page_renders_water_row_with_thermal_constants() {
+        // Water's thermal / phase constants should show up verbatim with
+        // a kelvin-and-celsius pair for the phase-change columns and a
+        // human-readable name from the locale.
+        let mut locale = resources_fixture_locale();
+        locale.resources.push(ResourceEntry {
+            id: "water".into(),
+            name: "Water".into(),
+        });
+        let mut water = make_resource_stat("water", "Normal");
+        water.terraformation_info = Some(water_ti());
+        let sirenix = Sirenix {
+            resources: vec![water],
+            ..Default::default()
+        };
+        let page = page_terraforming(&locale, &sirenix);
+        // Header is present.
+        assert!(page.starts_with("# Terraforming"), "page must start with title:\n{page}");
+        // Water row anchor + display name.
+        let water_row = page
+            .lines()
+            .find(|l| l.contains("terraforming-water"))
+            .expect("Water row present:\n");
+        assert!(water_row.contains("Water"), "row must use locale display name:\n{water_row}");
+        // Kelvin temperatures appear, with celsius pair (373 K → ~100 °C,
+        // 220 K → ~-53 °C). We assert on the kelvin substring and the °C
+        // pair so the row is unambiguously the temperature row.
+        assert!(
+            water_row.contains("373") && water_row.contains("100"),
+            "boiling K and °C must both appear (373 K / 100 °C):\n{water_row}"
+        );
+        assert!(
+            water_row.contains("220") && water_row.contains("-53"),
+            "melting K and °C must both appear (220 K / -53 °C):\n{water_row}"
+        );
+        // Latent heat, heat capacity, optical depth, triple-point pressure
+        // all surface.
+        assert!(water_row.contains("50000"), "latent heat 50000:\n{water_row}");
+        assert!(water_row.contains("1860"), "heat capacity 1860:\n{water_row}");
+        assert!(water_row.contains("0.002"), "optical depth 0.002:\n{water_row}");
+        assert!(water_row.contains("0.00611"), "triple-point pressure 0.00611:\n{water_row}");
+    }
+
+    #[test]
+    fn terraforming_page_skips_resources_without_thermal_info() {
+        // Resources whose terraformation_info is None (energy, human,
+        // supplies, …) must not show up on the page. Otherwise the page
+        // would clutter with all-1.0 placeholder rows.
+        let locale = resources_fixture_locale();
+        let sirenix = Sirenix {
+            resources: vec![
+                make_resource_stat("energy", "Energy"), // no TI
+                make_resource_stat("alloy", "Normal"),  // no TI either
+            ],
+            ..Default::default()
+        };
+        let page = page_terraforming(&locale, &sirenix);
+        assert!(
+            !page.contains("terraforming-energy"),
+            "energy row must not appear when TI is None:\n{page}"
+        );
+        assert!(
+            !page.contains("terraforming-alloy"),
+            "alloy row must not appear when TI is None:\n{page}"
+        );
+    }
+
+    #[test]
+    fn terraforming_page_orders_resources_alphabetically_by_display_name() {
+        // Two resources with TI: hydrogen and water. Hydrogen sorts before
+        // Water alphabetically, so its row should appear first on the page.
+        let mut locale = resources_fixture_locale();
+        locale.resources.push(ResourceEntry { id: "hydrogen".into(), name: "Hydrogen".into() });
+        locale.resources.push(ResourceEntry { id: "water".into(), name: "Water".into() });
+        let mut hydrogen = make_resource_stat("hydrogen", "Normal");
+        hydrogen.terraformation_info = Some(TerraformationInfoStat {
+            optical_depth_parameter: 0.0001,
+            heat_capacity: 14320.0,
+            vaporization_latent_heat: 449.0,
+            boiling_temperature_k: 20.0,
+            melting_temperature_k: 14.0,
+            pressure_triple_point: 0.0695,
+        });
+        let mut water = make_resource_stat("water", "Normal");
+        water.terraformation_info = Some(water_ti());
+        let sirenix = Sirenix {
+            // Insert water first to prove the page sorts independently of dump order.
+            resources: vec![water, hydrogen],
+            ..Default::default()
+        };
+        let page = page_terraforming(&locale, &sirenix);
+        let h_idx = page.find("terraforming-hydrogen").expect("hydrogen row");
+        let w_idx = page.find("terraforming-water").expect("water row");
+        assert!(h_idx < w_idx, "Hydrogen must sort before Water in the table");
+    }
+
+    #[test]
+    fn terraforming_page_emits_reading_the_table_section() {
+        // Player-facing column descriptions live in a "Reading the table"
+        // section below the data — same convention as page_resources.
+        let locale = resources_fixture_locale();
+        let mut water = make_resource_stat("water", "Normal");
+        water.terraformation_info = Some(water_ti());
+        let sirenix = Sirenix {
+            resources: vec![water],
+            ..Default::default()
+        };
+        let page = page_terraforming(&locale, &sirenix);
+        assert!(
+            page.contains("## Reading the table"),
+            "missing reading section:\n{page}"
+        );
+        assert!(
+            page.contains("Optical depth"),
+            "missing optical-depth explanation:\n{page}"
+        );
+        assert!(
+            page.contains("Heat capacity"),
+            "missing heat-capacity explanation:\n{page}"
+        );
+    }
+
+    #[test]
+    fn terraforming_page_cross_links_to_resources_page() {
+        // The terraforming page should point readers back to the per-resource
+        // page so they can find facilities that produce / consume each species.
+        let locale = resources_fixture_locale();
+        let mut water = make_resource_stat("water", "Normal");
+        water.terraformation_info = Some(water_ti());
+        let sirenix = Sirenix {
+            resources: vec![water],
+            ..Default::default()
+        };
+        let page = page_terraforming(&locale, &sirenix);
+        assert!(
+            page.contains("../resources/"),
+            "page must link back to the resources page:\n{page}"
         );
     }
 
@@ -7203,6 +7525,7 @@ fn main() -> Result<()> {
     write_file(&wiki_root, "facilities/README.md", &page_facilities(&locale, &sirenix))?;
     write_file(&wiki_root, "corporations/README.md", &page_corporations(&locale, &sirenix))?;
     write_file(&wiki_root, "resources/README.md", &page_resources(&locale, &sirenix))?;
+    write_file(&wiki_root, "terraforming/README.md", &page_terraforming(&locale, &sirenix))?;
     write_file(&wiki_root, "contracts/README.md", &page_contracts(&locale, &sirenix))?;
     write_file(&wiki_root, "research/README.md", &page_research(&locale, &sirenix))?;
     write_file(&wiki_root, "missions/README.md", &page_missions(&locale, &sirenix))?;

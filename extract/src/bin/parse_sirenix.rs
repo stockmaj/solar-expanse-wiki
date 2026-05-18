@@ -141,6 +141,42 @@ struct Resource {
     market_price_base: f64,
     show_on_ui: bool,
     can_be_left_on_object: bool,
+    /// Thermal / phase constants for the terraforming sim. `None` for
+    /// resources whose `terraformationInfo` is the C# all-1.0 placeholder
+    /// default (ledger resources like Energy / Human / Supplies).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    terraformation_info: Option<TerraformationInfo>,
+}
+
+/// Per-resource thermal / phase constants from
+/// `ResourceDefinition.terraformationInfo`. The values drive Solar Expanse's
+/// atmosphere and surface-temperature sim — boiling / melting points, latent
+/// heat of vaporization, heat capacity, greenhouse contribution. Units come
+/// from inspecting how the C# sim consumes them (see Assembly-CSharp
+/// `TerraformationInfoDef`):
+///
+/// * `boiling_temperature_k` / `melting_temperature_k` — kelvin (used with
+///   the gas constant R = 8.314 J/(mol·K) in the Clausius-Clapeyron formula).
+/// * `vaporization_latent_heat` — J/mol (divided by R in the same formula).
+/// * `pressure_triple_point` — atmospheres (water's 0.00611 atm = 611 Pa,
+///   CO2's 5.11 atm both match real values).
+/// * `heat_capacity` — specific heat (J/(kg·K) for steam-like resources).
+/// * `optical_depth_parameter` — dimensionless greenhouse coefficient
+///   (formerly `gasIRAbsorbtionCoefficient`).
+///
+/// The C# default initializes every field to 1.0 (`TerraformationInfoDef
+/// { resourceOpticalDepthParameter = 1.0, … }`), which is the "unset"
+/// placeholder for ledger resources like Energy / Human / Supplies that
+/// never participate in the atmosphere sim. `parse_resource` drops those
+/// rows so the terraforming page only surfaces resources with real physics.
+#[derive(Serialize, Debug, Default, PartialEq, Clone)]
+struct TerraformationInfo {
+    optical_depth_parameter: f64,
+    heat_capacity: f64,
+    vaporization_latent_heat: f64,
+    boiling_temperature_k: f64,
+    melting_temperature_k: f64,
+    pressure_triple_point: f64,
 }
 
 #[derive(Serialize, Debug, Default, PartialEq)]
@@ -819,7 +855,37 @@ fn parse_resource(v: &Value) -> Option<Resource> {
         market_price_base: lookup_f64(v, &["marketClearingPriceBase"]).unwrap_or(0.0),
         show_on_ui: lookup_bool(v, &["showOnUI"]).unwrap_or(true),
         can_be_left_on_object: lookup_bool(v, &["canBeLeftOnObject"]).unwrap_or(false),
+        terraformation_info: parse_terraformation_info(v.get("terraformationInfo")),
     })
+}
+
+/// Parse `terraformationInfo`. Returns `None` when the field is missing or
+/// carries the C# all-1.0 placeholder default (ledger resources never set
+/// real values); otherwise returns the populated struct.
+fn parse_terraformation_info(v: Option<&Value>) -> Option<TerraformationInfo> {
+    let obj = v?;
+    let ti = TerraformationInfo {
+        optical_depth_parameter: lookup_f64(obj, &["resourceOpticalDepthParameter"]).unwrap_or(0.0),
+        heat_capacity: lookup_f64(obj, &["resourceHeatCapacity"]).unwrap_or(0.0),
+        vaporization_latent_heat: lookup_f64(obj, &["vaporizationLatentHeat"]).unwrap_or(0.0),
+        boiling_temperature_k: lookup_f64(obj, &["baseTemperatureBoiling"]).unwrap_or(0.0),
+        melting_temperature_k: lookup_f64(obj, &["temperatureMelting"]).unwrap_or(0.0),
+        pressure_triple_point: lookup_f64(obj, &["pressureTriplePoint"]).unwrap_or(0.0),
+    };
+    // The C# default initializes every field to 1.0. Treat that exact
+    // signature as "unset" and drop the row. Any resource with real physics
+    // overrides at least one field to a non-1.0 value (water has 373 K
+    // boiling, hydrogen 14 K melting, etc.).
+    let is_placeholder = ti.optical_depth_parameter == 1.0
+        && ti.heat_capacity == 1.0
+        && ti.vaporization_latent_heat == 1.0
+        && ti.boiling_temperature_k == 1.0
+        && ti.melting_temperature_k == 1.0
+        && ti.pressure_triple_point == 1.0;
+    if is_placeholder {
+        return None;
+    }
+    Some(ti)
 }
 
 fn parse_contract(v: &Value) -> Option<Contract> {
@@ -2540,5 +2606,74 @@ mod tests {
             c.date_time_string_start.as_deref(),
             Some("2080-01-01 00:00:00")
         );
+    }
+
+    #[test]
+    fn parses_resource_terraformation_info_for_water() {
+        // Water's real values from the Sirenix dump. Confirms field-name
+        // mapping and that the thermal constants survive parsing.
+        let v = serde_json::json!({
+            "id": "id_resource_water",
+            "resourceType": "Normal",
+            "showOnUI": true,
+            "canBeLeftOnObject": true,
+            "marketClearingPriceBase": 0.0,
+            "terraformationInfo": {
+                "resourceOpticalDepthParameter": 0.002,
+                "resourceHeatCapacity": 1860,
+                "vaporizationLatentHeat": 50000,
+                "baseTemperatureBoiling": 373,
+                "temperatureMelting": 220,
+                "pressureTriplePoint": 0.00611
+            }
+        });
+        let r = parse_resource(&v).expect("parses");
+        let ti = r.terraformation_info.expect("terraformation info present");
+        assert_eq!(ti.optical_depth_parameter, 0.002);
+        assert_eq!(ti.heat_capacity, 1860.0);
+        assert_eq!(ti.vaporization_latent_heat, 50000.0);
+        assert_eq!(ti.boiling_temperature_k, 373.0);
+        assert_eq!(ti.melting_temperature_k, 220.0);
+        assert_eq!(ti.pressure_triple_point, 0.00611);
+    }
+
+    #[test]
+    fn parse_resource_drops_placeholder_terraformation_info() {
+        // The TerraformationInfoDef default in the C# code initializes every
+        // field to 1.0. Resources that never override it (antimatter, energy,
+        // human/colonists, supplies, …) should land with `None` so the
+        // terraforming page can skip them rather than rendering a row of 1's.
+        let v = serde_json::json!({
+            "id": "id_resource_antimatter",
+            "resourceType": "Normal",
+            "showOnUI": true,
+            "terraformationInfo": {
+                "resourceOpticalDepthParameter": 1.0,
+                "resourceHeatCapacity": 1.0,
+                "vaporizationLatentHeat": 1.0,
+                "baseTemperatureBoiling": 1.0,
+                "temperatureMelting": 1.0,
+                "pressureTriplePoint": 1.0
+            }
+        });
+        let r = parse_resource(&v).expect("parses");
+        assert!(
+            r.terraformation_info.is_none(),
+            "all-1.0 placeholder should be dropped, got {:?}",
+            r.terraformation_info
+        );
+    }
+
+    #[test]
+    fn parse_resource_handles_missing_terraformation_info() {
+        // Old / hand-rolled fixtures may omit the field entirely; the parser
+        // must not panic and must leave the field as None.
+        let v = serde_json::json!({
+            "id": "id_resource_water",
+            "resourceType": "Normal",
+            "showOnUI": true,
+        });
+        let r = parse_resource(&v).expect("parses");
+        assert!(r.terraformation_info.is_none());
     }
 }
