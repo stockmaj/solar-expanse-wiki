@@ -681,10 +681,17 @@
     return '<ul class="calc-placed">' + rows.map(function (r) {
       var pipsHtml = '';
       if (r.capsule) {
+        var totalSeats = r.capsule.capacity * r.count;
         var totalMass = r.capsule.mass * r.count;
-        pipsHtml = '<span class="calc-pip" data-tip="' +
-          escapeHtml(r.count + ' × ' + r.capsule.mass + 't = ' + totalMass + 't (modules empty)') + '">' +
-          '<span class="calc-pip-num">' + fmtAbbrev(totalMass) + 't</span>' +
+        pipsHtml =
+          '<span class="calc-pip" data-tip="' +
+            escapeHtml(r.count + ' × ' + r.capsule.capacity + ' seats = ' + totalSeats + ' onboard (fully loaded)') + '">' +
+            '<span class="calc-pip-num">' + fmtAbbrev(totalSeats) + '</span>' +
+            '<img class="calc-pip-icon" src="' + escapeHtml(iconUrl('human')) + '" alt="">' +
+          '</span>' +
+          '<span class="calc-pip" data-tip="' +
+            escapeHtml(r.count + ' × ' + r.capsule.mass + 't = ' + totalMass + 't (modules empty)') + '">' +
+            '<span class="calc-pip-num">' + fmtAbbrev(totalMass) + 't</span>' +
           '</span>';
       } else if (r.mod) {
         var modMass = r.mod.mass * r.count;
