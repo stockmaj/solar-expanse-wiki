@@ -98,7 +98,6 @@
       p: state.placed,
       c: state.checked,
       sc: state.spacecraft,
-      cap: state.shipCapacity,
       os: state.onSite,
     };
     return btoa(JSON.stringify(payload))
@@ -114,7 +113,6 @@
         placed: payload.p || {},
         checked: payload.c || {},
         spacecraft: payload.sc || null,
-        shipCapacity: payload.cap || null,
         onSite: payload.os || {},
       };
     } catch (e) { return null; }
@@ -190,17 +188,16 @@
   function loadState() {
     try {
       var raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return { placed: {}, checked: {}, spacecraft: null, shipCapacity: null, onSite: {} };
+      if (!raw) return { placed: {}, checked: {}, spacecraft: null, onSite: {} };
       var s = JSON.parse(raw);
       return {
         placed: (s && s.placed) || {},
         checked: (s && s.checked) || {},
         spacecraft: (s && s.spacecraft) || null,
-        shipCapacity: (s && s.shipCapacity) || null,
         onSite: (s && s.onSite) || {},
       };
     } catch (e) {
-      return { placed: {}, checked: {}, spacecraft: null, shipCapacity: null, onSite: {} };
+      return { placed: {}, checked: {}, spacecraft: null, onSite: {} };
     }
   }
 
@@ -332,15 +329,18 @@
     };
 
     ctx.crewById = (data.crew_transports || []).reduce(function (m, c) { m[c.id] = c; return m; }, {});
+    ctx.modById = (data.space_modules || []).reduce(function (m, x) { m[x.id] = x; return m; }, {});
 
-    // Seed the cargo-capacity input from the first non-trivial spacecraft so
-    // users see a working trip count out of the box; they can edit it freely.
-    if (!ctx.state.shipCapacity) {
+    var scById = (data.spacecraft || []).reduce(function (m, s) { m[s.id] = s; return m; }, {});
+    if (!ctx.state.spacecraft || !scById[ctx.state.spacecraft]) {
+      // Default to Stratos (100 t) — a real workhorse-tier ship most players
+      // have early on. Iris (2 t) is too small to give a useful trip count.
       var seed = (data.spacecraft || []).find(function (s) { return s.cargo_capacity >= 100; })
         || (data.spacecraft || [])[0];
-      ctx.state.shipCapacity = seed ? seed.cargo_capacity : null;
+      ctx.state.spacecraft = seed ? seed.id : null;
       saveState(ctx.state);
     }
+    ctx.scById = scById;
 
     bindReductions(root, ctx);
     bindFacilityList(root, ctx);
@@ -377,21 +377,27 @@
   }
 
   function renderSpacecraftPicker(ctx) {
-    var cap = ctx.state.shipCapacity || '';
-    return '<label>Spacecraft cargo: ' +
-      '<input type="number" min="1" id="calc-sc-cap" value="' + cap + '" placeholder="t / trip" data-tip="In-game cargo capacity (per trip). The dump-derived defaults are based on the standard hull; cargo-bay modules and Expanded Cargo Bays research can multiply this.">' +
-      ' t / trip</label>';
+    var ships = ctx.data.spacecraft || [];
+    if (!ships.length) return '';
+    return '<label>Spacecraft: ' +
+      '<select id="calc-sc-select">' +
+      ships.map(function (s) {
+        var sel = s.id === ctx.state.spacecraft ? ' selected' : '';
+        return '<option value="' + escapeHtml(s.id) + '"' + sel + '>' +
+          escapeHtml(s.name) + ' — ' + s.cargo_capacity.toLocaleString() + ' t / trip' +
+          '</option>';
+      }).join('') +
+      '</select></label>';
   }
 
   function bindSpacecraftPicker(root, ctx) {
     var el = root.querySelector('#calc-spacecraft-picker');
     if (!el) return;
     el.innerHTML = renderSpacecraftPicker(ctx);
-    var cap = el.querySelector('#calc-sc-cap');
-    if (cap) {
-      cap.addEventListener('input', function () {
-        var v = parseFloat(cap.value);
-        ctx.state.shipCapacity = (isNaN(v) || v <= 0) ? null : v;
+    var sel = el.querySelector('#calc-sc-select');
+    if (sel) {
+      sel.addEventListener('change', function () {
+        ctx.state.spacecraft = sel.value;
         saveState(ctx.state);
         rerenderTotals(root, ctx);
       });
@@ -451,6 +457,7 @@
     var placeableIds = {};
     (data.facilities || []).forEach(function (f) { placeableIds[f.id] = true; });
     (data.crew_transports || []).forEach(function (c) { placeableIds[c.id] = true; });
+    (data.space_modules || []).forEach(function (m) { placeableIds[m.id] = true; });
     Object.keys(state.placed).forEach(function (id) {
       if (!placeableIds[id]) delete state.placed[id];
     });
@@ -542,6 +549,18 @@
       byCat['Crew Transport'] = crewItems;
       catOrder.push('Crew Transport');
     }
+    // Other spacecraft modules — group by their `category` tag.
+    (ctx.data.space_modules || []).forEach(function (m) {
+      var cat = m.category || 'Module';
+      if (!byCat[cat]) {
+        byCat[cat] = [];
+        catOrder.push(cat);
+      }
+      byCat[cat].push({
+        id: m.id, name: m.name,
+        _isModule: true, _mass: m.mass, _locked: m.is_locked,
+      });
+    });
 
     var checked = Object.keys(ctx.state.checked)
       .map(function (id) { return ctx.redById[id]; })
@@ -570,6 +589,12 @@
             pipsHtml = '<span class="calc-capsule-info" data-tip="' +
               escapeHtml(f._capacity + ' seats, ' + f._mass + 't empty (' + (f._mass + f._capacity) + 't fully loaded)') + '">' +
               f._capacity + ' seats · ' + f._mass + 't' + lockTag +
+              '</span>';
+          } else if (f._isModule) {
+            var modLock = f._locked ? ' 🔒' : '';
+            pipsHtml = '<span class="calc-capsule-info" data-tip="' +
+              escapeHtml('Module mass ' + f._mass + 't (shipped pre-assembled).') + '">' +
+              f._mass + 't' + modLock +
               '</span>';
           } else {
             var reduced = applyReductions(f, checked);
@@ -618,7 +643,7 @@
   // ----- Placed list (middle pane) --------------------------------------
 
   function addFacility(root, ctx, id, delta) {
-    if (!ctx.facById[id] && !ctx.crewById[id]) return;
+    if (!ctx.facById[id] && !ctx.crewById[id] && !ctx.modById[id]) return;
     var cur = ctx.state.placed[id] || 0;
     ctx.state.placed[id] = Math.max(0, cur + delta);
     saveState(ctx.state);
@@ -627,7 +652,7 @@
   }
 
   function setFacilityCount(root, ctx, id, value) {
-    if (!ctx.facById[id] && !ctx.crewById[id]) return;
+    if (!ctx.facById[id] && !ctx.crewById[id] && !ctx.modById[id]) return;
     ctx.state.placed[id] = Math.max(0, Math.floor(value));
     saveState(ctx.state);
     rerenderPlaced(root, ctx);
@@ -643,9 +668,10 @@
       .map(function (id) {
         var fac = ctx.facById[id];
         var cap = ctx.crewById[id];
-        return { id: id, fac: fac, capsule: cap, name: (fac || cap || {}).name, count: ctx.state.placed[id] };
+        var mod = ctx.modById[id];
+        return { id: id, fac: fac, capsule: cap, mod: mod, name: (fac || cap || mod || {}).name, count: ctx.state.placed[id] };
       })
-      .filter(function (r) { return r.fac || r.capsule; })
+      .filter(function (r) { return r.fac || r.capsule || r.mod; })
       .sort(function (a, b) { return a.name.localeCompare(b.name); });
 
     var checked = Object.keys(ctx.state.checked)
@@ -659,6 +685,12 @@
         pipsHtml = '<span class="calc-pip" data-tip="' +
           escapeHtml(r.count + ' × ' + r.capsule.mass + 't = ' + totalMass + 't (modules empty)') + '">' +
           '<span class="calc-pip-num">' + fmtAbbrev(totalMass) + 't</span>' +
+          '</span>';
+      } else if (r.mod) {
+        var modMass = r.mod.mass * r.count;
+        pipsHtml = '<span class="calc-pip" data-tip="' +
+          escapeHtml(r.count + ' × ' + r.mod.mass + 't = ' + modMass + 't') + '">' +
+          '<span class="calc-pip-num">' + fmtAbbrev(modMass) + 't</span>' +
           '</span>';
       } else {
         var reduced = applyReductions(r.fac, checked);
@@ -818,8 +850,8 @@
 
   function renderTotals(ctx) {
     var allPlaced = Object.keys(ctx.state.placed).map(function (id) {
-      return { id: id, fac: ctx.facById[id], cap: ctx.crewById[id], count: ctx.state.placed[id] };
-    }).filter(function (p) { return (p.fac || p.cap) && p.count > 0; });
+      return { id: id, fac: ctx.facById[id], cap: ctx.crewById[id], mod: ctx.modById[id], count: ctx.state.placed[id] };
+    }).filter(function (p) { return (p.fac || p.cap || p.mod) && p.count > 0; });
 
     if (allPlaced.length === 0) {
       return '<p class="calc-empty"><em>Add items to see totals.</em></p>';
@@ -828,6 +860,7 @@
     var facilityPlaced = allPlaced.filter(function (p) { return p.fac; })
       .map(function (p) { return { facility: p.fac, count: p.count }; });
     var capsulePlaced = allPlaced.filter(function (p) { return p.cap; });
+    var modulePlaced = allPlaced.filter(function (p) { return p.mod; });
 
     var checked = Object.keys(ctx.state.checked)
       .map(function (id) { return ctx.redById[id]; })
@@ -849,32 +882,63 @@
       };
     });
 
-    // Capsule rows — one per placed type, assumed fully loaded (capacity
-    // humans inside each). Mass = count × (module + capacity × 1 t/human).
+    var workers = workerTotal(facilityPlaced, checked);
+    var onSiteHumans = (ctx.state.onSite && ctx.state.onSite.human) || 0;
+    var onboardCapacity = capsulePlaced.reduce(function (s, p) { return s + p.cap.capacity * p.count; }, 0);
+    // On-site humans count against humans needed, NOT against capsule seats.
+    // So total at destination = on-site + capsule-shipped, capped by demand.
+    var humansToShip = Math.max(0, workers - onSiteHumans);
+    var totalHumansShipped = Math.min(humansToShip, onboardCapacity);
+
+    // Distribute the shipped humans across placed capsule types, largest
+    // capacity first (fills bigger modules so they're not wasted on empty
+    // seats while smaller ones could've held the same headcount).
+    var remainingHumans = totalHumansShipped;
+    var capsuleAlloc = capsulePlaced.slice().sort(function (a, b) {
+      return b.cap.capacity - a.cap.capacity;
+    });
+    capsuleAlloc.forEach(function (p) {
+      var seats = p.cap.capacity * p.count;
+      p._humans = Math.min(remainingHumans, seats);
+      remainingHumans -= p._humans;
+    });
+
+    // One row per placed capsule type — actual humans carried, not capacity.
     capsulePlaced.forEach(function (p) {
-      var perLoaded = p.cap.mass + p.cap.capacity;
-      var totalMass = perLoaded * p.count;
+      var moduleT = p.cap.mass * p.count;
+      var crewT = p._humans;
+      var totalMass = moduleT + crewT;
       cargoRows.push({
         rid: 'human',
-        name: p.cap.name + ' ×' + p.count + ' (' + (p.cap.capacity * p.count) + ' humans)',
+        name: p.cap.name + ' ×' + p.count + ' (' + p._humans + ' humans)',
         needed: totalMass,
         onSite: 0,
         amount: totalMass,
         editable: false,
-        tip: p.count + ' × (' + p.cap.mass + 't module + ' + p.cap.capacity + 't crew) = ' + totalMass + 't',
+        tip: p.count + ' × ' + p.cap.mass + 't module + ' + p._humans + 't crew = ' + totalMass + 't',
       });
     });
 
-    var workers = workerTotal(facilityPlaced, checked);
-    var onSiteHumans = (ctx.state.onSite && ctx.state.onSite.human) || 0;
-    var onboardCapacity = capsulePlaced.reduce(function (s, p) { return s + p.cap.capacity * p.count; }, 0);
-    var humansToShip = Math.max(0, workers - onSiteHumans);
+    // One row per placed non-crew module — module mass × count.
+    modulePlaced.forEach(function (p) {
+      var modMass = p.mod.mass * p.count;
+      cargoRows.push({
+        name: p.mod.name + ' ×' + p.count,
+        needed: modMass,
+        onSite: 0,
+        amount: modMass,
+        editable: false,
+        tip: p.count + ' × ' + p.mod.mass + 't = ' + modMass + 't (module shipped pre-assembled)',
+      });
+    });
 
     cargoRows = cargoRows.filter(function (r) { return r.amount > 0 || r.editable; });
-    // Sort: editable resource rows by amount desc, then capsule/human rows last.
+    // Stable alphabetical sort so rows don't reshuffle when an on-site value
+    // changes — typing into an editable input shouldn't move it under the
+    // cursor.  Capsule rows still float to the bottom (non-editable).
     cargoRows.sort(function (a, b) {
       if (a.editable !== b.editable) return a.editable ? -1 : 1;
-      return b.amount - a.amount;
+      return a.name.localeCompare(b.name);
     });
 
     var grand = cargoRows.reduce(function (sum, r) { return sum + r.amount; }, 0);
@@ -883,15 +947,18 @@
     if (workers > 0) {
       var shortage = Math.max(0, humansToShip - onboardCapacity);
       // Humans gets bespoke HTML so the on-site count is an editable input.
+      // "in capsules" = humans actually being carried (not capsule capacity);
+      // on-site humans add to the headcount at destination, not to seats.
       var humansHtml = '<tr data-tip="' + escapeHtml(
         'Demand = facilities × workers_required (after crew-reduction research). ' +
-        'Onboard = Σ capsule capacity × count. On-site = humans already at the destination.'
+        'In capsules = humans actually being shipped (capped by placed capsule seats). ' +
+        'On site = humans already at the destination — counted against demand, not against seats.'
       ) + '">' +
         '<td colspan="2">' +
         '<img class="calc-total-icon" src="' + escapeHtml(iconUrl('human')) + '" alt=""> ' +
         'Humans ' + workers +
-        ' <span class="calc-trip-note">(' + onboardCapacity + ' onboard, ' +
-        '<input type="number" min="0" class="calc-onsite calc-onsite-inline" data-rid="human" value="' +
+        ' <span class="calc-trip-note">(' + totalHumansShipped + ' in capsules, ' +
+        '<input type="text" inputmode="numeric" pattern="[0-9]*" class="calc-onsite calc-onsite-inline" data-rid="human" value="' +
         (onSiteHumans || '') + '" placeholder="0"> on site)</span>' +
         '</td>' +
         '<td class="calc-num">' + (shortage > 0 ? '−' + shortage + ' short' : 'covered') + '</td>' +
@@ -916,7 +983,7 @@
         ? '<img class="calc-total-icon" src="' + escapeHtml(iconUrl(r.rid)) + '" alt=""> '
         : '';
       var onSiteCell = r.editable
-        ? '<input type="number" min="0" class="calc-onsite" data-rid="' + escapeHtml(r.rid) +
+        ? '<input type="text" inputmode="numeric" pattern="[0-9]*" class="calc-onsite" data-rid="' + escapeHtml(r.rid) +
           '" value="' + (r.onSite || '') + '" placeholder="0">'
         : '—';
       return '<tr' + tipAttr + '><td>' + iconHtml + escapeHtml(r.name) + '</td>' +
@@ -939,11 +1006,11 @@
       var totalRow = '<tr class="calc-total-row"><td colspan="2"><strong>Total tons</strong></td>' +
         '<td class="calc-num"><strong>' + grand.toLocaleString() + '</strong></td></tr>';
       var trips = '';
-      var cap = ctx.state.shipCapacity || 0;
-      if (grand > 0 && cap > 0) {
-        var n = Math.ceil(grand / cap);
-        trips = '<tr><td colspan="2">Trips ' +
-          '<span class="calc-trip-note">(' + cap + ' t / trip)</span></td>' +
+      var ship = ctx.scById && ctx.scById[ctx.state.spacecraft];
+      if (ship && grand > 0 && ship.cargo_capacity > 0) {
+        var n = Math.ceil(grand / ship.cargo_capacity);
+        trips = '<tr><td colspan="2">' + escapeHtml(ship.name) + ' trips ' +
+          '<span class="calc-trip-note">(' + ship.cargo_capacity.toLocaleString() + ' t / trip)</span></td>' +
           '<td class="calc-num">' + n.toLocaleString() + '</td></tr>';
       }
       html += '<thead><tr><th class="calc-section">Cargo (to ship)</th><th class="calc-section calc-num">On site</th><th class="calc-section calc-num">Tons</th></tr></thead>' +

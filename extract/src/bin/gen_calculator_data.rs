@@ -17,6 +17,20 @@ struct Sirenix {
     crew_transports: Vec<CrewTransportStat>,
     #[serde(default)]
     spacecraft: Vec<SpacecraftStat>,
+    #[serde(default)]
+    space_modules: Vec<SpaceModuleStat>,
+}
+
+#[derive(Deserialize, Clone)]
+struct SpaceModuleStat {
+    id: String,
+    mass: f64,
+    #[serde(default)]
+    special_ability: String,
+    #[serde(default)]
+    is_locked: bool,
+    #[serde(default)]
+    can_be_load_as_cargo: bool,
 }
 
 #[derive(Deserialize, Clone)]
@@ -103,6 +117,18 @@ struct CalculatorData {
     reductions: Vec<CalcReduction>,
     crew_transports: Vec<CalcCrewTransport>,
     spacecraft: Vec<CalcSpacecraft>,
+    space_modules: Vec<CalcSpaceModule>,
+}
+
+#[derive(Serialize, Debug, PartialEq)]
+struct CalcSpaceModule {
+    id: String,
+    name: String,
+    /// Role tag for grouping in the UI (Mining / Power / Probe / …).
+    category: String,
+    /// Dry mass in tons — what gets lifted.
+    mass: f64,
+    is_locked: bool,
 }
 
 #[derive(Serialize, Debug, PartialEq)]
@@ -354,13 +380,80 @@ fn build_calculator_data(sirenix: &Sirenix, locale: &Locale) -> CalculatorData {
             .then(a.id.cmp(&b.id))
     });
 
+    // Spacecraft modules a player ships to a colony (mining, refinery,
+    // probes, habitats, power, etc.). Cargo cost is the module's own dry
+    // mass, not its build_cost — they're built on Earth before launch.
+    // Filter: skip legacy `id_SpaceModule_*` sentinels, contract-only items,
+    // any zero-mass entry, crew transports (already captured separately),
+    // and anything not loadable as cargo.
+    let mut space_modules: Vec<CalcSpaceModule> = sirenix
+        .space_modules
+        .iter()
+        .filter(|m| {
+            m.id.starts_with("module_")
+                && m.id != "module_contractitem"
+                && m.mass > 0.0
+                && m.special_ability != "CrewTransport"
+                && m.can_be_load_as_cargo
+        })
+        .map(|m| CalcSpaceModule {
+            id: m.id.clone(),
+            name: humanize_module_id(&m.id),
+            category: module_category(&m.special_ability),
+            mass: m.mass,
+            is_locked: m.is_locked,
+        })
+        .collect();
+    space_modules.sort_by(|a, b| {
+        a.category
+            .cmp(&b.category)
+            .then(a.mass.partial_cmp(&b.mass).unwrap_or(std::cmp::Ordering::Equal))
+            .then(a.id.cmp(&b.id))
+    });
+
     CalculatorData {
         facilities,
         resources,
         reductions,
         crew_transports,
         spacecraft,
+        space_modules,
     }
+}
+
+/// Strip the `module_` prefix and title-case the rest. Specific id overrides
+/// for the modules whose default humanisation reads awkwardly.
+fn humanize_module_id(id: &str) -> String {
+    match id {
+        "module_basemining" => "Base Mining Module".into(),
+        "module_icemining" => "Ice Mining Module".into(),
+        "module_metalmining" => "Metal Mining Module".into(),
+        "module_raremining" => "Rare Metal Mining Module".into(),
+        "module_ground_probe" => "Ground Probe".into(),
+        "module_space_probe" => "Space Probe".into(),
+        "module_fuel" => "Fuel Refinery Module".into(),
+        "module_hubel_telescope" => "Hubel Telescope".into(),
+        "module_space_construction_cargo" => "Space Construction Module".into(),
+        "module_construction" => "Construction Module".into(),
+        "module_habitat" => "Habitat Module".into(),
+        "module_power" => "Power Module".into(),
+        _ => humanize_id(id.strip_prefix("module_").unwrap_or(id)),
+    }
+}
+
+/// Map the raw `specialAbilityFacilityNew` enum to a player-facing category.
+fn module_category(ability: &str) -> String {
+    match ability {
+        "Mining" => "Mining Module",
+        "Probe" => "Probe",
+        "Refiner" => "Refinery Module",
+        "ConstructionEquipment" => "Construction Module",
+        "CrewCapacity" => "Habitat Module",
+        "EnergyProduction" | "EnergyProduction, EnergyStorage" => "Power Module",
+        "InstallationModule" => "Installation Module",
+        _ => "Module",
+    }
+    .to_string()
 }
 
 /// Short display names for the three crew-transport modules. Game's raw ids
