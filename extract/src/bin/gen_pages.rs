@@ -6,6 +6,13 @@ use std::path::{Path, PathBuf};
 
 const AU_IN_KM: f64 = 149_597_870.7;
 
+/// Solar Expanse displays recurring costs (facility upkeep, launch-vehicle
+/// maintenance) as monthly figures in-game, but the underlying
+/// ScriptableObject fields are per-day rates (`maintenanceCostPerDay`).
+/// Multiply by this constant when rendering so the wiki matches what
+/// players see in the game UI.
+const DAYS_PER_MONTH: f64 = 30.0;
+
 // ---------------------------------------------------------------------------
 // TerraformationData — emitted by `parse-terraformation-config`. Mirrors the
 // structs in `parse_terraformation_config.rs`; we keep a lean Deserialize-only
@@ -2292,7 +2299,7 @@ fn page_launch_vehicles(locale: &Locale, sirenix: &Sirenix) -> String {
             fmt_build_cost(&lv.build_cost, &resource_name),
             fmt_amount(lv.build_time_days),
             fmt_abbrev(lv.launch_cost),
-            fmt_abbrev(lv.maintenance_cost_per_day),
+            fmt_abbrev(lv.maintenance_cost_per_day * DAYS_PER_MONTH),
             escape_cell(desc),
         ]
     };
@@ -2305,7 +2312,7 @@ fn page_launch_vehicles(locale: &Locale, sirenix: &Sirenix) -> String {
         "Build cost",
         "Time (d)",
         "Launch",
-        "Maint",
+        "Maint ($/mo)",
         "Description",
     ];
     let tooltips = [
@@ -2317,7 +2324,7 @@ fn page_launch_vehicles(locale: &Locale, sirenix: &Sirenix) -> String {
         Some("Resources required to construct"),
         Some("Build time in days"),
         Some("Cash fee paid on every launch"),
-        Some("Daily maintenance cost while idle on the pad"),
+        Some("Monthly maintenance cost ($/30-day month) — the dump stores a per-day rate; we multiply by 30 to match the figure the game's UI shows."),
         None,
     ];
 
@@ -2395,7 +2402,7 @@ fn page_launch_vehicles(locale: &Locale, sirenix: &Sirenix) -> String {
             "—".to_string()
         };
         let maint = if f.maintenance_per_day > 0.0 {
-            fmt_abbrev(f.maintenance_per_day)
+            fmt_abbrev(f.maintenance_per_day * DAYS_PER_MONTH)
         } else {
             "—".to_string()
         };
@@ -2429,7 +2436,7 @@ fn page_launch_vehicles(locale: &Locale, sirenix: &Sirenix) -> String {
         "Time",
         "Workers",
         "Energy",
-        "Maint",
+        "Maint ($/mo)",
         "Launch bonus",
         "Prereq",
         "Description",
@@ -2440,7 +2447,7 @@ fn page_launch_vehicles(locale: &Locale, sirenix: &Sirenix) -> String {
         Some("Build time in days"),
         Some("On-site population required for full output"),
         Some("Energy consumed per day"),
-        Some("Daily maintenance cost"),
+        Some("Monthly maintenance cost ($/30-day month) — the dump stores a per-day rate; we multiply by 30 to match the in-game UI."),
         Some("Discount or capacity gain applied to launches that originate here"),
         Some("Research that unlocks this facility"),
         None,
@@ -2467,7 +2474,7 @@ Three propulsion families are unlocked across the tech tree:\n\n\
 - **Reusable** — *Yes* means the vehicle survives reentry and can fly again; *No* means each launch consumes the vehicle.\n\
 - **Crew Rated** — whether the vehicle can carry humans, not just cargo.\n\
 - **Max G** is the surface-gravity envelope the rocket can launch from. `Any` means no restriction; `≤ 1.8 G` means the rocket only ignites on bodies with surface gravity at or below 1.8 g (Earth ≈ 1 G, Mars ≈ 0.38 G, Luna ≈ 0.16 G, Jupiter ≈ 2.5 G). Only the Al-Ice rockets carry a gate in the shipped data — everything else launches from anywhere.\n\
-- **Launch cost** is the cash fee paid every launch; **Maintenance** is the daily upkeep cost while idle on the pad.\n\n\
+- **Launch cost** is the cash fee paid every launch; **Maint ($/mo)** is the monthly upkeep cost while idle on the pad (the dump stores it as a per-day rate; we multiply by 30 to match what the game UI shows).\n\n\
 ## Alternative launch methods\n\n\
 The game also models several non-rocket launch systems unlocked through\n\
 research and built as facilities at the launch site. Each row links to the\n\
@@ -5040,7 +5047,7 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
             "—".to_string()
         };
         let maint = if f.maintenance_per_day > 0.0 {
-            fmt_abbrev(f.maintenance_per_day)
+            fmt_abbrev(f.maintenance_per_day * DAYS_PER_MONTH)
         } else {
             "—".to_string()
         };
@@ -5084,7 +5091,7 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
         "Role",
         "Workers",
         "Energy",
-        "Maint",
+        "Maint ($/mo)",
         "Launch bonus",
         "Terraforming",
         "Habitat req.",
@@ -5109,7 +5116,7 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
         Some("Primary on-site role and its magnitude (crew capacity, research rate, mining rate, etc.)"),
         Some("On-site population required for full output"),
         Some("Energy consumed per day"),
-        Some("Daily maintenance cost"),
+        Some("Monthly maintenance cost ($/30-day month) — the dump stores a per-day rate; we multiply by 30 to match the in-game UI."),
         Some("Bonus granted to launches that originate here"),
         Some("Per-day deltas applied to the planet's habitability parameters"),
         Some("Habitability constraints — pressure/temperature/etc. ranges this facility requires on the body it's built on."),
@@ -5176,7 +5183,7 @@ Facilities are split into two families:\n\n\
 - **Role** combines the facility's primary on-site role with its magnitude — *Crew 100* for a habitat, *Lab 1* for a research lab, *Mining 10* for a heavy mine, *Mirror/Shade −0.006* for a sunshade's albedo delta, etc. Facilities with no specific role show `—`.\n\
 - **Workers** is the on-site population the facility needs to operate at full output. Most facilities throttle when understaffed.\n\
 - **Energy/day** is the running energy demand. Power facilities show this as `—`; everything else is a consumer.\n\
-- **Maintenance** is the per-day cash upkeep while the facility is active.\n\
+- **Maint ($/mo)** is the monthly cash upkeep while the facility is active — the dump stores a per-day rate; we multiply by 30 to match the in-game UI.\n\
 - **Launch bonus** appears only for launch facilities — it describes the discount or capacity gain applied to launches that originate from this facility.\n\
 - **Terraforming** lists the per-day deltas the facility applies to a body's habitability parameters (temperature, atmosphere, gravity, radiation, magnetic field). Empty for everything except a handful of dedicated terraforming structures.\n\
 - **Habitat req.** is a hard prerequisite on the body itself — \"Vacuum only\" for mass drivers, \"Atmosphere required\" for magnetic launch rails, gravity/radiation/pressure envelopes for habitats, etc. The game blocks construction if the body's reading is outside the listed range. `—` means the facility has no body-side requirement.\n\
@@ -9589,6 +9596,58 @@ mod tests {
             habitability_scales: BTreeMap::new(),
             cargo: vec![],
         }
+    }
+
+    #[test]
+    fn launch_vehicles_page_renders_maintenance_as_monthly_dollars() {
+        // The dump stores `maintenanceCostPerDay` (e.g. Sparrow=10, Falcon=20),
+        // but the in-game UI displays a monthly figure ($300 / $600). The
+        // rest of the game's UI shows monthly, so the wiki should match —
+        // multiply the per-day value by 30 at display time and label the
+        // column accordingly.
+        let mut locale = max_g_fixture_locale();
+        locale.launch_vehicles.push(NameDesc {
+            id: "id_Rocket_RocketType3".into(),
+            name: "Falcon".into(),
+            description: String::new(),
+        });
+        let mut sparrow = launch_vehicle_stat("id_Rocket_RocketType1");
+        sparrow.maintenance_cost_per_day = 10.0;
+        let mut falcon = launch_vehicle_stat("id_Rocket_RocketType3");
+        falcon.maintenance_cost_per_day = 20.0;
+        let sirenix = Sirenix {
+            launch_vehicles: vec![sparrow, falcon],
+            ..Default::default()
+        };
+        let page = page_launch_vehicles(&locale, &sirenix);
+        // Header should advertise the monthly unit.
+        assert!(
+            page.contains("Maint ($/mo)"),
+            "Maintenance column should be labelled monthly:\n{page}"
+        );
+        // Tooltip should call out the monthly convention to defuse
+        // confusion ("but the dump field is per-day!").
+        assert!(
+            page.contains("Monthly maintenance cost"),
+            "Maintenance tooltip should describe the value as monthly:\n{page}"
+        );
+        // Row values should be daily × 30.
+        let sparrow_row = page
+            .lines()
+            .find(|l| l.contains("Sparrow"))
+            .expect("Sparrow row present");
+        assert!(
+            sparrow_row.contains("| 300 |"),
+            "Sparrow (daily=10) should render monthly=300:\n{sparrow_row}"
+        );
+        let falcon_row = page
+            .lines()
+            .find(|l| l.contains("Falcon"))
+            .expect("Falcon row present");
+        assert!(
+            falcon_row.contains("| 600 |"),
+            "Falcon (daily=20) should render monthly=600:\n{falcon_row}"
+        );
     }
 
     #[test]

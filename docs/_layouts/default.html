@@ -197,6 +197,15 @@
         Unofficial fan wiki — <em>Solar Expanse</em> © SpaceOps.
         Built from the game's own data files; pipeline in
         <a href="https://github.com/{{ site.github.repository_nwo | default: 'stockmaj/solar-expanse-wiki' }}">stockmaj/solar-expanse-wiki</a>.
+        {%- comment -%}
+        Page-history link points at the markdown/HTML source on GitHub.
+        page.path is the source-relative path (e.g. `spacecraft/README.md`);
+        the Pages source is the `docs/` folder, so we prepend `docs/` to
+        reach the repo-rooted path the GitHub commits view expects.
+        {%- endcomment -%}
+        {% if page.path %}
+        · <a href="https://github.com/{{ site.github.repository_nwo | default: 'stockmaj/solar-expanse-wiki' }}/commits/main/docs/{{ page.path }}">Page history</a>
+        {% endif %}
         {% if site.data.wiki %}
         <br>Data from <em>Solar Expanse</em> v{{ site.data.wiki.game_version }} (generated {{ site.data.wiki.generated_at }}).
         {% endif %}
