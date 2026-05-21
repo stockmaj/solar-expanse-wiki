@@ -127,7 +127,11 @@ run_pipeline() {
         "$CACHE/terraformation.json"
 
     log "extract-icons"
-    "$bindir/extract-icons" "$CACHE/project/ExportedProject" "$WIKI_ROOT/docs/images/resources"
+    # extract-icons writes one subdir per category (resources/, research/,
+    # planet-types/) under the given root, so the root is `docs/images` —
+    # not `docs/images/resources`, which would produce a doubled
+    # `images/resources/resources/` path.
+    "$bindir/extract-icons" "$CACHE/project/ExportedProject" "$WIKI_ROOT/docs/images"
 
     local proj_settings="$CACHE/project/ExportedProject/ProjectSettings/ProjectSettings.asset"
     local game_version="unknown"
