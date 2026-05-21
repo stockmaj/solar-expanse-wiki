@@ -644,6 +644,10 @@ struct SpacecraftStat {
     build_cost: Vec<ResourceCost>,
     build_time_days: f64,
     launch_cost: f64,
+    /// `hull.lifeSupportMaxBase` from the dump — non-zero means the craft
+    /// can sustain a crew (rendered as "Life support: Yes").
+    #[serde(default)]
+    life_support_max: f64,
 }
 
 #[derive(Deserialize, Clone)]
@@ -1689,6 +1693,7 @@ lift them to space.\n\n",
                 "Fuel (t)",
                 "Thrust",
                 "Exhaust V",
+                "Life support",
                 "Reusable",
                 "Built at",
                 "Requires LV",
@@ -1703,6 +1708,7 @@ lift them to space.\n\n",
                 Some("Fuel capacity in tonnes"),
                 Some("Default engine thrust"),
                 Some("Effective exhaust velocity — chemical ~3-5 km/s, nuclear ~8-15, fusion 20+"),
+                Some("Whether the hull has life support — `hull.lifeSupportMaxBase > 0` in the dump. Yes means the craft can transport humans on long missions; No means uncrewed or short-haul only."),
                 Some("Survives the trip and can fly again (Yes / Partial / No)"),
                 Some("Where the spacecraft is assembled — Orbit means built in an orbital shipyard; Surface means built on a planet"),
                 Some("When the craft needs a launch vehicle to leave a planet/moon surface. Earth always requires an LV; on lower-gravity bodies many craft can self-launch."),
@@ -1821,6 +1827,7 @@ lift them to space.\n\n",
             fmt_amount(s.fuel_capacity),
             thrust,
             exhaust,
+            if s.life_support_max > 0.0 { "Yes".into() } else { "No".into() },
             fmt_reusability(s.reusability).into(),
             built_at,
             launch_vehicle_cell,
@@ -6848,6 +6855,7 @@ mod tests {
             build_cost: vec![],
             build_time_days: 30.0,
             launch_cost: 1000.0,
+            life_support_max: 0.0,
         }
     }
 
@@ -7781,6 +7789,51 @@ mod tests {
         assert!(
             row.contains("../research/#research-research-sc-iris"),
             "Iris row should link to its research-unlock anchor:\n{row}"
+        );
+    }
+
+    #[test]
+    fn spacecraft_page_has_life_support_column_with_yes_no_per_row() {
+        // Players need to see at-a-glance which craft can transport humans
+        // — surfaced from `SpacecraftType.hull.lifeSupportMaxBase`. A row
+        // with capacity > 0 reads "Yes"; otherwise "No".
+        let mut locale = nav_fixture_locale();
+        locale.spacecraft.push(NameDesc {
+            id: "spacecraft_chem_large".into(),
+            name: "Stratos".into(),
+            description: "Large chemical craft.".into(),
+        });
+        let mut crewed = make_sc_stat("spacecraft_chem_large", false);
+        crewed.life_support_max = 180.0;
+        let uncrewed = make_sc_stat("spacecraft_chem_small", false);
+        assert_eq!(
+            uncrewed.life_support_max, 0.0,
+            "default sc stat should have no life support so the No branch is exercised"
+        );
+        let sirenix = Sirenix {
+            spacecraft: vec![crewed, uncrewed],
+            ..Default::default()
+        };
+        let page = page_spacecraft(&locale, &sirenix);
+        assert!(
+            page.contains("Life support"),
+            "spacecraft page missing 'Life support' column header:\n{page}"
+        );
+        let crewed_row = page
+            .lines()
+            .find(|l| l.contains("Stratos"))
+            .expect("Stratos row present");
+        assert!(
+            crewed_row.contains("| Yes |"),
+            "Stratos row should mark life support Yes:\n{crewed_row}"
+        );
+        let uncrewed_row = page
+            .lines()
+            .find(|l| l.contains("Iris"))
+            .expect("Iris row present");
+        assert!(
+            uncrewed_row.contains("| No |"),
+            "Iris row should mark life support No:\n{uncrewed_row}"
         );
     }
 

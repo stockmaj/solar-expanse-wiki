@@ -25,6 +25,11 @@ struct Spacecraft {
     build_cost: Vec<ResourceCost>,
     build_time_days: f64,
     launch_cost: f64,
+    /// Hull's life-support capacity (`hull.lifeSupportMaxBase`). Non-zero
+    /// means the spacecraft can sustain a crew on long missions — players
+    /// read this as "can transport humans". Zero on freighters, sails,
+    /// payload containers, and small uncrewed craft.
+    life_support_max: f64,
 }
 
 #[derive(Serialize, Debug, Default, PartialEq)]
@@ -883,6 +888,7 @@ fn parse_spacecraft(v: &Value) -> Option<Spacecraft> {
         build_cost,
         build_time_days: f(&["timeToBuildInDays"]),
         launch_cost: f(&["costLaunch"]),
+        life_support_max: lookup_f64(v, &["hull", "lifeSupportMaxBase"]).unwrap_or(0.0),
     })
 }
 
@@ -3098,6 +3104,32 @@ mod tests {
         let sc = parse_spacecraft(&v).expect("should parse");
         assert_eq!(sc.cargo_capacity, 300.0,
             "Hermes-style: hull.cargoCapacityBase (300) is the real value, not top-level cargoCapacity (80)");
+    }
+
+    #[test]
+    fn surfaces_hull_life_support_capacity() {
+        // Crewed hulls carry `hull.lifeSupportMaxBase` > 0 (Stratos 180,
+        // Hermes 5110, nuclear class 4380, InterstellarShip 219000); the
+        // spacecraft page renders Yes/No from this value, so parser must
+        // pass it through.
+        let crewed = serde_json::json!({
+            "id": "spacecraft_chem_large",
+            "engineType": "chemical",
+            "hull": { "lifeSupportMaxBase": 180 }
+        });
+        let sc = parse_spacecraft(&crewed).expect("should parse");
+        assert_eq!(sc.life_support_max, 180.0);
+
+        // Hulls without life support (cargo freighters, sails) read as 0,
+        // not None — keep the field non-optional so the renderer's
+        // `> 0` test doesn't need an extra unwrap.
+        let dry = serde_json::json!({
+            "id": "spacecraft_sail_small",
+            "engineType": "sail",
+            "hull": { }
+        });
+        let sc = parse_spacecraft(&dry).expect("should parse");
+        assert_eq!(sc.life_support_max, 0.0);
     }
 
     #[test]
