@@ -78,10 +78,28 @@ pub struct ParameterData {
     pub label_thresholds: Vec<LabelThreshold>,
 }
 
+/// One entry from the `resultCommentTranslationId[]` array under
+/// `habitability:`. The game's Object Info window labels each body by the
+/// first entry whose `min_result` ≤ the body's overall habitability score —
+/// i.e. these are score-floor thresholds, listed in descending order of
+/// floor.  The shipped asset carries four entries (90 / 50 / 0 / -100000),
+/// which the renderer reads back as the Excellent / Good / Marginal /
+/// Hostile buckets.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct ResultCommentThreshold {
+    pub min_result: f64,
+    pub translation_id: String,
+}
+
 #[derive(Serialize)]
 pub struct TerraformationData {
     pub source: String,
     pub parameters: std::collections::BTreeMap<String, ParameterData>,
+    /// Habitability-% bucket thresholds — preserved in source/descending
+    /// order. Empty when the asset doesn't carry the block (defensive — the
+    /// shipped file always has it).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub result_comment_thresholds: Vec<ResultCommentThreshold>,
 }
 
 // ---------------------------------------------------------------------------
@@ -423,6 +441,81 @@ const PARAMETER_KEYS: &[(&str, &str, &str)] = &[
     ("composition", "composition", "O₂ fraction"),
     ("water", "water", "ocean fraction"),
 ];
+
+/// Pull the `resultCommentTranslationId[]` list out of the habitability
+/// block. Entries are returned in source order (descending by `min_result`
+/// in the shipped asset). Returns an empty vec when the block is missing.
+pub fn parse_result_comment_thresholds(yaml: &str) -> Vec<ResultCommentThreshold> {
+    let lines: Vec<&str> = yaml.lines().collect();
+    // Locate the list header.  In the shipped file `habitability:` lives at
+    // depth 1 and `resultCommentTranslationId:` at depth 2 — the list
+    // items themselves are at the same indent as their parent key in Unity
+    // YAML (i.e. each `- translationId: …` line is at depth 2 too).
+    let header_idx = match lines
+        .iter()
+        .position(|l| l.trim_start().trim_end() == "resultCommentTranslationId:")
+    {
+        Some(idx) => idx,
+        None => return Vec::new(),
+    };
+    let header_indent = indent_of(lines[header_idx]);
+    let mut out: Vec<ResultCommentThreshold> = Vec::new();
+    let mut cur_id: Option<String> = None;
+    let mut cur_min: Option<f64> = None;
+    for line in lines.iter().skip(header_idx + 1) {
+        let cleaned = clean_line(line);
+        if cleaned.trim().is_empty() {
+            continue;
+        }
+        let depth = indent_of(line);
+        let trimmed = cleaned.trim_start();
+        if depth < header_indent {
+            break;
+        }
+        if depth == header_indent {
+            if trimmed.starts_with("- ") {
+                // Flush previous entry, start a new one.
+                if let (Some(t), Some(m)) = (cur_id.take(), cur_min.take()) {
+                    out.push(ResultCommentThreshold {
+                        translation_id: t,
+                        min_result: m,
+                    });
+                }
+                // The `- ` line carries the first field inline, e.g.
+                //   `- translationId: Tooltip.…ResultComment0`
+                let after_dash = trimmed.trim_start_matches('-').trim_start();
+                if let Some(colon) = after_dash.find(':') {
+                    let key = &after_dash[..colon];
+                    let value = after_dash[colon + 1..].trim();
+                    match key {
+                        "translationId" => cur_id = Some(value.to_string()),
+                        "minResult" => cur_min = value.parse().ok(),
+                        _ => {}
+                    }
+                }
+                continue;
+            } else {
+                // Sibling key at header indent — list ended.
+                break;
+            }
+        }
+        // depth > header_indent: sub-field of the current list item.
+        if let Some((key, value)) = split_kv(cleaned) {
+            match key {
+                "translationId" => cur_id = Some(value.to_string()),
+                "minResult" => cur_min = value.parse().ok(),
+                _ => {}
+            }
+        }
+    }
+    if let (Some(t), Some(m)) = (cur_id, cur_min) {
+        out.push(ResultCommentThreshold {
+            translation_id: t,
+            min_result: m,
+        });
+    }
+    out
+}
 
 /// Parse the whole `TerraformationConfig.asset` and pull every parameter's
 /// curve/gradient pair out.
@@ -934,6 +1027,54 @@ MonoBehaviour:
         let has_peak = edges.iter().any(|e| (e - 13.0).abs() < 1.0);
         assert!(has_peak, "peak at 13°C should be a bucket edge: {:?}", edges);
     }
+
+    // ---- result-comment thresholds ----------------------------------------
+
+    /// The habitability block ships a `resultCommentTranslationId:` list that
+    /// maps a score floor (`minResult`) to a translation id surfaced by the
+    /// in-game Object Info tooltip ("A perfect place for life.", "Our crews
+    /// can live here…", etc.). The parser must walk the list in source order
+    /// — the renderer relies on that ordering to label the Habitability %
+    /// buckets on the terraforming page.
+    #[test]
+    fn parses_result_comment_thresholds_from_real_yaml() {
+        // Subset of `TerraformationConfig.asset` containing only the
+        // resultCommentTranslationId block — same shape as the shipped file
+        // (real `minResult` values: 90, 50, 0, -100000).
+        let yaml = r#"%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_Name: TerraformationConfig
+  habitability:
+    resultCommentTranslationId:
+    - translationId: Tooltip.UIBasicInfoHabitabilityParameters.ResultComment0
+      minResult: 90
+    - translationId: Tooltip.UIBasicInfoHabitabilityParameters.ResultComment1
+      minResult: 50
+    - translationId: Tooltip.UIBasicInfoHabitabilityParameters.ResultComment2
+      minResult: 0
+    - translationId: Tooltip.UIBasicInfoHabitabilityParameters.ResultComment3
+      minResult: -100000
+"#;
+        let thresholds = parse_result_comment_thresholds(yaml);
+        assert_eq!(
+            thresholds.len(),
+            4,
+            "should parse all 4 result-comment entries: {:?}",
+            thresholds
+        );
+        // Walk-order preserves the YAML order; the renderer prints
+        // descending-score rows which is the same as source order here.
+        assert_eq!(thresholds[0].min_result, 90.0);
+        assert_eq!(
+            thresholds[0].translation_id,
+            "Tooltip.UIBasicInfoHabitabilityParameters.ResultComment0"
+        );
+        assert_eq!(thresholds[1].min_result, 50.0);
+        assert_eq!(thresholds[2].min_result, 0.0);
+        assert_eq!(thresholds[3].min_result, -100000.0);
+    }
 }
 
 fn main() -> Result<()> {
@@ -949,9 +1090,11 @@ fn main() -> Result<()> {
     let yaml = fs::read_to_string(&input)
         .with_context(|| format!("reading {}", input.display()))?;
     let parameters = parse_config(&yaml);
+    let result_comment_thresholds = parse_result_comment_thresholds(&yaml);
     let data = TerraformationData {
         source: input.display().to_string(),
         parameters,
+        result_comment_thresholds,
     };
 
     serde_json::to_writer_pretty(fs::File::create(&output)?, &data)?;

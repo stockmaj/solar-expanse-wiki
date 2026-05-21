@@ -536,6 +536,13 @@ struct SpaceModule {
     /// `spaceModuleType` enum: Engine / PowerSupply / Utility / None.
     /// Drives section grouping on the wiki page.
     space_module_type: String,
+    /// Resources this module can mine — drawn from `resourcesToMine[]`.
+    /// Stored in the normalized form (no `id_resource_` prefix, lowercased)
+    /// so the renderer can resolve them via the resources locale and the
+    /// icon set under `/docs/images/resources/`. Empty for non-mining
+    /// modules.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    resources_to_mine: Vec<String>,
 }
 
 /// Per-celestial-body mining license fees, in dollars per tonne extracted.
@@ -1603,6 +1610,20 @@ fn parse_space_module(v: &Value) -> Option<SpaceModule> {
         lookup_bool(v, &["buildOnOrbitSpaceModuleAllow"]).unwrap_or(false);
     let build_time_days = lookup_f64(v, &["timeToBuildInDays"]).unwrap_or(0.0);
     let build_cost = parse_build_cost(v.pointer("/price/listResources"));
+    // `resourcesToMine[]` mirrors the facility parser's reading (above) —
+    // simple list of `{name: "id_resource_xxx"}` entries that we normalize
+    // and keep in source order so the renderer can list Water/Carbon/Metal/
+    // Rare Metal in the same sequence the game uses.
+    let resources_to_mine: Vec<String> = v
+        .get("resourcesToMine")
+        .and_then(|x| x.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|e| e.get("name").and_then(|x| x.as_str()))
+                .map(normalize_resource_id)
+                .collect()
+        })
+        .unwrap_or_default();
 
     Some(SpaceModule {
         id,
@@ -1615,6 +1636,7 @@ fn parse_space_module(v: &Value) -> Option<SpaceModule> {
         can_be_load_as_cargo,
         build_on_orbit_allowed,
         space_module_type,
+        resources_to_mine,
     })
 }
 
@@ -2862,6 +2884,12 @@ mod tests {
             "canBeLoadAsCargo": true,
             "buildOnOrbitSpaceModuleAllow": true,
             "timeToBuildInDays": 30,
+            "resourcesToMine": [
+                { "$ref": true, "type": "ResourceDefinition", "name": "id_resource_water" },
+                { "$ref": true, "type": "ResourceDefinition", "name": "id_resource_volatile" },
+                { "$ref": true, "type": "ResourceDefinition", "name": "id_resource_metal" },
+                { "$ref": true, "type": "ResourceDefinition", "name": "id_resource_raremetal" }
+            ],
             "price": {
                 "listResources": [
                     { "resourceDefinitionIDSave": { "id": "id_resource_steel" }, "price": 75 },
@@ -2871,6 +2899,14 @@ mod tests {
             }
         });
         let m = parse_space_module(&v).expect("module_basemining should parse");
+        // Mining modules surface their `resourcesToMine[]` list so the wiki
+        // can render a "Mines" column. Resource ids are normalized (the
+        // `id_resource_` prefix is stripped) to match the resources page.
+        assert_eq!(
+            m.resources_to_mine,
+            vec!["water", "volatile", "metal", "raremetal"],
+            "resourcesToMine should be normalized + preserved in dump order"
+        );
         assert_eq!(m.id, "module_basemining");
         assert_eq!(m.mass, 15.0);
         assert_eq!(m.space_module_type, "Engine");
@@ -2942,6 +2978,26 @@ mod tests {
         });
         assert!(parse_space_module(&v).is_none(),
             "build_* ids belong to the facility parser, not the space-module parser");
+    }
+
+    /// Placeholder modules in the `id_SpaceModule_*` namespace
+    /// (`EngineType1`, `CargoType1`, `ControlCenterType1`, `Empty`, …) carry
+    /// `specialAbilityFacilityNew == "None"`. The parser keeps the row but
+    /// collapses the ability to an empty string so the page-renderer can
+    /// distinguish "ability=None" (drop) from a real ability.
+    #[test]
+    fn collapses_none_ability_to_empty_string() {
+        let v = serde_json::json!({
+            "id": "id_SpaceModule_EngineType1",
+            "spaceModuleType": "Engine",
+            "specialAbilityFacilityNew": "None"
+        });
+        let m = parse_space_module(&v).expect("None-ability module still parses");
+        assert!(
+            m.special_ability.is_empty(),
+            "specialAbilityFacilityNew=None should collapse to empty (got {:?})",
+            m.special_ability
+        );
     }
 
     /// `module_ThermoelectricTest` is a leftover dev fixture flagged in its

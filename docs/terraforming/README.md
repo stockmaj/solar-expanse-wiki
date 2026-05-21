@@ -30,6 +30,17 @@ per-resource thermal properties. Use these tables to understand:
 | <a id="terraforming-silicon"></a><img src="../images/resources/silicon.png" width="16" alt="Silicon"/>&nbsp;**[Silicon](../resources/#resource-silicon)** | 1687 / 1414 °C | 3538 / 3265 °C | 359000 | 705 | 1 | 1.0e-5 |
 | <a id="terraforming-water"></a><img src="../images/resources/water.png" width="16" alt="Water"/>&nbsp;**[Water](../resources/#resource-water)** | 220 / -53 °C | 373 / 100 °C | 50000 | 1860 | 0.002 | 0.00611 |
 
+## Habitability summary
+
+The four labels the in-game Object Info window shows once per body — players read these as the at-a-glance verdict on whether a body is liveable. The percentages come from the `resultCommentTranslationId[]` block of `TerraformationConfig.asset` (a body's overall Habitability % falls into the first bucket whose floor it meets).
+
+| Habitability | Crew status | Habitability % |
+| --- | --- | --- |
+| Excellent | A perfect place for life. | ≥ 90% |
+| Good | Our crews can live here with minor issues. | ≥ 50% |
+| Marginal | Our crews will struggle to survive here. | ≥ 0% |
+| Hostile | Our crews cannot land here — the object is too hostile. | < 0% |
+
 ## Habitability bucket ranges
 
 The in-game Object Info window grades each body on four habitability axes (Temperature, Atmosphere, Gravitation, Radiation/Magnetic field) using a six-step label scale. The tables below show the numeric `(low, high)` input range that produces each bucket — derived from the `AnimationCurve` and `Gradient` pairs inside `TerraformationConfig.asset`. The **Score** column shows the curve's habitability score at the bucket midpoint, where 100 is "perfect" and negative scores are hostile.
