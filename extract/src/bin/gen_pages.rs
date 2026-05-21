@@ -41,11 +41,29 @@ struct TerraParameter {
     label_thresholds: Vec<TerraLabelThreshold>,
 }
 
+/// Mirror of `parse_terraformation_config::ResultCommentThreshold`.
+/// One score-floor / tooltip-id pair for the Habitability % bucket table
+/// on the terraforming page. Source list is descending by `min_result`
+/// (90, 50, 0, -100000 in the shipped asset) which the renderer reads as
+/// Excellent / Good / Marginal / Hostile.
+#[derive(Deserialize, Clone, Default, Debug)]
+struct TerraResultCommentThreshold {
+    #[serde(default)]
+    min_result: f64,
+    #[serde(default)]
+    translation_id: String,
+}
+
 #[derive(Deserialize, Default, Debug)]
 struct TerraformationData {
     /// Keyed by parameter name (temperature, pressure, gravity, …).
     #[serde(default)]
     parameters: BTreeMap<String, TerraParameter>,
+    /// Habitability-% bucket thresholds — preserved in source/descending
+    /// order so the Excellent → Hostile row sequence on the wiki matches
+    /// the in-game tooltip ladder.
+    #[serde(default)]
+    result_comment_thresholds: Vec<TerraResultCommentThreshold>,
 }
 
 #[derive(Deserialize)]
@@ -505,7 +523,9 @@ struct SpaceComponentStat {
 
 /// Mirror of `parse_sirenix::SpaceModule`. Drives the `/space-modules/`
 /// page that lists spacecraft payload modules — mining rigs, refiners,
-/// probes, telescopes, habitats, etc. — grouped by `space_module_type`.
+/// probes, telescopes, habitats, etc. The page groups by the gameplay
+/// role (`specialAbilityFacilityNew`), NOT by `space_module_type` (which
+/// is just the orbital slot the module occupies on a ship).
 #[derive(Deserialize, Clone, Default)]
 struct SpaceModuleStat {
     id: String,
@@ -526,8 +546,13 @@ struct SpaceModuleStat {
     #[allow(dead_code)]
     #[serde(default)]
     build_on_orbit_allowed: bool,
+    #[allow(dead_code)]
     #[serde(default)]
     space_module_type: String,
+    /// Resource ids (normalized, no `id_resource_` prefix) this module can
+    /// mine. Only populated for Mining-ability modules; empty otherwise.
+    #[serde(default)]
+    resources_to_mine: Vec<String>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -1831,31 +1856,55 @@ lift them to space.\n\n",
     out
 }
 
-/// Group a SpaceModule into a render-time category. `spaceModuleType`
-/// (Engine / PowerSupply / Utility / None) is the primary grouping
-/// (controls which orbital slot the module occupies on a ship), with a
-/// `CrewTransport` override so the three crew-compartment modules — which
-/// share `PowerSupply` as their slot — get their own player-recognizable
-/// section instead of being mixed in with mining/power equipment.
+/// Group a SpaceModule into a render-time category based on
+/// `specialAbilityFacilityNew` — the gameplay role players actually
+/// recognize ("Mining", "Refining", "Probe", …). The `spaceModuleType`
+/// enum (Engine / PowerSupply / Utility) describes the orbital slot the
+/// module occupies on the ship and is NOT a player-facing category.
+///
+/// Compound abilities like `"EnergyProduction, EnergyStorage"`
+/// (module_power) bucket by the first token — which puts energy-storage-
+/// bonus modules under Power Generation alongside the rest of the power
+/// equipment.
+///
+/// Modules with empty `special_ability` (the parser's collapse for the
+/// asset's `"None"` sentinel) return the empty string — they're filtered
+/// out by the caller before reaching grouping.
 fn space_module_section(m: &SpaceModuleStat) -> &'static str {
-    if m.special_ability == "CrewTransport" {
-        return "Crew";
-    }
-    match m.space_module_type.as_str() {
-        "Engine" => "Engine",
-        "PowerSupply" => "Power Supply",
-        "Utility" => "Utility",
-        _ => "Other",
+    let primary = m
+        .special_ability
+        .split(',')
+        .next()
+        .map(|s| s.trim())
+        .unwrap_or("");
+    match primary {
+        "Mining" => "Mining",
+        "Refiner" => "Refining",
+        "Probe" => "Probes",
+        "CrewTransport" => "Crew Transport",
+        "CrewCapacity" => "Crew Capacity",
+        "EnergyProduction" | "EnergyStorage" => "Power Generation",
+        "ConstructionEquipment" => "Construction",
+        "InstallationModule" => "Installation",
+        "ConstructShip" => "Ship Construction",
+        _ => "",
     }
 }
 
 fn space_module_section_order(label: &str) -> u8 {
+    // Player-facing order: extraction → processing → exploration → crew →
+    // power → on-site building → orbital construction.
     match label {
-        "Engine" => 0,
-        "Power Supply" => 1,
-        "Utility" => 2,
-        "Crew" => 3,
-        _ => 4,
+        "Mining" => 0,
+        "Refining" => 1,
+        "Probes" => 2,
+        "Crew Transport" => 3,
+        "Crew Capacity" => 4,
+        "Power Generation" => 5,
+        "Construction" => 6,
+        "Installation" => 7,
+        "Ship Construction" => 8,
+        _ => 9,
     }
 }
 
@@ -1894,6 +1943,59 @@ fn fmt_space_module_role(ability: &str, magnitude: f64) -> String {
     }
 }
 
+/// Render the "Mines" cell for a mining module — a list of resource
+/// icons (with player-facing names in the tooltip) corresponding to the
+/// module's `resources_to_mine`. Reuses the same icon style as
+/// `fmt_build_cost` / `page_resources` so the visual vocabulary across
+/// pages stays consistent. Returns "—" for an empty list.
+fn fmt_space_module_mines(
+    ids: &[String],
+    resource_name: &BTreeMap<&str, &str>,
+) -> String {
+    if ids.is_empty() {
+        return "—".to_string();
+    }
+    ids.iter()
+        .map(|rid| {
+            let label = resource_name.get(rid.as_str()).copied().unwrap_or(rid.as_str());
+            format!(
+                "<span style=\"white-space:nowrap\" title=\"{label}\"><img src=\"../images/resources/{id}.png\" width=\"16\" alt=\"{label}\"/>&nbsp;{label}</span>",
+                id = rid,
+                label = escape_cell(label),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("<br>")
+}
+
+/// Build the `module_id → research_id` map by walking the research dump.
+/// Both the primary `unlock_target` (when `action == "UnlockFacility"`)
+/// and the secondary `unlockDataList[]` entries with the same action
+/// contribute — `module_crew_medium` in particular is only reachable via
+/// the secondary path (the primary path of `research_lifesup_2` is an
+/// UnlockBonus). When the same module has multiple unlocks, the first one
+/// encountered wins (BTreeMap::entry().or_insert).
+fn build_module_unlocking_research(sirenix: &Sirenix) -> BTreeMap<&str, &str> {
+    let mut out: BTreeMap<&str, &str> = BTreeMap::new();
+    for r in &sirenix.research {
+        if r.action == "UnlockFacility" {
+            if let Some(target) = r.unlock_target.as_deref() {
+                if target.starts_with("module_") || target.starts_with("id_SpaceModule_") {
+                    out.entry(target).or_insert(r.id.as_str());
+                }
+            }
+        }
+        for s in &r.secondary_unlocks {
+            if s.action == "UnlockFacility"
+                && (s.target.starts_with("module_") || s.target.starts_with("id_SpaceModule_"))
+            {
+                out.entry(s.target.as_str()).or_insert(r.id.as_str());
+            }
+        }
+    }
+    out
+}
+
 fn page_space_modules(locale: &Locale, sirenix: &Sirenix) -> String {
     // Player-facing names live under `locale.cargo` (the `module_*` /
     // `id_SpaceModule_*` translation keys all land in that bucket via the
@@ -1914,22 +2016,33 @@ fn page_space_modules(locale: &Locale, sirenix: &Sirenix) -> String {
         .iter()
         .map(|r| (r.id.as_str(), r.name.as_str()))
         .collect();
+    let research_name: BTreeMap<&str, &str> = locale
+        .research
+        .iter()
+        .map(|r| (r.id.as_str(), r.name.as_str()))
+        .collect();
+    let module_unlocked_by = build_module_unlocking_research(sirenix);
 
     // Decide which modules render. Drop:
     //   * entries without a locale name (we'd be forced to leak the id)
-    //   * locked entries with no real data — "real data" means an actual
-    //     gameplay role (specialAbility), a numeric parameter, or a build
-    //     cost. Mass alone is not informative; modules like
-    //     `module_contractitem` carry a token mass and a locked flag with
-    //     no other content and shouldn't surface as buildable equipment.
+    //   * entries with no `specialAbilityFacilityNew` — these are the
+    //     placeholder/test rows (Engine Type 1, Cargo Type 1, Control
+    //     Center, Empty, Hubel Telescope) that aren't real player-facing
+    //     equipment. The parser collapses the asset's `"None"` sentinel
+    //     to "" so `special_ability.is_empty()` catches all of them.
+    //   * locked entries with no real data — defensive belt-and-suspenders
+    //     for any module that slips through with a role but zero stats.
     let keep = |m: &SpaceModuleStat| -> bool {
         let name = cargo_name.get(m.id.as_str()).copied().unwrap_or("");
         if name.is_empty() {
             return false;
         }
-        let has_data = !m.special_ability.is_empty()
-            || m.special_ability_parameter > 0.0
-            || !m.build_cost.is_empty();
+        if m.special_ability.is_empty() {
+            return false;
+        }
+        let has_data = m.special_ability_parameter > 0.0
+            || !m.build_cost.is_empty()
+            || m.mass > 0.0;
         if m.is_locked && !has_data {
             return false;
         }
@@ -1941,7 +2054,11 @@ fn page_space_modules(locale: &Locale, sirenix: &Sirenix) -> String {
         if !keep(m) {
             continue;
         }
-        by_section.entry(space_module_section(m)).or_default().push(m);
+        let section = space_module_section(m);
+        if section.is_empty() {
+            continue;
+        }
+        by_section.entry(section).or_default().push(m);
     }
 
     let mut out = String::from(
@@ -1949,10 +2066,16 @@ fn page_space_modules(locale: &Locale, sirenix: &Sirenix) -> String {
 Spacecraft payload — mining rigs, refiners, probes, telescopes, habitats, power\n\
 plants, and crew compartments that ride on (or alongside) interplanetary craft.\n\
 Most are loaded as cargo on a launch vehicle and deployed at the destination;\n\
-a few are assembled directly in an orbital shipyard.\n\n",
+a few are assembled directly in an orbital shipyard. Modules are grouped by\n\
+the gameplay role they fill on the destination — Mining rigs extract\n\
+resources, Probes survey a body, Crew Capacity modules house a population,\n\
+and so on.\n\n",
     );
 
-    let header = [
+    // Column shape varies per section: Mining adds a `Mines` column listing
+    // the resources the rig can extract.  Everything else uses the base
+    // 7-column shape.
+    let base_header: &[&str] = &[
         "Module",
         "Mass (t)",
         "Role",
@@ -1961,7 +2084,7 @@ a few are assembled directly in an orbital shipyard.\n\n",
         "Time (d)",
         "Description",
     ];
-    let header_tips: [Option<&str>; 7] = [
+    let base_tips: &[Option<&str>] = &[
         None,
         Some("Dry mass in tonnes"),
         Some("Module role and its magnitude (mining rate per day, crew capacity, energy production, …)"),
@@ -1970,23 +2093,40 @@ a few are assembled directly in an orbital shipyard.\n\n",
         Some("Build time in days"),
         None,
     ];
+    let mining_header: &[&str] = &[
+        "Module",
+        "Mass (t)",
+        "Role",
+        "Mines",
+        "Cargo",
+        "Build cost",
+        "Time (d)",
+        "Description",
+    ];
+    let mining_tips: &[Option<&str>] = &[
+        None,
+        Some("Dry mass in tonnes"),
+        Some("Module role and its magnitude (mining rate per day)"),
+        Some("Which resources the rig can extract"),
+        Some("Whether the module can be loaded into a launch vehicle as cargo"),
+        Some("Resources required to construct"),
+        Some("Build time in days"),
+        None,
+    ];
 
-    // Order: Engine → Power Supply → Utility → Crew → Other.
     let mut sections: Vec<(&'static str, Vec<&SpaceModuleStat>)> = by_section.into_iter().collect();
     sections.sort_by_key(|(label, _)| space_module_section_order(label));
 
     for (label, mut modules) in sections {
-        // Within a section: role label, then magnitude desc, then id for stability.
+        // Within a section: magnitude descending (so highest-output rig
+        // leads), then id for stability.
         modules.sort_by(|a, b| {
-            a.special_ability
-                .cmp(&b.special_ability)
-                .then(
-                    b.special_ability_parameter
-                        .partial_cmp(&a.special_ability_parameter)
-                        .unwrap_or(std::cmp::Ordering::Equal),
-                )
+            b.special_ability_parameter
+                .partial_cmp(&a.special_ability_parameter)
+                .unwrap_or(std::cmp::Ordering::Equal)
                 .then(a.id.cmp(&b.id))
         });
+        let is_mining = label == "Mining";
         let rows: Vec<Vec<String>> = modules
             .iter()
             .map(|m| {
@@ -2002,25 +2142,58 @@ a few are assembled directly in an orbital shipyard.\n\n",
                     "—".into()
                 };
                 let mass_cell = if m.mass > 0.0 { fmt_amount(m.mass) } else { "—".into() };
+                // Locked-at-start annotation. When we know the research
+                // that unlocks the module, surface its display name so
+                // players can plan their tech path; otherwise fall back to
+                // the bare "Locked at start" line.
                 let locked_prefix = if m.is_locked {
-                    "<sub>Locked at start</sub><br>"
+                    match module_unlocked_by.get(m.id.as_str()).copied() {
+                        Some(rid) => {
+                            let name = research_name.get(rid).copied().unwrap_or(rid);
+                            let link = link_cross_page(
+                                "research",
+                                "research",
+                                rid,
+                                &escape_cell(name),
+                            );
+                            format!("<sub>Locked at start (unlocks: {link})</sub><br>")
+                        }
+                        None => "<sub>Locked at start</sub><br>".to_string(),
+                    }
                 } else {
-                    ""
+                    String::new()
                 };
                 let desc_cell = format!("{locked_prefix}{}", escape_cell(desc));
-                vec![
-                    format!("**{}**", escape_cell(&display)),
-                    mass_cell,
-                    role,
-                    cargo_cell.to_string(),
-                    cost,
-                    time,
-                    desc_cell,
-                ]
+                if is_mining {
+                    vec![
+                        format!("**{}**", escape_cell(&display)),
+                        mass_cell,
+                        role,
+                        fmt_space_module_mines(&m.resources_to_mine, &resource_name),
+                        cargo_cell.to_string(),
+                        cost,
+                        time,
+                        desc_cell,
+                    ]
+                } else {
+                    vec![
+                        format!("**{}**", escape_cell(&display)),
+                        mass_cell,
+                        role,
+                        cargo_cell.to_string(),
+                        cost,
+                        time,
+                        desc_cell,
+                    ]
+                }
             })
             .collect();
         out.push_str(&format!("## {label}\n\n"));
-        out.push_str(&md_table_with_tips(&header, &header_tips, &rows));
+        if is_mining {
+            out.push_str(&md_table_with_tips(mining_header, mining_tips, &rows));
+        } else {
+            out.push_str(&md_table_with_tips(base_header, base_tips, &rows));
+        }
         out.push('\n');
     }
 
@@ -2028,12 +2201,15 @@ a few are assembled directly in an orbital shipyard.\n\n",
         "## Reading the table\n\n\
 - **Mass** is the module's dry mass in tonnes — included in the carrier launch vehicle's payload budget.\n\
 - **Role** is what the module does on station — mining a resource at the listed rate, refining one resource into another, transporting a fixed crew count, etc. The number in parentheses is the role-specific magnitude (mining rate per day, crew capacity, energy production).\n\
+- **Mines** (Mining section only) lists the resources a rig can extract from the body it lands on.\n\
 - **Cargo** indicates whether the module can ride to orbit inside a launch vehicle's cargo bay. Modules that say *No* must be assembled directly in an orbital shipyard.\n\
-- **Build cost / Time** are the resources and days required to build the module — either on the surface (most cargo-loadable modules) or in orbit.\n\n\
+- **Build cost / Time** are the resources and days required to build the module — either on the surface (most cargo-loadable modules) or in orbit.\n\
+- **Locked at start** rows are unavailable until you research the listed technology (or, when no research direct-unlocks the module, until the scenario or contract chain grants it).\n\n\
 ## See also\n\n\
 - [Spacecraft](../spacecraft/) — the craft these modules ride on\n\
 - [Launch Vehicles](../launch-vehicles/) — surface-to-orbit lifters\n\
-- [Facilities](../facilities/) — ground and surface-installed structures\n",
+- [Facilities](../facilities/) — ground and surface-installed structures\n\
+- [Research](../research/) — technology unlocks for locked modules\n",
     );
     out
 }
@@ -2954,6 +3130,104 @@ fn merge_peak_buckets(buckets: &[TerraLabelThreshold]) -> Vec<TerraLabelThreshol
 ///
 /// Sorting: alphabetically by player-facing display name (locale-resolved),
 /// matching the convention used elsewhere on the wiki.
+/// Resolve a `Tooltip.UIBasicInfoHabitabilityParameters.ResultComment{N}`
+/// translation id to the player-facing crew-status string the in-game
+/// tooltip shows. The shipped en-US.csv carries these strings verbatim;
+/// hardcoding the mapping keeps the renderer free of locale.json reads
+/// for one specific 4-element ladder that the locale parser doesn't
+/// already collect under a structured key.
+fn resolve_result_comment(translation_id: &str) -> &'static str {
+    match translation_id {
+        "Tooltip.UIBasicInfoHabitabilityParameters.ResultComment0" => {
+            "A perfect place for life."
+        }
+        "Tooltip.UIBasicInfoHabitabilityParameters.ResultComment1" => {
+            "Our crews can live here with minor issues."
+        }
+        "Tooltip.UIBasicInfoHabitabilityParameters.ResultComment2" => {
+            "Our crews will struggle to survive here."
+        }
+        "Tooltip.UIBasicInfoHabitabilityParameters.ResultComment3" => {
+            "Our crews cannot land here — the object is too hostile."
+        }
+        _ => "",
+    }
+}
+
+/// Player-facing label for each Habitability % bucket — the 4-rung ladder
+/// the game presents in its summary view. Mapped from the translation-id
+/// suffix because the asset doesn't carry a separate label list (the
+/// in-game UI uses the same `ResultComment{N}` indices to drive both the
+/// label and the tooltip body).
+fn habitability_bucket_label(translation_id: &str) -> &'static str {
+    match translation_id {
+        "Tooltip.UIBasicInfoHabitabilityParameters.ResultComment0" => "Excellent",
+        "Tooltip.UIBasicInfoHabitabilityParameters.ResultComment1" => "Good",
+        "Tooltip.UIBasicInfoHabitabilityParameters.ResultComment2" => "Marginal",
+        "Tooltip.UIBasicInfoHabitabilityParameters.ResultComment3" => "Hostile",
+        _ => "?",
+    }
+}
+
+/// Render the Habitability % bucket table — one row per
+/// `resultCommentTranslationId` entry, with the `min_result` floors
+/// surfaced as `≥ N%` ranges. The tail bucket (lowest score floor) flips
+/// to `< prev%` because its `min_result` is the runtime sentinel
+/// `-100000`. Returns an empty string when the asset doesn't carry any
+/// thresholds (defensive — the shipped file always does).
+fn render_habitability_buckets_table(
+    thresholds: &[TerraResultCommentThreshold],
+) -> String {
+    if thresholds.is_empty() {
+        return String::new();
+    }
+    // Sort by min_result descending so the player reads Excellent → Hostile
+    // top-to-bottom (the dump preserves this order, but defending against
+    // a hand-edited fixture costs nothing).
+    let mut sorted: Vec<&TerraResultCommentThreshold> = thresholds.iter().collect();
+    sorted.sort_by(|a, b| {
+        b.min_result
+            .partial_cmp(&a.min_result)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let rows: Vec<Vec<String>> = sorted
+        .iter()
+        .enumerate()
+        .map(|(i, t)| {
+            let label = habitability_bucket_label(&t.translation_id);
+            let crew_status = resolve_result_comment(&t.translation_id);
+            // For the tail bucket (last row) the `min_result` is the C#
+            // sentinel `-100000`, which would read awkwardly as "≥ -100000%".
+            // Flip to "< prev%" so the table reads as four contiguous
+            // numeric bands.
+            let percent_cell = if i + 1 == sorted.len() && sorted.len() >= 2 {
+                let prev = sorted[i - 1].min_result;
+                format!("< {}%", fmt_amount(prev))
+            } else {
+                format!("≥ {}%", fmt_amount(t.min_result))
+            };
+            vec![
+                label.to_string(),
+                crew_status.to_string(),
+                percent_cell,
+            ]
+        })
+        .collect();
+    let table = md_table(
+        &["Habitability", "Crew status", "Habitability %"],
+        &rows,
+    );
+    format!(
+        "## Habitability summary\n\n\
+The four labels the in-game Object Info window shows once per body — \
+players read these as the at-a-glance verdict on whether a body is \
+liveable. The percentages come from the `resultCommentTranslationId[]` \
+block of `TerraformationConfig.asset` (a body's overall Habitability % \
+falls into the first bucket whose floor it meets).\n\n\
+{table}\n"
+    )
+}
+
 fn page_terraforming(
     locale: &Locale,
     sirenix: &Sirenix,
@@ -3180,6 +3454,17 @@ shows the curve's habitability score at the bucket midpoint, where 100 is \
         String::new()
     };
 
+    // ---- Overall habitability percent → label / crew status ---------------
+    // The per-axis tables above let players read a single axis; the
+    // game ALSO computes a single overall Habitability % and reports it
+    // with one of four label / tooltip pairs. The thresholds come from
+    // `resultCommentTranslationId[]` inside the habitability block:
+    // the shipped asset carries minResult floors of 90, 50, 0, -100000
+    // for Excellent / Good / Marginal / Hostile respectively.
+    let habitability_buckets_section = render_habitability_buckets_table(
+        &terraformation.result_comment_thresholds,
+    );
+
     let facilities_section = if terra_facs.is_empty() {
         String::new()
     } else {
@@ -3228,6 +3513,7 @@ per-resource thermal properties. Use these tables to understand:\n\n\
 - which resources contribute to greenhouse warming (optical depth) and surface heating\n\n\
 ## Resource thermal properties\n\n\
 {table}\n\
+{habitability_buckets_section}\
 {thresholds_section}\
 {facilities_section}\
 ## Reading the table\n\n\
@@ -7154,7 +7440,10 @@ mod tests {
         };
         let mut params = BTreeMap::new();
         params.insert("temperature".to_string(), param);
-        TerraformationData { parameters: params }
+        TerraformationData {
+            parameters: params,
+            result_comment_thresholds: vec![],
+        }
     }
 
     fn terra_fixture_locale_with_labels() -> Locale {
@@ -7220,6 +7509,87 @@ mod tests {
         assert!(
             section.contains("Melting Hot"),
             "tail bucket should be labelled Melting Hot after peak-merge:\n{section}"
+        );
+    }
+
+    /// The terraforming page should expose the four overall-habitability
+    /// buckets (Excellent / Good / Marginal / Hostile) with the numeric %
+    /// thresholds players see in-game. Source of truth is the
+    /// `resultCommentTranslationId[]` block in TerraformationConfig.asset
+    /// — minResult of {90, 50, 0, -100000} for the four buckets in the
+    /// shipped dump. The renderer reads `result_comment_thresholds` off the
+    /// TerraformationData top-level struct and emits a 3-column table:
+    /// Habitability label / Crew status / Habitability % range.
+    #[test]
+    fn terraforming_page_renders_habitability_percent_buckets_table() {
+        let locale = terra_fixture_locale_with_labels();
+        let mut water = make_resource_stat("water", "Normal");
+        water.terraformation_info = Some(water_ti());
+        let sirenix = Sirenix {
+            resources: vec![water],
+            ..Default::default()
+        };
+        let terra = TerraformationData {
+            parameters: BTreeMap::new(),
+            result_comment_thresholds: vec![
+                TerraResultCommentThreshold {
+                    min_result: 90.0,
+                    translation_id:
+                        "Tooltip.UIBasicInfoHabitabilityParameters.ResultComment0".into(),
+                },
+                TerraResultCommentThreshold {
+                    min_result: 50.0,
+                    translation_id:
+                        "Tooltip.UIBasicInfoHabitabilityParameters.ResultComment1".into(),
+                },
+                TerraResultCommentThreshold {
+                    min_result: 0.0,
+                    translation_id:
+                        "Tooltip.UIBasicInfoHabitabilityParameters.ResultComment2".into(),
+                },
+                TerraResultCommentThreshold {
+                    min_result: -100000.0,
+                    translation_id:
+                        "Tooltip.UIBasicInfoHabitabilityParameters.ResultComment3".into(),
+                },
+            ],
+        };
+        let page = page_terraforming(&locale, &sirenix, &terra);
+        // Section header.
+        assert!(
+            page.contains("## Habitability"),
+            "habitability section header missing:\n{page}"
+        );
+        // The four player-facing labels (Excellent / Good / Marginal /
+        // Hostile) and the crew-status text the in-game tooltip carries.
+        for needle in [
+            "Excellent",
+            "Good",
+            "Marginal",
+            "Hostile",
+            "perfect place for life",
+            "live here with minor",
+            "struggle to survive",
+            "cannot land here",
+        ] {
+            assert!(
+                page.contains(needle),
+                "habitability table missing {needle:?}:\n{page}"
+            );
+        }
+        // Numeric thresholds — the exact `minResult` values from the asset
+        // surface as `≥ N%` (or `< N%` for the tail-Hostile bucket).
+        assert!(
+            page.contains("≥ 90") || page.contains("90%"),
+            "Excellent bucket should advertise its 90% floor:\n{page}"
+        );
+        assert!(
+            page.contains("≥ 50") || page.contains("50%"),
+            "Good bucket should advertise its 50% floor:\n{page}"
+        );
+        assert!(
+            page.contains("≥ 0") || page.contains("< 0"),
+            "Marginal/Hostile boundary at 0% should appear:\n{page}"
         );
     }
 
@@ -7546,6 +7916,7 @@ mod tests {
             can_be_load_as_cargo: true,
             build_on_orbit_allowed: true,
             space_module_type: module_type.into(),
+            resources_to_mine: vec![],
         }
     }
 
@@ -7581,11 +7952,14 @@ mod tests {
         locale
     }
 
-    /// The space-modules page should emit one table per category — Engine,
-    /// Power Supply, Utility, Crew — and only include modules with a
-    /// player-facing locale name.
+    /// The space-modules page groups by `specialAbilityFacilityNew` (the
+    /// module's gameplay role) — Mining, Refining, Probes, Crew Transport,
+    /// Crew Capacity, Power Generation, Construction, Installation, Ship
+    /// Construction — NOT by the orbital-slot `spaceModuleType`, which
+    /// players don't see as a category in-game. Modules without a
+    /// player-facing locale name are dropped (memory rule: no internal ids).
     #[test]
-    fn space_modules_page_groups_by_category() {
+    fn space_modules_page_groups_by_ability_role() {
         let locale = space_modules_fixture_locale();
         let sirenix = Sirenix {
             space_modules: vec![
@@ -7597,11 +7971,16 @@ mod tests {
             ..Default::default()
         };
         let page = page_space_modules(&locale, &sirenix);
-        // Each category section header should be present.
-        assert!(page.contains("## Engine"), "Engine section header missing:\n{page}");
-        assert!(page.contains("## Power Supply") || page.contains("## PowerSupply"),
-            "Power Supply section header missing:\n{page}");
-        assert!(page.contains("## Crew"), "Crew section header missing:\n{page}");
+        // Role-based section headers (not orbital-slot categories).
+        assert!(page.contains("## Mining"), "Mining section missing:\n{page}");
+        assert!(page.contains("## Refining"), "Refining section missing:\n{page}");
+        assert!(page.contains("## Crew Transport"),
+            "Crew Transport section missing:\n{page}");
+        // Old orbital-slot section names must NOT leak through.
+        assert!(!page.contains("## Engine"),
+            "should NOT group by spaceModuleType anymore:\n{page}");
+        assert!(!page.contains("## Power Supply") && !page.contains("## PowerSupply"),
+            "should NOT group by spaceModuleType anymore:\n{page}");
         // Each module's player-facing name should appear once (the renderer
         // title-cases the ALL-CAPS locale strings via smart_title_case).
         assert!(page.contains("Mining Module"), "module_basemining name missing:\n{page}");
@@ -7614,6 +7993,229 @@ mod tests {
             "internal id 'module_basemining' must not appear in player-facing markup");
         assert!(!page.contains("id_SpaceModule_ISRU"),
             "internal id 'id_SpaceModule_ISRU' must not appear in player-facing markup");
+    }
+
+    /// Placeholder modules with `specialAbilityFacilityNew == "None"`
+    /// (Engine Type 1/2, Cargo Type 1/2, Control Center Type 1/2, Empty,
+    /// Hubel Telescope) are test fixtures / unused alt-namespace entries and
+    /// MUST NOT render — the parser collapses their ability to "" so this
+    /// page-renderer rule fires on `special_ability.is_empty()`.
+    #[test]
+    fn space_modules_page_drops_modules_with_none_ability() {
+        let mut locale = space_modules_fixture_locale();
+        locale.cargo.push(NameDesc {
+            id: "id_SpaceModule_EngineType1".into(),
+            name: "Engine Type 1".into(),
+            description: String::new(),
+        });
+        locale.cargo.push(NameDesc {
+            id: "id_SpaceModule_CargoType1".into(),
+            name: "Cargo Type 1".into(),
+            description: String::new(),
+        });
+        let sirenix = Sirenix {
+            space_modules: vec![
+                make_space_module("id_SpaceModule_EngineType1", "Engine", "", 0.0, false),
+                make_space_module("id_SpaceModule_CargoType1", "PowerSupply", "", 0.0, false),
+                // Real module so the page renders SOMETHING.
+                make_space_module("module_basemining", "Engine", "Mining", 0.2, false),
+            ],
+            ..Default::default()
+        };
+        let page = page_space_modules(&locale, &sirenix);
+        assert!(
+            !page.contains("Engine Type 1"),
+            "ability=None placeholder modules should be dropped:\n{page}"
+        );
+        assert!(
+            !page.contains("Cargo Type 1"),
+            "ability=None placeholder modules should be dropped:\n{page}"
+        );
+        assert!(page.contains("Mining Module"), "real module should still render");
+    }
+
+    /// Mining modules surface a "Mines" column listing the resources they
+    /// can extract — pulled from `resourcesToMine[]`. Resource ids resolve
+    /// to player-facing names via the resources locale (so
+    /// `id_resource_volatile` → "Carbon", `id_resource_steel` → "Alloy").
+    #[test]
+    fn space_modules_page_mining_section_has_mines_column() {
+        let mut locale = space_modules_fixture_locale();
+        // Resource locale entries — drives the icon alt text + tooltip.
+        locale.resources.push(ResourceEntry {
+            id: "water".into(),
+            name: "Water".into(),
+        });
+        locale.resources.push(ResourceEntry {
+            id: "volatile".into(),
+            name: "Carbon".into(),
+        });
+        locale.resources.push(ResourceEntry {
+            id: "metal".into(),
+            name: "Metals".into(),
+        });
+        let mut base = make_space_module("module_basemining", "Engine", "Mining", 0.2, false);
+        base.resources_to_mine = vec!["water".into(), "volatile".into(), "metal".into()];
+        let sirenix = Sirenix {
+            space_modules: vec![base],
+            ..Default::default()
+        };
+        let page = page_space_modules(&locale, &sirenix);
+        // The Mining section table must expose a Mines column header.
+        let mining_idx = page
+            .find("## Mining")
+            .expect("Mining section header present");
+        let mining_section = &page[mining_idx..];
+        assert!(
+            mining_section.contains("Mines"),
+            "Mining-section header should include a 'Mines' column:\n{mining_section}"
+        );
+        // The mining row should show each mined resource via its icon (or at
+        // minimum its locale-resolved player-facing name).
+        let row = page
+            .lines()
+            .find(|l| l.contains("Mining Module"))
+            .expect("mining row present");
+        assert!(
+            row.contains("water.png") || row.contains("Water"),
+            "row should reference Water:\n{row}"
+        );
+        assert!(
+            row.contains("volatile.png") || row.contains("Carbon"),
+            "row should reference Carbon (volatile):\n{row}"
+        );
+        assert!(
+            row.contains("metal.png") || row.contains("Metals"),
+            "row should reference Metals:\n{row}"
+        );
+    }
+
+    /// Locked modules with a research-direct unlock should say WHICH
+    /// research unlocks them, not just "Locked at start" alone.
+    /// `module_crew_medium` ← `research_lifesup_2` (UnlockFacility via the
+    /// unlockDataList secondary-unlock path).
+    #[test]
+    fn space_modules_page_locked_module_shows_unlocking_research() {
+        let mut locale = space_modules_fixture_locale();
+        locale.cargo.push(NameDesc {
+            id: "module_crew_medium".into(),
+            name: "Crew Compartment Type-M".into(),
+            description: String::new(),
+        });
+        locale.research.push(ResearchEntry {
+            id: "research_lifesup_2".into(),
+            category: "topic".into(),
+            name: "Crew Comfort II".into(),
+            description: String::new(),
+        });
+        let crew_medium = SpaceModuleStat {
+            id: "module_crew_medium".into(),
+            mass: 15.0,
+            special_ability: "CrewTransport".into(),
+            special_ability_parameter: 20.0,
+            build_cost: vec![],
+            build_time_days: 30.0,
+            is_locked: true,
+            can_be_load_as_cargo: true,
+            build_on_orbit_allowed: false,
+            space_module_type: "PowerSupply".into(),
+            resources_to_mine: vec![],
+        };
+        let research = ResearchStat {
+            id: "research_lifesup_2".into(),
+            work_hours: 100.0,
+            branch: "lifesup".into(),
+            subbranch: String::new(),
+            prereqs: vec![],
+            action: "UnlockBonus".into(),
+            unlock_target: None,
+            bonus_kind: Some("BuildCost".into()),
+            bonus_amount: -40.0,
+            bonus_components: vec!["module_crew_medium".into()],
+            show_in_tree: true,
+            contract_unlocks: vec![],
+            stage: 0,
+            secondary_unlocks: vec![SecondaryUnlockStat {
+                action: "UnlockFacility".into(),
+                target: "module_crew_medium".into(),
+                bonus: String::new(),
+                bonus_parameter: 0.0,
+            }],
+        };
+        let sirenix = Sirenix {
+            space_modules: vec![crew_medium],
+            research: vec![research],
+            ..Default::default()
+        };
+        let page = page_space_modules(&locale, &sirenix);
+        let row = page
+            .lines()
+            .find(|l| l.contains("Crew Compartment Type-M"))
+            .expect("locked crew row present");
+        assert!(
+            row.contains("Locked at start"),
+            "locked-prefix should appear:\n{row}"
+        );
+        assert!(
+            row.contains("Crew Comfort II"),
+            "locked-prefix should name the unlocking research:\n{row}"
+        );
+    }
+
+    /// `module_ground_probe` and `module_space_probe` (or
+    /// `id_SpaceModule_Probe`) carry identical Probe stats; the ONLY
+    /// difference is `isLocked`. The page should make the locked-at-start
+    /// distinction obvious — render both rows but flag the ground variant
+    /// (which is locked) explicitly. Players otherwise see two seemingly
+    /// duplicate rows.
+    #[test]
+    fn space_modules_page_flags_locked_ground_probe_distinctly() {
+        let mut locale = space_modules_fixture_locale();
+        locale.cargo.push(NameDesc {
+            id: "module_ground_probe".into(),
+            name: "Ground Probe".into(),
+            description: "Probes a body.".into(),
+        });
+        locale.cargo.push(NameDesc {
+            id: "module_space_probe".into(),
+            name: "Probe".into(),
+            description: "Probes a body.".into(),
+        });
+        let ground = make_space_module("module_ground_probe", "Engine", "Probe", 10.0, true);
+        let space = make_space_module("module_space_probe", "Engine", "Probe", 10.0, false);
+        let sirenix = Sirenix {
+            space_modules: vec![ground, space],
+            ..Default::default()
+        };
+        let page = page_space_modules(&locale, &sirenix);
+        // Both rows render under the Probes section.
+        let probes_idx = page.find("## Probes").expect("Probes section header");
+        let probes_section = &page[probes_idx..];
+        assert!(
+            probes_section.contains("Ground Probe"),
+            "Ground Probe row missing:\n{probes_section}"
+        );
+        assert!(
+            probes_section.contains(">**Probe**") || probes_section.contains("**Probe**"),
+            "Space Probe row missing:\n{probes_section}"
+        );
+        // Ground variant carries the locked annotation; space variant does not.
+        let ground_row = probes_section
+            .lines()
+            .find(|l| l.contains("Ground Probe"))
+            .expect("ground probe row");
+        assert!(
+            ground_row.contains("Locked at start"),
+            "Ground Probe row should be labelled locked:\n{ground_row}"
+        );
+        let space_row = probes_section
+            .lines()
+            .find(|l| l.contains("**Probe**") && !l.contains("Ground"))
+            .expect("space probe row");
+        assert!(
+            !space_row.contains("Locked at start"),
+            "Space Probe row should NOT be labelled locked:\n{space_row}"
+        );
     }
 
     /// Locked modules with no meaningful stats (`module_ThermoelectricTest` /
@@ -7644,6 +8246,7 @@ mod tests {
             can_be_load_as_cargo: true,
             build_on_orbit_allowed: false,
             space_module_type: String::new(),
+            resources_to_mine: vec![],
         };
         let useful_locked = make_space_module(
             "module_metalmining",
