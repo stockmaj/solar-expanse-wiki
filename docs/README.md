@@ -1,7 +1,7 @@
 # Solar Expanse Wiki
 
 A player-facing reference for **[Solar Expanse](https://store.steampowered.com/app/1369700/)** —
-the realistic solar-system management game by Maciej Miąsik / TJ Entertainment.
+the realistic solar-system management game by SpaceOps.
 
 This wiki is built from the game's own localization files and asset bundles, so
 the names, descriptions, and stat tables here match exactly what you see in-game.
@@ -42,6 +42,6 @@ See [CONTRIBUTING](CONTRIBUTING.md) for details.
 
 ## Credits
 
-- **Solar Expanse** © Maciej Miąsik / TJ Entertainment.
+- **Solar Expanse** © SpaceOps.
 - Wiki text is generated from the game's English localization and is presented
 here for reference purposes only.

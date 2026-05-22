@@ -6071,7 +6071,7 @@ fn page_root() -> String {
     String::from(
         "# Solar Expanse Wiki\n\n\
 A player-facing reference for **[Solar Expanse](https://store.steampowered.com/app/1369700/)** —\n\
-the realistic solar-system management game by Maciej Miąsik / TJ Entertainment.\n\n\
+the realistic solar-system management game by SpaceOps.\n\n\
 This wiki is built from the game's own localization files and asset bundles, so\n\
 the names, descriptions, and stat tables here match exactly what you see in-game.\n\n\
 ## Contents\n\n\
@@ -6103,7 +6103,7 @@ Almost every page is generated from the game's own files; direct edits get\n\
 overwritten when the pipeline reruns. Fixes belong in the [generator code](https://github.com/stockmaj/solar-expanse-wiki/tree/main/extract).\n\
 See [CONTRIBUTING](CONTRIBUTING.md) for details.\n\n\
 ## Credits\n\n\
-- **Solar Expanse** © Maciej Miąsik / TJ Entertainment.\n\
+- **Solar Expanse** © SpaceOps.\n\
 - Wiki text is generated from the game's English localization and is presented\n\
   here for reference purposes only.\n",
     )
