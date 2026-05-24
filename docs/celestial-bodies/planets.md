@@ -1,6 +1,6 @@
 # Planets
 
-The nine major planets of the Solar System available in Solar Expanse.
+Planets available in Solar Expanse.
 
 | Planet | Mass (×10²⁴ kg) | Radius (km) | Semi-major axis (AU) | Eccentricity | Inclination (°) | Moons |
 | --- | --- | --- | --- | --- | --- | --- |

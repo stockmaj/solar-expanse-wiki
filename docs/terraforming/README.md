@@ -91,10 +91,10 @@ Facilities that actively modify a planet's habitability parameters over time. Se
 ## Reading the table
 
 - **Melting / Boiling** are the phase-change temperatures the body's average surface temperature must cross to keep the resource solid, liquid, or gas at reference pressure. Both columns show kelvin first with the celsius equivalent in parentheses.
-- **Latent heat (J/mol)** is the energy required to vaporize one mole of the resource. It drives how strongly evaporation cools the planet's surface and how strongly condensation warms it — the same constant feeds the Clausius-Clapeyron formula the sim uses to compute saturation pressures from temperature.
+- **Latent heat (J/mol)** is the energy required to vaporize one mole of the resource. Higher values mean stronger evaporative cooling and stronger condensation warming when the substance changes phase.
 - **Heat capacity (J/(kg·K))** is how much energy the resource absorbs before its temperature rises. High values smooth out day/night and seasonal temperature swings, so atmospheres dominated by high-Cp species are stabler.
 - **Optical depth** is the dimensionless greenhouse contribution. Higher values trap more outgoing infrared radiation — atmospheres dominated by high-optical-depth species (CO2, water vapor) warm.
-- **Triple-point pressure (atm)** is the minimum atmospheric pressure at which a stable liquid phase exists. Below this, the resource sublimates directly between solid and gas (think Mars-pressure CO2 frost).
+- **Triple-point pressure (atm)** is the minimum atmospheric pressure at which a stable liquid phase exists. Below this, the resource sublimates directly between solid and gas.
 
 ## See also
 

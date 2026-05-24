@@ -54,13 +54,9 @@ relevant page.
 - Some contracts bind more than one achievement (e.g. *Interstellar 2* awards
   both *To Infinity* and *Wanderlust* — the latter only if completed before
   the year 2400).  Each binding appears as its own row.
-- Spacecraft-bound achievements typically fire the first time you operate a
-  craft of that propulsion class — building, fueling, or launching one
-  depending on the achievement.
 - The Condition column lists the extra requirements parsed from each
   binding's `conditions[]` array — typically a year deadline or a
-  prerequisite contract.  "—" means the achievement fires the moment the
-  parent contract is completed, with no further constraint.
+  prerequisite contract.  "—" means no additional condition is set on the binding.
 - Achievement names are derived from the in-game id when no localized
   display name is available; the in-game UI may polish the wording further.
 

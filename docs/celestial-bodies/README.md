@@ -1,8 +1,7 @@
 # Celestial Bodies
 
-All natural objects in Solar Expanse — from the nine planets, through
-moons and asteroid belts, out to comets and the Trappist-1 and Kepler-90
-exoplanet systems reachable in the late game.
+All natural objects in Solar Expanse — planets, moons, asteroids, comets,
+and exoplanet systems reachable in the late game.
 
 | Type | Count | Notes |
 | --- | --- | --- |
@@ -13,10 +12,6 @@ exoplanet systems reachable in the late game.
 | **[Exoplanets](exoplanets.md)** | 15 | Body in a non-Solar system. Reachable only via a generation ship. |
 
 ## Orbital data
-
-Orbital elements below are anchored at the **2020-01-01 campaign-start epoch**
-the game ships — the same epoch the in-game flight planner uses for its
-initial body positions.
 
 | Field | Meaning | Unit |
 | --- | --- | --- |

@@ -20,15 +20,19 @@ Plan Mission walks you through five steps:
 4. **Launch Vehicle** — pick the lifter (only required for missions launching from a planet's surface).
 5. **Flight Plan** — pick the launch and arrival windows from the porkchop plot.
 
-### Mission types (from in-game UI)
+### Mission types
 
-| Type | Notes |
-| --- | --- |
-| **Direct** | Single Hohmann-style transfer to the destination. |
-| **Gravity Assist** | Uses another body's gravity to bend the trajectory and save Δv. The game lets you choose whether cargo drops at the assist target or continues on. |
-| **Cyclical** | A repeating supply route between two or more bodies. |
-| **Asteroid Pulling** | Specialised mission to push an asteroid into a different orbit using an Asteroid Engine Module. |
-| **Probe Deployment** | Drops a small probe at a destination (typically the first thing you send anywhere). |
+Mission-type labels surfaced by the in-game Plan Mission window (locale
+keys `Game.UI.Windows.Windows.PlanMissionWindow.*`):
+
+- **Direct flight** (the default Plan Mission flow)
+- **Gravity Assist** (toggle in Plan Mission — `PlanMission.GravityAssistOn`)
+- **Cyclical Mission** (`UI.WindowMain.Layers.CycleMission`, planned via the *Plan Cyclical Mission* window)
+- **Asteroid Pulling** (specialised mission scheduled from an Asteroid Engine Module)
+- **Probe Deployment** (probe payload dropped on arrival)
+
+The mechanics behind each type aren't captured in the shipped data files;
+see the in-game UI for the authoritative behaviour.
 
 For launch-window timing for any destination, see [Launch Windows](../celestial-bodies/launch-windows.md).
 

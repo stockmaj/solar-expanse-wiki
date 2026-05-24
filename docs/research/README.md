@@ -10,7 +10,7 @@ research tree (Computing, Chemical Propulsion, Spacecraft, …).
 
 <label class="show-unreleased"><input type="checkbox" class="show-unreleased-toggle"> Show unreleased</label>
 
-| Research | <span title="Cost in work-hours; divide by your labs' research output to get the actual research time in days">Cost (h)</span> | <span title="Tech tree era — broad progression tier of this research.">Era</span> | Prereqs | Unlocks | Description |
+| Research | <span title="Cost in work-hours (`workHourToComplete` from the dump). Actual time-in-days depends on your labs' research output, which isn't surfaced statically.">Cost (h)</span> | <span title="Tech tree era — broad progression tier of this research.">Era</span> | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- | --- |
 | <a id="research-research-category-agriculture"></a><span class="row-unreleased" hidden></span><sub class="unreleased-tag" title="Marked isLocked=true in the dump with no research/contract path that unlocks it — not reachable in-game today.">Unreleased</sub><br><img src="../images/research/research_category_agriculture.png" width="16" alt=""/>&nbsp;**Agriculture** | 288k | Early | — | — | The growth of food and plants outside of Earth presents new challenges to be solved. |
 
@@ -18,7 +18,7 @@ research tree (Computing, Chemical Propulsion, Spacecraft, …).
 
 <label class="show-unreleased"><input type="checkbox" class="show-unreleased-toggle"> Show unreleased</label>
 
-| Research | <span title="Cost in work-hours; divide by your labs' research output to get the actual research time in days">Cost (h)</span> | <span title="Tech tree era — broad progression tier of this research.">Era</span> | Prereqs | Unlocks | Description |
+| Research | <span title="Cost in work-hours (`workHourToComplete` from the dump). Actual time-in-days depends on your labs' research output, which isn't surfaced statically.">Cost (h)</span> | <span title="Tech tree era — broad progression tier of this research.">Era</span> | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- | --- |
 | <a id="research-research-category-biotech"></a><img src="../images/research/research_category_biotech.png" width="16" alt=""/>&nbsp;**Biotech** | 288k | Early | — | — | Application of organisms and biology in technological contexts |
 | <a id="research-research-agriculture-1"></a><img src="../images/research/research_agriculture_1.png" width="16" alt=""/>&nbsp;**Space Farming** | 1.2M | Early | [Biotech](#research-research-category-biotech) | Builds [**Hydroponic Farm**](../facilities/#facility-farm) | Although small growth experiments have been conducted in 0g, there are still adaptations needed to allow large scale agriculture in extraterrestrial environments. Usage of appropriate aggregate medium, artificial lighting, radiation shielding, and local power sourcing could allow colonies to feed themselves. |
@@ -34,7 +34,7 @@ research tree (Computing, Chemical Propulsion, Spacecraft, …).
 
 ## Chemical
 
-| Research | <span title="Cost in work-hours; divide by your labs' research output to get the actual research time in days">Cost (h)</span> | <span title="Tech tree era — broad progression tier of this research.">Era</span> | Prereqs | Unlocks | Description |
+| Research | <span title="Cost in work-hours (`workHourToComplete` from the dump). Actual time-in-days depends on your labs' research output, which isn't surfaced statically.">Cost (h)</span> | <span title="Tech tree era — broad progression tier of this research.">Era</span> | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- | --- |
 | <a id="research-research-category-chem"></a><img src="../images/research/research_category_chem.png" width="16" alt=""/>&nbsp;**Chemical Propulsion** | 288k | Early | — | — | Powerful but inefficient, chemical engines powered the first rockets, and remain the main propulsion for launch vehicles. |
 | <a id="research-research-chem-main1"></a><img src="../images/research/research_chem_main1.png" width="16" alt=""/>&nbsp;**Solid Propellant Rockets** | 1.2M | Early | [Chemical Propulsion](#research-research-category-chem) | — | The simplest form of propulsion, a solid fuel is ignited and directed out of the exhaust to catch fire. While high in thrust and simple in design, the length of the burn cannot be controlled and the thruster will keep firing until out of fuel. |
@@ -46,7 +46,7 @@ research tree (Computing, Chemical Propulsion, Spacecraft, …).
 
 ## Colonization
 
-| Research | <span title="Cost in work-hours; divide by your labs' research output to get the actual research time in days">Cost (h)</span> | <span title="Tech tree era — broad progression tier of this research.">Era</span> | Prereqs | Unlocks | Description |
+| Research | <span title="Cost in work-hours (`workHourToComplete` from the dump). Actual time-in-days depends on your labs' research output, which isn't surfaced statically.">Cost (h)</span> | <span title="Tech tree era — broad progression tier of this research.">Era</span> | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- | --- |
 | <a id="research-research-lifesup-9"></a><img src="../images/research/research_lifesup_9.png" width="16" alt=""/>&nbsp;**Planetary Habitats** | 1.2M | Mid | [Life Support](#research-research-category-lifesup) | Builds [**Outpost**](../facilities/#facility-outpost)<br>Facility: [**Habitat**](../facilities/#facility-habitat) | Permanent solution for extraterrestrial bases. |
 | <a id="research-research-lifesup-11"></a><img src="../images/research/research_lifesup_11.png" width="16" alt=""/>&nbsp;**Colony Construction** | 2.2M | Early | — | — | With our experience in construction and habitation on other planets we can finally realize the dream of permanent colonies outside of Earth. |
@@ -61,7 +61,7 @@ research tree (Computing, Chemical Propulsion, Spacecraft, …).
 
 <label class="show-unreleased"><input type="checkbox" class="show-unreleased-toggle"> Show unreleased</label>
 
-| Research | <span title="Cost in work-hours; divide by your labs' research output to get the actual research time in days">Cost (h)</span> | <span title="Tech tree era — broad progression tier of this research.">Era</span> | Prereqs | Unlocks | Description |
+| Research | <span title="Cost in work-hours (`workHourToComplete` from the dump). Actual time-in-days depends on your labs' research output, which isn't surfaced statically.">Cost (h)</span> | <span title="Tech tree era — broad progression tier of this research.">Era</span> | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- | --- |
 | <a id="research-research-category-computing"></a><img src="../images/research/research_category_computing.png" width="16" alt=""/>&nbsp;**Computing** | 648k | Early | — | — | The study of computer science and construction of processing units. |
 | <a id="research-research-computing-proc1"></a><img src="../images/research/research_computing_proc1.png" width="16" alt=""/>&nbsp;**Microprocessors** | 1.2M | Early | [Computing](#research-research-category-computing) | — | Miniature processing units, freeing us of the need for enormous computer frames. |
@@ -79,7 +79,7 @@ research tree (Computing, Chemical Propulsion, Spacecraft, …).
 
 <label class="show-unreleased"><input type="checkbox" class="show-unreleased-toggle"> Show unreleased</label>
 
-| Research | <span title="Cost in work-hours; divide by your labs' research output to get the actual research time in days">Cost (h)</span> | <span title="Tech tree era — broad progression tier of this research.">Era</span> | Prereqs | Unlocks | Description |
+| Research | <span title="Cost in work-hours (`workHourToComplete` from the dump). Actual time-in-days depends on your labs' research output, which isn't surfaced statically.">Cost (h)</span> | <span title="Tech tree era — broad progression tier of this research.">Era</span> | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- | --- |
 | <a id="research-research-category-electromag"></a><img src="../images/research/research_category_electromag.png" width="16" alt=""/>&nbsp;**Electromagnetism** | 648k | Early | — | — | The study of electricity and magnetism. |
 | <a id="research-research-electromag-5"></a><span class="row-unreleased" hidden></span><sub class="unreleased-tag" title="Marked isLocked=true in the dump with no research/contract path that unlocks it — not reachable in-game today.">Unreleased</sub><br><img src="../images/research/research_electromag_5.png" width="16" alt=""/>&nbsp;**Phased-Arrays** | 864k | Early | — | — | A set of radio antennas controlled by a computer, capable of being steered in a specific direction without moving the antenna itself. |
@@ -92,7 +92,7 @@ research tree (Computing, Chemical Propulsion, Spacecraft, …).
 
 ## Electroprop
 
-| Research | <span title="Cost in work-hours; divide by your labs' research output to get the actual research time in days">Cost (h)</span> | <span title="Tech tree era — broad progression tier of this research.">Era</span> | Prereqs | Unlocks | Description |
+| Research | <span title="Cost in work-hours (`workHourToComplete` from the dump). Actual time-in-days depends on your labs' research output, which isn't surfaced statically.">Cost (h)</span> | <span title="Tech tree era — broad progression tier of this research.">Era</span> | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- | --- |
 | <a id="research-research-category-electricprop"></a><img src="../images/research/research_category_electricprop.png" width="16" alt=""/>&nbsp;**Electric Propulsion** | 648k | Mid | — | — | Highly efficient but low in thrust, electric drives can handle great distances but are limited by their need for power. |
 | <a id="research-research-electricprop-1"></a><img src="../images/research/research_electricprop_1.png" width="16" alt=""/>&nbsp;**Hall Thruster** | 1.2M | Early | [Electric Propulsion](#research-research-category-electricprop) | +35 ComponentExhaustV on Electric, Electricmpd, Electrichermes | Ions are accelerated outside this thruster through the use of the Hall Current, giving it its name. |
@@ -106,7 +106,7 @@ research tree (Computing, Chemical Propulsion, Spacecraft, …).
 
 <label class="show-unreleased"><input type="checkbox" class="show-unreleased-toggle"> Show unreleased</label>
 
-| Research | <span title="Cost in work-hours; divide by your labs' research output to get the actual research time in days">Cost (h)</span> | <span title="Tech tree era — broad progression tier of this research.">Era</span> | Prereqs | Unlocks | Description |
+| Research | <span title="Cost in work-hours (`workHourToComplete` from the dump). Actual time-in-days depends on your labs' research output, which isn't surfaced statically.">Cost (h)</span> | <span title="Tech tree era — broad progression tier of this research.">Era</span> | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- | --- |
 | <a id="research-research-category-observation"></a><img src="../images/research/research_category_observation.png" width="16" alt=""/>&nbsp;**Observation** | 648k | Late | — | — | Astronomy, observation, and study of celestial objects |
 | <a id="research-research-observation-1"></a><img src="../images/research/research_observation_1.png" width="16" alt=""/>&nbsp;**Improved Optics** | 1.2M | Early | [Observation](#research-research-category-observation) | +30 ObservationSpeed | Improvements in the creation of large lenses can help us observe distant objects. |
@@ -118,7 +118,7 @@ research tree (Computing, Chemical Propulsion, Spacecraft, …).
 
 <label class="show-unreleased"><input type="checkbox" class="show-unreleased-toggle"> Show unreleased</label>
 
-| Research | <span title="Cost in work-hours; divide by your labs' research output to get the actual research time in days">Cost (h)</span> | <span title="Tech tree era — broad progression tier of this research.">Era</span> | Prereqs | Unlocks | Description |
+| Research | <span title="Cost in work-hours (`workHourToComplete` from the dump). Actual time-in-days depends on your labs' research output, which isn't surfaced statically.">Cost (h)</span> | <span title="Tech tree era — broad progression tier of this research.">Era</span> | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- | --- |
 | <a id="research-research-fusionpower-1"></a><img src="../images/research/research_fusionpower_1.png" width="16" alt=""/>&nbsp;**Fusion Theory** | 3.0M | Late | [Nuclear Power](#research-research-category-nukepower)<br>[Superconducting Magnets](#research-research-electromag-1) | — | The use of nuclear fusion to generate power. |
 | <a id="research-research-electromag-2"></a><img src="../images/research/research_electromag_2.png" width="16" alt=""/>&nbsp;**Magnetic Field Containment** | 4.1M | Early | [Fusion Theory](#research-research-fusionpower-1) | Builds [**Fusion Reactor**](../facilities/#facility-power-fusion) | In our quest to achieve nuclear fusion, one of the greatest problems is containing hot fusion fuel plasma inside a magnetic field, at pressures great enough to allow ignition. |
@@ -131,7 +131,7 @@ research tree (Computing, Chemical Propulsion, Spacecraft, …).
 
 ## Launch Facility
 
-| Research | <span title="Cost in work-hours; divide by your labs' research output to get the actual research time in days">Cost (h)</span> | <span title="Tech tree era — broad progression tier of this research.">Era</span> | Prereqs | Unlocks | Description |
+| Research | <span title="Cost in work-hours (`workHourToComplete` from the dump). Actual time-in-days depends on your labs' research output, which isn't surfaced statically.">Cost (h)</span> | <span title="Tech tree era — broad progression tier of this research.">Era</span> | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- | --- |
 | <a id="research-research-category-launch"></a><img src="../images/research/research_category_launch.png" width="16" alt=""/>&nbsp;**Launch Facility** | 648k | Mid | — | — | Launch infrastructure that can substantially help with reaching orbit. |
 | <a id="research-research-launch-pad"></a><img src="../images/research/research_launch_pad.png" width="16" alt=""/>&nbsp;**Launch Pad** | 1.2M | Early | [Launch Facility](#research-research-category-launch) | Builds [**Launch Pad**](../facilities/#facility-launch-pad) | Proper launch infrastructure can make our landings easier and safer. |
@@ -146,7 +146,7 @@ research tree (Computing, Chemical Propulsion, Spacecraft, …).
 
 <label class="show-unreleased"><input type="checkbox" class="show-unreleased-toggle"> Show unreleased</label>
 
-| Research | <span title="Cost in work-hours; divide by your labs' research output to get the actual research time in days">Cost (h)</span> | <span title="Tech tree era — broad progression tier of this research.">Era</span> | Prereqs | Unlocks | Description |
+| Research | <span title="Cost in work-hours (`workHourToComplete` from the dump). Actual time-in-days depends on your labs' research output, which isn't surfaced statically.">Cost (h)</span> | <span title="Tech tree era — broad progression tier of this research.">Era</span> | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- | --- |
 | <a id="research-research-category-lv"></a><img src="../images/research/research_category_lv.png" width="16" alt=""/>&nbsp;**Launch Vehicles** | 648k | Mid | [Chemical Propulsion](#research-research-category-chem) | — | The primary solution for surface-to-orbit transport. |
 | <a id="research-research-lv-alice"></a><img src="../images/research/research_lv_alice.png" width="16" alt=""/>&nbsp;**Aluminium-Ice Rockets** | 864k | Early | [Reusable Launch Vehicles](#research-research-lv-main3) | Launch Vehicle: [**Al-Ice Rocket**](../launch-vehicles/#lv-id-Rocket-RocketType5)<br>Launch Vehicle: [**Al-Ice Rocket (Heavy)**](../launch-vehicles/#lv-id-Rocket-RocketType6)<br>+0 Additional build lv for construction module | Microscopic particles of aluminium suspended in ice. Once ignited, the aluminium reacts with oxygen from the ice, creating heat, while the liberated hydrogen helps with burn efficiency. While not powerful or efficient enough for Earth, this type of rocket can easily be assembled on-site and does not require extensive cooling that typical cryogenic propellants need. |
@@ -166,7 +166,7 @@ research tree (Computing, Chemical Propulsion, Spacecraft, …).
 
 <label class="show-unreleased"><input type="checkbox" class="show-unreleased-toggle"> Show unreleased</label>
 
-| Research | <span title="Cost in work-hours; divide by your labs' research output to get the actual research time in days">Cost (h)</span> | <span title="Tech tree era — broad progression tier of this research.">Era</span> | Prereqs | Unlocks | Description |
+| Research | <span title="Cost in work-hours (`workHourToComplete` from the dump). Actual time-in-days depends on your labs' research output, which isn't surfaced statically.">Cost (h)</span> | <span title="Tech tree era — broad progression tier of this research.">Era</span> | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- | --- |
 | <a id="research-research-category-lifesup"></a><img src="../images/research/research_category_lifesup.png" width="16" alt=""/>&nbsp;**Life Support** | 648k | Mid | — | — | It is essential to develop technologies that help sustain our astronauts in good health. |
 | <a id="research-research-lifesup-1"></a><img src="../images/research/research_lifesup_1.png" width="16" alt=""/>&nbsp;**Crewed Flight** | 1.2M | Early | [Life Support](#research-research-category-lifesup) | Builds **Module Crew Compartment** | Safe orbital transport of small crews. |
@@ -185,7 +185,7 @@ research tree (Computing, Chemical Propulsion, Spacecraft, …).
 
 <label class="show-unreleased"><input type="checkbox" class="show-unreleased-toggle"> Show unreleased</label>
 
-| Research | <span title="Cost in work-hours; divide by your labs' research output to get the actual research time in days">Cost (h)</span> | <span title="Tech tree era — broad progression tier of this research.">Era</span> | Prereqs | Unlocks | Description |
+| Research | <span title="Cost in work-hours (`workHourToComplete` from the dump). Actual time-in-days depends on your labs' research output, which isn't surfaced statically.">Cost (h)</span> | <span title="Tech tree era — broad progression tier of this research.">Era</span> | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- | --- |
 | <a id="research-research-category-mat2"></a><img src="../images/research/research_category_mat2.png" width="16" alt=""/>&nbsp;**Advanced Materials** | 144k | Late | — | — | Advanced Material Science |
 | <a id="research-research-category-mat"></a><img src="../images/research/research_category_mat.png" width="16" alt=""/>&nbsp;**Materials** | 648k | Early | — | Builds [**Alloy Smelting**](../facilities/#facility-alloysmelting)<br>Facility: [**Glass Kiln**](../facilities/#facility-glass) | Material Science |
@@ -205,7 +205,7 @@ research tree (Computing, Chemical Propulsion, Spacecraft, …).
 
 ## Mining
 
-| Research | <span title="Cost in work-hours; divide by your labs' research output to get the actual research time in days">Cost (h)</span> | <span title="Tech tree era — broad progression tier of this research.">Era</span> | Prereqs | Unlocks | Description |
+| Research | <span title="Cost in work-hours (`workHourToComplete` from the dump). Actual time-in-days depends on your labs' research output, which isn't surfaced statically.">Cost (h)</span> | <span title="Tech tree era — broad progression tier of this research.">Era</span> | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- | --- |
 | <a id="research-research-category-mine"></a><img src="../images/research/research_category_mine.png" width="16" alt=""/>&nbsp;**Mining** | 648k | Mid | — | — | Extraction of resources from celestial objects |
 | <a id="research-research-mine-1"></a><img src="../images/research/research_mine_1.png" width="16" alt=""/>&nbsp;**In-Situ Resource Utilization** | 1.2M | Early | [Mining](#research-research-category-mine) | Builds [**Metal Mining Base**](../facilities/#facility-metalmine)<br>Facility: [**Water Ice Extractor**](../facilities/#facility-icemine)<br>Facility: [**Rare Metal Extractors**](../facilities/#facility-raremine)<br>Facility: [**Carbon Mine**](../facilities/#facility-carbonmine) | We cannot bring everything we need where we're going. We have to be ready to extract what's needed directly from the ground we step on. |
@@ -221,7 +221,7 @@ research tree (Computing, Chemical Propulsion, Spacecraft, …).
 
 <label class="show-unreleased"><input type="checkbox" class="show-unreleased-toggle"> Show unreleased</label>
 
-| Research | <span title="Cost in work-hours; divide by your labs' research output to get the actual research time in days">Cost (h)</span> | <span title="Tech tree era — broad progression tier of this research.">Era</span> | Prereqs | Unlocks | Description |
+| Research | <span title="Cost in work-hours (`workHourToComplete` from the dump). Actual time-in-days depends on your labs' research output, which isn't surfaced statically.">Cost (h)</span> | <span title="Tech tree era — broad progression tier of this research.">Era</span> | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- | --- |
 | <a id="research-research-category-nukepower"></a><img src="../images/research/research_category_nukepower.png" width="16" alt=""/>&nbsp;**Nuclear Power** | 648k | Mid | — | Builds [**Nuclear Reactor**](../facilities/#facility-power-nuke) | The use of nuclear fission to generate power. |
 | <a id="research-research-nukeprop-1"></a><span class="row-unreleased" hidden></span><sub class="unreleased-tag" title="Marked isLocked=true in the dump with no research/contract path that unlocks it — not reachable in-game today.">Unreleased</sub><br><img src="../images/research/research_nukeprop_1.png" width="16" alt=""/>&nbsp;**High Temperature NTR** | 864k | Early | — | — | We can increase the performance of our engines by keeping the fuel elements close to the melting point, increasing the power available for thrust. |
@@ -238,7 +238,7 @@ research tree (Computing, Chemical Propulsion, Spacecraft, …).
 
 ## Power
 
-| Research | <span title="Cost in work-hours; divide by your labs' research output to get the actual research time in days">Cost (h)</span> | <span title="Tech tree era — broad progression tier of this research.">Era</span> | Prereqs | Unlocks | Description |
+| Research | <span title="Cost in work-hours (`workHourToComplete` from the dump). Actual time-in-days depends on your labs' research output, which isn't surfaced statically.">Cost (h)</span> | <span title="Tech tree era — broad progression tier of this research.">Era</span> | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- | --- |
 | <a id="research-research-category-power"></a><img src="../images/research/research_category_power.png" width="16" alt=""/>&nbsp;**Power** | 648k | Mid | — | — | Provides electricity for planetary bases. |
 | <a id="research-research-power-geo"></a><img src="../images/research/research_power_geo.png" width="16" alt=""/>&nbsp;**Geothermal Power Turbine** | 1.2M | Early | [Power](#research-research-category-power) | Builds [**Geothermal Power**](../facilities/#facility-power-geothermal) | Active planetary geology provides thermal gradients that can be utilized to generate power. |
@@ -253,7 +253,7 @@ research tree (Computing, Chemical Propulsion, Spacecraft, …).
 
 <label class="show-unreleased"><input type="checkbox" class="show-unreleased-toggle"> Show unreleased</label>
 
-| Research | <span title="Cost in work-hours; divide by your labs' research output to get the actual research time in days">Cost (h)</span> | <span title="Tech tree era — broad progression tier of this research.">Era</span> | Prereqs | Unlocks | Description |
+| Research | <span title="Cost in work-hours (`workHourToComplete` from the dump). Actual time-in-days depends on your labs' research output, which isn't surfaced statically.">Cost (h)</span> | <span title="Tech tree era — broad progression tier of this research.">Era</span> | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- | --- |
 | <a id="research-research-category-sc2"></a><span class="row-unreleased" hidden></span><sub class="unreleased-tag" title="Marked isLocked=true in the dump with no research/contract path that unlocks it — not reachable in-game today.">Unreleased</sub><br><img src="../images/research/research_category_sc2.png" width="16" alt=""/>&nbsp;**Advanced Spacecraft** | 72k | Late | — | — | Dedicated space vehicles for travel between orbits. |
 | <a id="research-research-sc-helios"></a><img src="../images/research/research_sc_helios.png" width="16" alt=""/>&nbsp;**Stratos** | 144k | Early | [Spacecraft](#research-research-category-sc) | Spacecraft: [**Stratos**](../spacecraft/#spacecraft-spacecraft-chem-large) | Powerful upper stage capable of independent operation in space, ideal workhorse for the moon and beyond. |
@@ -285,7 +285,7 @@ research tree (Computing, Chemical Propulsion, Spacecraft, …).
 
 <label class="show-unreleased"><input type="checkbox" class="show-unreleased-toggle"> Show unreleased</label>
 
-| Research | <span title="Cost in work-hours; divide by your labs' research output to get the actual research time in days">Cost (h)</span> | <span title="Tech tree era — broad progression tier of this research.">Era</span> | Prereqs | Unlocks | Description |
+| Research | <span title="Cost in work-hours (`workHourToComplete` from the dump). Actual time-in-days depends on your labs' research output, which isn't surfaced statically.">Cost (h)</span> | <span title="Tech tree era — broad progression tier of this research.">Era</span> | Prereqs | Unlocks | Description |
 | --- | --- | --- | --- | --- | --- |
 | <a id="research-research-category-terraforming"></a><img src="../images/research/research_category_terraforming.png" width="16" alt=""/>&nbsp;**Terraforming** | 648k | Late | — | — | Transformation of celestial objects into an Earth-like environment |
 | <a id="research-research-terraforming-2"></a><img src="../images/research/research_terraforming_2.png" width="16" alt=""/>&nbsp;**Carbon Release** | 1.2M | Early | [Terraforming](#research-research-category-terraforming) | Builds [**Carbon Power Plant**](../facilities/#facility-power-carbon)<br>Facility: [**Co2 Electrolysis**](../facilities/#facility-co2-splitting)<br>Facility: [**Hydrogen Power Plant**](../facilities/#facility-power-hydrogen) | We can slowly raise the temperature and pressure of our environment by processing and releasing carbon dioxide from local minerals. |

@@ -85,10 +85,6 @@ Early Exploration, The Expansion, Colonization Era, and Race Beyond — each
 with its own roster of playable corporations, all driving the comparison
 table above.
 
-*The shipped data files carry start-year values that don't match what the
-game UI currently shows (start years drift with patches), so they're not
-in this table. The names and corp rosters below are stable.*
-
 | Scenario | Playable corporations |
 | --- | --- |
 | **Early Exploration** | CNSA, ESA, NASA, Roscosmos, Solex |

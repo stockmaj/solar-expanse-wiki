@@ -927,7 +927,7 @@ fn page_planets(ctx: &WikiCtx) -> String {
 
     format!(
         "# Planets\n\n\
-The nine major planets of the Solar System available in Solar Expanse.\n\n\
+Planets available in Solar Expanse.\n\n\
 {table}\n\
 ## See also\n\n\
 - [Moons](moons.md)\n\
@@ -1319,11 +1319,10 @@ fn page_launch_windows(ctx: &WikiCtx) -> String {
         "# Launch Windows\n\n\
 **Jump to:** [Window calculator](#window-calculator) · [Earth ↔ body table](#body-table) · [Gravity-assist trajectory](#gravity-assist)\n\n\
 > **Heads-up:** these numbers are computed by the wiki from the orbital\n\
-> elements the game ships, *not* read from the game itself.  The in-game\n\
-> Plan Mission window uses live n-body propagation including gravitational\n\
-> perturbations and your spacecraft's specific Δv budget, so the dates and\n\
-> intervals here are a **planning approximation** — the porkchop plot is\n\
-> the source of truth at launch time.\n\n\
+> elements the game ships, *not* read from the game itself. The in-game\n\
+> Plan Mission window may produce different dates and Δv numbers — treat\n\
+> the values here as a planning aid; the in-game porkchop plot is the\n\
+> source of truth at launch time.\n\n\
 ## What counts as a launch window\n\n\
 A *launch window* here is the moment when an idealized **Hohmann transfer**\n\
 launched from one body's orbit will arrive at the target body just as that\n\
@@ -1346,7 +1345,7 @@ Pick a *from* body, *to* body, and a start date.  The calculator lists the\n\
 next five Hohmann-transfer launch windows from that pair, plus the arrival\n\
 date for each (transfer time = `0.5 × ((a_from + a_to) / 2)^1.5` years).\n\
 The body fields are typeahead — start typing and pick from the dropdown.\n\
-The start date defaults to **2020-01-01**, the game's campaign start year.\n\n\
+The start date defaults to **2020-01-01**.\n\n\
 <div class=\"calc\">\n\
 <label>From: <input id=\"calc-from\" list=\"calc-bodies\" autocomplete=\"off\" placeholder=\"Body name…\" value=\"Earth\"></label>\n\
 <label>To: <input id=\"calc-to\" list=\"calc-bodies\" autocomplete=\"off\" placeholder=\"Body name…\" value=\"Mars\"></label>\n\
@@ -1388,11 +1387,10 @@ ready and the in-game flight planner handles phasing.\n\n\
 ## Gravity-assist trajectory\n\n\
 <a id=\"gravity-assist\"></a>\n\n\
 > **Heads-up:** these trajectories are computed by the wiki using a\n\
-> patched-conic model on circular coplanar orbits.  The in-game Plan\n\
-> Mission window uses full n-body propagation, so the dates, Δv values,\n\
-> and even the best flyby choice may not match what the game's flight\n\
-> planner reports.  Treat this as a **first-cut planning tool**, not a\n\
-> precise trajectory — confirm in-game before committing to a craft.\n\n\
+> patched-conic model on circular coplanar orbits, not read from the game\n\
+> itself. The in-game Plan Mission window may report different dates, Δv\n\
+> values, and best-flyby choices — treat this as a first-cut planning aid\n\
+> and confirm in-game before committing to a craft.\n\n\
 For outer-system targets a *gravity assist* — a deep flyby of an intermediate\n\
 body that bends the spacecraft's trajectory at no propellant cost — can cut\n\
 the launch Δv dramatically.  Pick any *from*, *flyby*, and *to* body and the\n\
@@ -1474,14 +1472,10 @@ fn page_celestial_index() -> String {
     let count_table = md_table(&["Type", "Count", "Notes"], &rows);
     format!(
         "# Celestial Bodies\n\n\
-All natural objects in Solar Expanse — from the nine planets, through\n\
-moons and asteroid belts, out to comets and the Trappist-1 and Kepler-90\n\
-exoplanet systems reachable in the late game.\n\n\
+All natural objects in Solar Expanse — planets, moons, asteroids, comets,\n\
+and exoplanet systems reachable in the late game.\n\n\
 {count_table}\n\
 ## Orbital data\n\n\
-Orbital elements below are anchored at the **2020-01-01 campaign-start epoch**\n\
-the game ships — the same epoch the in-game flight planner uses for its\n\
-initial body positions.\n\n\
 | Field | Meaning | Unit |\n\
 | --- | --- | --- |\n\
 | Mass | Body mass | 10²⁴ kg |\n\
@@ -1744,10 +1738,10 @@ lift them to space.\n\n",
                 Some("Fuel capacity in tonnes"),
                 Some("Default engine thrust"),
                 Some("Effective exhaust velocity — chemical ~3-5 km/s, nuclear ~8-15, fusion 20+"),
-                Some("Whether the hull has life support — `hull.lifeSupportMaxBase > 0` in the dump. Yes means the craft can transport humans on long missions; No means uncrewed or short-haul only."),
+                Some("Whether the hull has life support — `hull.lifeSupportMaxBase > 0` in the dump. Yes means the craft can carry crew; No means crew cannot board (the game blocks crew assignment per `ToolTip.CargoCrewSCnoLifeSupport`)."),
                 Some("Survives the trip and can fly again (Yes / Partial / No)"),
                 Some("Where the spacecraft is assembled — Orbit means built in an orbital shipyard; Surface means built on a planet"),
-                Some("When the craft needs a launch vehicle to leave a planet/moon surface. Earth always requires an LV; on lower-gravity bodies many craft can self-launch."),
+                Some("From the dump's `needLaunchVehicleToGoToMoon` flag: Any body when true, Earth only when false, Built in orbit when `orbitSC` is true. Confirm gameplay behaviour in-game."),
                 Some("Resources required to construct"),
                 Some("Build time in days"),
                 None,
@@ -1899,7 +1893,7 @@ lift them to space.\n\n",
 - **Exhaust V** is the engine's effective exhaust velocity in km/s, equivalent to specific impulse (multiply by ~102 to get ISP in seconds). Higher exhaust V = more Δv per kilogram of fuel = longer reach, but typically less thrust. Chemical engines sit around 3–5 km/s; nuclear thermal 8–15; fusion and ion drives 20+.\n\
 - **Build cost** is the resource cost of building the spacecraft itself (engine and tank modules are paid for separately when configured).\n\
 - **Built at** is where the craft is assembled: *Orbit* means it's built in an orbital shipyard and never lands; *Surface* means it's built on a planet's surface (some surface craft are full SSTOs, some are upper stages or ride a [launch vehicle](../launch-vehicles/) — the player picks which LV to pair with the craft at flight-planning time, so no fixed mapping is listed here).\n\
-- **Requires LV** says when the craft must ride an LV to reach orbit: *Earth only* means it can self-launch from Luna, Mars, and asteroids but still needs an LV from Earth's gravity well; *Any body* means it needs an LV from every planet/moon (most early chemical and electric craft); *Built in orbit* means it never sits on a surface so the column doesn't apply. Earth always forces an LV regardless of the underlying flag.\n\n\
+- **Requires LV** is derived from the dump's `needLaunchVehicleToGoToMoon` flag: *Any body* when the flag is true (the craft needs an LV everywhere); *Earth only* when the flag is false; *Built in orbit* when `orbitSC` is true (never sits on a surface). The *Earth only* label reflects this static flag — confirm against the in-game UI for the gameplay-level rule.\n\n\
 ## See also\n\n\
 - [Launch Vehicles](../launch-vehicles/) — surface-to-orbit lifters\n\
 - [Space Modules](../space-modules/) — mining rigs, refiners, probes, telescopes, habitats, and crew compartments that ride on these craft\n\
@@ -2769,9 +2763,7 @@ scales starting money and ongoing costs.\n\n",
 Early Exploration, The Expansion, Colonization Era, and Race Beyond — each\n\
 with its own roster of playable corporations, all driving the comparison\n\
 table above.\n\n\
-*The shipped data files carry start-year values that don't match what the\n\
-game UI currently shows (start years drift with patches), so they're not\n\
-in this table. The names and corp rosters below are stable.*\n\n",
+",
         );
         section.push_str(&md_table(
             &["Scenario", "Playable corporations"],
@@ -3191,7 +3183,7 @@ fn page_resources(locale: &Locale, sirenix: &Sirenix) -> String {
         &[
             None,
             Some("Normal (physical), Energy (real-time power), or Human (colonists)"),
-            Some("Earth licensing fee per tonne extracted. Other planets either don't charge or set their own rates; check in-game per-deposit tooltips for non-Earth values."),
+            Some("Earth licensing fee per tonne extracted. Earth is the only body with non-zero fees in the shipped data."),
             Some("Base clearing price used as the market price anchor — supply and demand push actual prices around it"),
             Some("Facilities whose structured production data lists this resource as an output"),
             Some("Facilities whose structured production data lists this resource as an input"),
@@ -3209,7 +3201,7 @@ types exist:\n\n\
 - **Human** — colonists; produced over time by habitats and consumed by jobs.\n\n\
 {table}\n\
 ## Reading the table\n\n\
-- **License (Earth, $/t)** is the per-tonne fee Earth charges for extracting each resource. Earth is currently the only body that charges; other planets either don't charge at all or set their own rates per deposit (check the in-game tooltip on each deposit for non-Earth values).\n\
+- **License (Earth, $/t)** is the per-tonne fee Earth charges for extracting each resource. Earth is the only body in the shipped data with non-zero license fees — every other body's `licenseFeePerTonne` map is empty.\n\
 - **Market base ($/t)** is the starting clearing-price anchor used by the global market; supply and demand move actual prices around it.\n\
 - **Producers** and **Consumers** are pulled from each facility's structured production data (`refinerData`, `energyProductionData`, `resourcesToMine`, `byproducts`) — not from tooltip text — so refineries don't get mis-credited as producing their inputs. Per-day rates aren't extractable from the static descriptors; the in-game tooltip remains the source of truth for rate numbers.\n\n\
 ## See also\n\n\
@@ -3709,10 +3701,10 @@ per-resource thermal properties. Use these tables to understand:\n\n\
 {facilities_section}\
 ## Reading the table\n\n\
 - **Melting / Boiling** are the phase-change temperatures the body's average surface temperature must cross to keep the resource solid, liquid, or gas at reference pressure. Both columns show kelvin first with the celsius equivalent in parentheses.\n\
-- **Latent heat (J/mol)** is the energy required to vaporize one mole of the resource. It drives how strongly evaporation cools the planet's surface and how strongly condensation warms it — the same constant feeds the Clausius-Clapeyron formula the sim uses to compute saturation pressures from temperature.\n\
+- **Latent heat (J/mol)** is the energy required to vaporize one mole of the resource. Higher values mean stronger evaporative cooling and stronger condensation warming when the substance changes phase.\n\
 - **Heat capacity (J/(kg·K))** is how much energy the resource absorbs before its temperature rises. High values smooth out day/night and seasonal temperature swings, so atmospheres dominated by high-Cp species are stabler.\n\
 - **Optical depth** is the dimensionless greenhouse contribution. Higher values trap more outgoing infrared radiation — atmospheres dominated by high-optical-depth species (CO2, water vapor) warm.\n\
-- **Triple-point pressure (atm)** is the minimum atmospheric pressure at which a stable liquid phase exists. Below this, the resource sublimates directly between solid and gas (think Mars-pressure CO2 frost).\n\n\
+- **Triple-point pressure (atm)** is the minimum atmospheric pressure at which a stable liquid phase exists. Below this, the resource sublimates directly between solid and gas.\n\n\
 ## See also\n\n\
 - [Resources](../resources/) — per-resource production / consumption, market prices, and Earth licensing fees.\n\
 - [Facilities](../facilities/) — full table of buildings (including the terraforming structures surfaced above), with build costs and prerequisites.\n"
@@ -5768,7 +5760,7 @@ research tree (Computing, Chemical Propulsion, Spacecraft, …).\n\n",
                 &["Research", "Cost (h)", "Era", "Prereqs", "Unlocks", "Description"],
                 &[
                     None,
-                    Some("Cost in work-hours; divide by your labs' research output to get the actual research time in days"),
+                    Some("Cost in work-hours (`workHourToComplete` from the dump). Actual time-in-days depends on your labs' research output, which isn't surfaced statically."),
                     Some("Tech tree era — broad progression tier of this research."),
                     None,
                     None,
@@ -6034,8 +6026,7 @@ relevant page.\n\n",
     out.push_str(
         "## Notes\n\n\
 - Some contracts bind more than one achievement (e.g. *Interstellar 2* awards\n  both *To Infinity* and *Wanderlust* — the latter only if completed before\n  the year 2400).  Each binding appears as its own row.\n\
-- Spacecraft-bound achievements typically fire the first time you operate a\n  craft of that propulsion class — building, fueling, or launching one\n  depending on the achievement.\n\
-- The Condition column lists the extra requirements parsed from each\n  binding's `conditions[]` array — typically a year deadline or a\n  prerequisite contract.  \"—\" means the achievement fires the moment the\n  parent contract is completed, with no further constraint.\n\
+- The Condition column lists the extra requirements parsed from each\n  binding's `conditions[]` array — typically a year deadline or a\n  prerequisite contract.  \"—\" means no additional condition is set on the binding.\n\
 - Achievement names are derived from the in-game id when no localized\n  display name is available; the in-game UI may polish the wording further.\n\n\
 ## See also\n\n\
 - [Contracts](../contracts/) — full contract list and dependency chain\n\
@@ -6067,14 +6058,16 @@ Plan Mission walks you through five steps:\n\n\
 3. **Cargo** — pick the payload.\n\
 4. **Launch Vehicle** — pick the lifter (only required for missions launching from a planet's surface).\n\
 5. **Flight Plan** — pick the launch and arrival windows from the porkchop plot.\n\n\
-### Mission types (from in-game UI)\n\n\
-| Type | Notes |\n\
-| --- | --- |\n\
-| **Direct** | Single Hohmann-style transfer to the destination. |\n\
-| **Gravity Assist** | Uses another body's gravity to bend the trajectory and save Δv. The game lets you choose whether cargo drops at the assist target or continues on. |\n\
-| **Cyclical** | A repeating supply route between two or more bodies. |\n\
-| **Asteroid Pulling** | Specialised mission to push an asteroid into a different orbit using an Asteroid Engine Module. |\n\
-| **Probe Deployment** | Drops a small probe at a destination (typically the first thing you send anywhere). |\n\n\
+### Mission types\n\n\
+Mission-type labels surfaced by the in-game Plan Mission window (locale\n\
+keys `Game.UI.Windows.Windows.PlanMissionWindow.*`):\n\n\
+- **Direct flight** (the default Plan Mission flow)\n\
+- **Gravity Assist** (toggle in Plan Mission — `PlanMission.GravityAssistOn`)\n\
+- **Cyclical Mission** (`UI.WindowMain.Layers.CycleMission`, planned via the *Plan Cyclical Mission* window)\n\
+- **Asteroid Pulling** (specialised mission scheduled from an Asteroid Engine Module)\n\
+- **Probe Deployment** (probe payload dropped on arrival)\n\n\
+The mechanics behind each type aren't captured in the shipped data files;\n\
+see the in-game UI for the authoritative behaviour.\n\n\
 For launch-window timing for any destination, see [Launch Windows](../celestial-bodies/launch-windows.md).\n\n\
 ## See also\n\n\
 - [Contracts](../contracts/)\n\
@@ -6277,24 +6270,24 @@ the names, descriptions, and stat tables here match exactly what you see in-game
 | Section | What's in it |\n\
 | --- | --- |\n\
 | **[Celestial Bodies](celestial-bodies/)** | The Sun, planets, moons, asteroids, comets, and exoplanet systems. |\n\
-| [Exoplanets](exoplanets/) | Trappist-1, Kepler-90, Tau Ceti, and Proxima Centauri — the four destination systems reachable via a generation ship. |\n\
-| [Spacecraft](spacecraft/) | Interplanetary craft — Iris, Selene, Stratos, Hermes, Centaur, Athena, Prometheus, Hephaistos, Ariane, Cronos, Nike, Sirius, Zeus, and the Hephaistos generation ship. |\n\
+| [Exoplanets](exoplanets/) | Destination systems reachable via a generation ship. |\n\
+| [Spacecraft](spacecraft/) | Interplanetary craft. |\n\
 | [Space Modules](space-modules/) | Spacecraft payload — mining rigs, refiners, probes, telescopes, habitats, power plants, and crew compartments. |\n\
-| [Launch Vehicles](launch-vehicles/) | Surface-to-orbit lifters — Albatross, Pelican, Magpie, Condor, Teratorn. |\n\
+| [Launch Vehicles](launch-vehicles/) | Surface-to-orbit lifters. |\n\
 | [Facilities](facilities/) | Ground buildings and orbital modules — power, mining, refining, habitats, life support, etc. |\n\
-| [Research](research/) | Tech tree — chemical, electric, nuclear, fusion propulsion, life support, materials, computing. |\n\
+| [Research](research/) | Tech tree. |\n\
 | [Missions](missions/) | Mission planning — Plan Mission walk-through, mission types, launch-window pointer. |\n\
 | [Contracts](contracts/) | Story and freelance contracts — the in-game Contracts tab — that drive progression. |\n\
 | [Achievements](achievements/) | Steam achievements and how to earn each — keyed to contracts, spacecraft, and launch vehicles. |\n\
-| [Resources](resources/) | The 20+ resource types — water, metals, fissiles, He-3, supplies, exotic alloys. |\n\
-| [Asteroid Taxonomy](asteroid-taxonomy/) | The five asteroid classes (Carbon, Dark, Helium-3, Metal, Stone) and the per-class resource roll table the game uses when you mine a deposit. |\n\
+| [Resources](resources/) | Resource catalogue — production, consumption, and per-body mining license fees. |\n\
+| [Asteroid Taxonomy](asteroid-taxonomy/) | Asteroid classes and the per-class resource roll table the game uses when you mine a deposit. |\n\
 | [Terraforming](terraforming/) | Per-resource thermal / phase constants — boiling and melting points, latent heat, heat capacity, optical depth — that drive the atmosphere sim. |\n\
-| [Corporations](corporations/) | Playable starting factions — SoleX, NASA, ESA, CNSA, Roscosmos. |\n\n\
+| [Corporations](corporations/) | Playable starting factions. |\n\n\
 ## How to use this wiki\n\n\
 - **Find data fast.** Bodies (planets, moons, asteroids, comets, exoplanets) live under [Celestial Bodies](celestial-bodies/) — radius, semi-major axis, eccentricity, inclination, parent. Fleet planning lives under [Spacecraft](spacecraft/) and [Launch Vehicles](launch-vehicles/) — dry mass, cargo, fuel, thrust, exhaust velocity, build cost. What-to-build prompts and the workforce / energy / resource math behind each structure are on [Facilities](facilities/). The tech tree — costs, prereqs, and what each node unlocks — is on [Research](research/).\n\
 - **Plan progression.** [Contracts](contracts/) is the in-game contracts tab, ordered by their root tree, with rewards and follow-on links. [Missions](missions/) walks the Plan Mission flow and points at launch-window data. [Achievements](achievements/) lists every Steam achievement keyed to the contract, spacecraft, or launch vehicle that earns it.\n\
 - **Compare scenario starts.** [Corporations](corporations/) is a side-by-side table of the playable factions — starting cash, starting research, starting fleet, starting facilities — so you can pick the run you want.\n\
-- **Understand the economy.** [Resources](resources/) lists every resource (water, metals, fissiles, He-3, supplies, exotic alloys), what produces it, what consumes it, and per-body mining license fees.  [Asteroid Taxonomy](asteroid-taxonomy/) shows the resource roll table for each of the five asteroid classes (Carbon, Dark, Helium-3, Metal, Stone) so you know what mining a given asteroid will yield.\n\
+- **Understand the economy.** [Resources](resources/) lists every resource, what produces it, what consumes it, and per-body mining license fees.  [Asteroid Taxonomy](asteroid-taxonomy/) shows the resource roll table for each asteroid class so you know what mining a given asteroid will yield.\n\
 - **Tables are sortable.** Click any column header to sort by that column; click again to reverse.  Hover a column header for a tooltip explaining its units or source data.\n\
 - **Calculator.** Several pages embed a small Calculator that computes a fleet's total payload and crew capacity for trip planning — change the inputs and the totals update live.\n\n\
 ## Contributing\n\n\

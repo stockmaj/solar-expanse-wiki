@@ -3,11 +3,10 @@
 **Jump to:** [Window calculator](#window-calculator) · [Earth ↔ body table](#body-table) · [Gravity-assist trajectory](#gravity-assist)
 
 > **Heads-up:** these numbers are computed by the wiki from the orbital
-> elements the game ships, *not* read from the game itself.  The in-game
-> Plan Mission window uses live n-body propagation including gravitational
-> perturbations and your spacecraft's specific Δv budget, so the dates and
-> intervals here are a **planning approximation** — the porkchop plot is
-> the source of truth at launch time.
+> elements the game ships, *not* read from the game itself. The in-game
+> Plan Mission window may produce different dates and Δv numbers — treat
+> the values here as a planning aid; the in-game porkchop plot is the
+> source of truth at launch time.
 
 ## What counts as a launch window
 
@@ -37,7 +36,7 @@ Pick a *from* body, *to* body, and a start date.  The calculator lists the
 next five Hohmann-transfer launch windows from that pair, plus the arrival
 date for each (transfer time = `0.5 × ((a_from + a_to) / 2)^1.5` years).
 The body fields are typeahead — start typing and pick from the dropdown.
-The start date defaults to **2020-01-01**, the game's campaign start year.
+The start date defaults to **2020-01-01**.
 
 <div class="calc">
 <label>From: <input id="calc-from" list="calc-bodies" autocomplete="off" placeholder="Body name…" value="Earth"></label>
@@ -154,11 +153,10 @@ ready and the in-game flight planner handles phasing.
 <a id="gravity-assist"></a>
 
 > **Heads-up:** these trajectories are computed by the wiki using a
-> patched-conic model on circular coplanar orbits.  The in-game Plan
-> Mission window uses full n-body propagation, so the dates, Δv values,
-> and even the best flyby choice may not match what the game's flight
-> planner reports.  Treat this as a **first-cut planning tool**, not a
-> precise trajectory — confirm in-game before committing to a craft.
+> patched-conic model on circular coplanar orbits, not read from the game
+> itself. The in-game Plan Mission window may report different dates, Δv
+> values, and best-flyby choices — treat this as a first-cut planning aid
+> and confirm in-game before committing to a craft.
 
 For outer-system targets a *gravity assist* — a deep flyby of an intermediate
 body that bends the spacecraft's trajectory at no propellant cost — can cut
