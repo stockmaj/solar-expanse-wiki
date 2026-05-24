@@ -191,6 +191,52 @@
   })();
   </script>
 
+  <script>
+  // "Show unreleased" toggle.  Rows that the generator marks as Unreleased
+  // (isLocked=true with no known unlock path) carry a hidden
+  // <span class="row-unreleased"> marker in their first cell.  Each affected
+  // table is preceded by a checkbox.label.show-unreleased.  When the box is
+  // unchecked (default), we hide every row containing the marker; when it's
+  // checked we show them.  We scope each toggle to the *next* sibling table
+  // so multiple toggles on a page (Ground / Orbital, etc.) stay independent.
+  (function () {
+    function bind() {
+      var toggles = document.querySelectorAll('.show-unreleased-toggle');
+      if (!toggles.length) return;
+      toggles.forEach(function (cb) {
+        // Find the nearest following <table>.  Walks across sibling elements
+        // so Markdown's paragraph-wrapped layout doesn't trip us up.
+        var node = cb.closest('.show-unreleased') || cb.parentElement;
+        var table = null;
+        while (node && node.nextElementSibling) {
+          node = node.nextElementSibling;
+          if (node.tagName === 'TABLE') { table = node; break; }
+          var inner = node.querySelector && node.querySelector('table');
+          if (inner) { table = inner; break; }
+        }
+        if (!table) return;
+        function apply() {
+          var show = cb.checked;
+          table.querySelectorAll('tbody tr').forEach(function (tr) {
+            if (tr.querySelector('.row-unreleased')) {
+              tr.style.display = show ? '' : 'none';
+            }
+          });
+        }
+        cb.addEventListener('change', apply);
+        apply();
+      });
+    }
+    if (typeof document !== 'undefined') {
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', bind);
+      } else {
+        bind();
+      }
+    }
+  })();
+  </script>
+
   <footer class="site-footer">
     <div class="container">
       <small>

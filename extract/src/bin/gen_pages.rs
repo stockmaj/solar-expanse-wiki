@@ -466,6 +466,12 @@ struct FacilityStat {
     can_be_scrapped: bool,
     #[allow(dead_code)]
     can_be_turned_off: bool,
+    /// `isLocked` from the dump — true when the facility ships locked and
+    /// requires a research / contract / scenario-start to unlock. Combined
+    /// with the per-research `unlock_target` map, a locked facility with no
+    /// known unlock path is flagged as "Unreleased" on the page.
+    #[serde(default)]
+    is_locked: bool,
     /// Days to construct. From `timeToBuildInDays`.
     #[serde(default)]
     build_time_days: f64,
@@ -2003,6 +2009,90 @@ fn build_module_unlocking_research(sirenix: &Sirenix) -> BTreeMap<&str, &str> {
             if s.action == "UnlockFacility"
                 && (s.target.starts_with("module_") || s.target.starts_with("id_SpaceModule_"))
             {
+                out.entry(s.target.as_str()).or_insert(r.id.as_str());
+            }
+        }
+    }
+    out
+}
+
+/// Hand-curated set of entity ids that the dump marks `isLocked = true`
+/// but the game grants by some non-research path the dumper can't see
+/// (scenario start, contract reward branch, end-of-tree milestone, etc.).
+/// Anything in this set is treated as reachable in the Availability
+/// classifier so it never gets the "Unreleased" badge.
+///
+/// **How to extend:** add the entity's raw id (the same id parse-sirenix
+/// emits). Keep this small — every entry is a workaround for a missing
+/// detection path, not a permanent fixture. If a pattern emerges (e.g.
+/// "everything granted by contract X is reachable"), encode that pattern
+/// in code instead.
+const REACHABLE_OVERRIDES: &[&str] = &[
+    // HQ is the scenario's starting building — granted at corp start, never
+    // research-unlocked. Locked-by-default in the dump.
+    "build_hq",
+    // Interstellar generation ship + the orbital shipyard that constructs
+    // it are granted at the end of the `contract_general_interstellar2`
+    // chain (the contract refs both ids in its objective list but doesn't
+    // expose a clean `actionUnlock` path the dumper can pick up).
+    "build_space_interstellarconstruction",
+    "build_space_interstellarconstruction2",
+    "build_veh_assemblyInterstellarShip",
+    "id_Spacecraft_InterstellarShip",
+    "id_Spacecraft_InterstellarShip2",
+];
+
+/// True if the entity is locked in the dump AND no research /
+/// secondary-unlock / contract-reward path the parser knows about
+/// touches it AND it isn't in the manual reachable-overrides list.
+fn is_unreleased(
+    is_locked: bool,
+    id: &str,
+    unlocked_by: &BTreeMap<&str, &str>,
+) -> bool {
+    if !is_locked {
+        return false;
+    }
+    if unlocked_by.contains_key(id) {
+        return false;
+    }
+    if REACHABLE_OVERRIDES.contains(&id) {
+        return false;
+    }
+    true
+}
+
+/// `<sub class="unreleased-tag">Unreleased</sub>` badge + a hidden
+/// `<span class="row-unreleased" hidden></span>` marker the JS toggle
+/// uses to filter the row out by default. Both go in the row's first
+/// cell so a single class selector catches the row.
+fn unreleased_row_badge() -> &'static str {
+    "<span class=\"row-unreleased\" hidden></span><sub class=\"unreleased-tag\" title=\"Marked isLocked=true in the dump with no research/contract path that unlocks it — not reachable in-game today.\">Unreleased</sub><br>"
+}
+
+/// Show/hide toggle rendered above a table when at least one row is
+/// flagged Unreleased. Uses the same CSS class the JS in
+/// `_layouts/default.html` binds to.
+fn show_unreleased_toggle() -> &'static str {
+    "<label class=\"show-unreleased\"><input type=\"checkbox\" class=\"show-unreleased-toggle\"> Show unreleased</label>\n\n"
+}
+
+/// Build the `facility_id → research_id` map covering BOTH the primary
+/// `unlock_target` (when `action == "UnlockFacility"`) and the secondary
+/// `unlockDataList[]` entries with the same action. Mirrors the module
+/// helper above — distinct only in that it accepts `build_*` ids.
+fn build_facility_unlocking_research(sirenix: &Sirenix) -> BTreeMap<&str, &str> {
+    let mut out: BTreeMap<&str, &str> = BTreeMap::new();
+    for r in &sirenix.research {
+        if r.action == "UnlockFacility" {
+            if let Some(target) = r.unlock_target.as_deref() {
+                if target.starts_with("build_") {
+                    out.entry(target).or_insert(r.id.as_str());
+                }
+            }
+        }
+        for s in &r.secondary_unlocks {
+            if s.action == "UnlockFacility" && s.target.starts_with("build_") {
                 out.entry(s.target.as_str()).or_insert(r.id.as_str());
             }
         }
@@ -4946,16 +5036,12 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
         .map(|r| (r.id.as_str(), r.name.as_str()))
         .collect();
 
-    // Build a facility_id → research_id map by walking the research nodes that
-    // declare an UnlockFacility action.  The facility's own `lockByHelpNotUse`
-    // field is set only for a handful of facilities, but every researched
-    // facility has a corresponding research with parameter1 = build_<id>.
-    let facility_unlocked_by: BTreeMap<&str, &str> = sirenix
-        .research
-        .iter()
-        .filter(|r| r.action == "UnlockFacility")
-        .filter_map(|r| r.unlock_target.as_deref().map(|t| (t, r.id.as_str())))
-        .collect();
+    // Build a facility_id → research_id map covering both the primary unlock
+    // (`action == "UnlockFacility"`) and secondary `unlockDataList[]` entries.
+    // Used both for the per-row Prereq column and the Unreleased classifier
+    // below — the latter needs the secondary list so a facility unlocked only
+    // through a research's bonus payload doesn't get a false "Unreleased".
+    let facility_unlocked_by = build_facility_unlocking_research(sirenix);
 
     let mut ground: Vec<&FacilityStat> = Vec::new();
     let mut orbital: Vec<&FacilityStat> = Vec::new();
@@ -5052,8 +5138,13 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
             "—".to_string()
         };
         let desc = facility_desc.get(id_no_prefix).copied().unwrap_or("");
+        let unreleased_prefix = if is_unreleased(f.is_locked, f.id.as_str(), &facility_unlocked_by) {
+            unreleased_row_badge()
+        } else {
+            ""
+        };
         let name_cell = format!(
-            "{anchor}**{name}**",
+            "{anchor}{unreleased_prefix}**{name}**",
             anchor = anchor_tag("facility", id_no_prefix),
             name = escape_cell(&display),
         );
@@ -5160,6 +5251,15 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
     };
     let ground_filter = build_filter_block("ground", &ground);
     let orbital_filter = build_filter_block("orbital", &orbital);
+    // Render the "Show unreleased" toggle above each table that has at
+    // least one Unreleased row. The toggle is shipped unchecked, so by
+    // default unreleased rows are hidden — players see only what's
+    // reachable in-game.
+    let has_unreleased = |facs: &[&FacilityStat]| -> bool {
+        facs.iter().any(|f| is_unreleased(f.is_locked, f.id.as_str(), &facility_unlocked_by))
+    };
+    let ground_toggle = if has_unreleased(&ground) { show_unreleased_toggle() } else { "" };
+    let orbital_toggle = if has_unreleased(&orbital) { show_unreleased_toggle() } else { "" };
 
     format!(
         "# Facilities\n\n\
@@ -5174,9 +5274,9 @@ Facilities are split into two families:\n\n\
 - **Orbital modules** attach to a space station or shipyard in orbit. They\n\
   don't need a habitable surface, but you have to build the station first.\n\n\
 ## Ground facilities\n\n\
-{ground_filter}{ground_table}\n\
+{ground_filter}{ground_toggle}{ground_table}\n\
 ## Orbital modules\n\n\
-{orbital_filter}{orbital_table}\n\
+{orbital_filter}{orbital_toggle}{orbital_table}\n\
 ## Reading the table\n\n\
 - **Type** is the gameplay category — *Production*, *Mining*, *Storage*, *Power*, *Habitat*, etc. The Solar Expanse UI groups facilities by type when you open the build menu.\n\
 - **Time** is the build duration in days.\n\
@@ -9156,6 +9256,7 @@ mod tests {
             is_obsolete: false,
             can_be_scrapped: false,
             can_be_turned_off: false,
+            is_locked: false,
             build_time_days: 0.0,
             bonus_data: None,
             role: None,
@@ -9431,6 +9532,65 @@ mod tests {
         assert!(
             !row.contains("None"),
             "raw role enum leaked: {row}"
+        );
+    }
+
+    #[test]
+    fn facilities_page_marks_unreleased_isLocked_with_no_unlock() {
+        // A facility with isLocked=true AND no research that unlocks it is
+        // dead/unreleased data — the player can't ever build it. The page
+        // should mark its row with a visible "Unreleased" badge and a hidden
+        // CSS marker the show/hide JS toggle uses to filter the row out by
+        // default. A facility with isLocked=false should NOT carry the badge.
+        let mut locale = facility_fixture_locale();
+        locale.facilities.push(Facility {
+            id: "metalmine_big".into(),
+            name: "Metal Mining Base (Advanced)".into(),
+            description: "Bigger metal mine.".into(),
+        });
+        let mut released = facility_stat("build_lab", "Other");
+        released.build_time_days = 200.0;
+        // explicit: defaults already give is_locked=false for the fixture
+        let mut orphan = facility_stat("build_metalmine_big", "Mining");
+        orphan.is_locked = true;
+        let sirenix = Sirenix {
+            facilities: vec![released, orphan],
+            ..Default::default()
+        };
+        let page = page_facilities(&locale, &sirenix);
+        // The released row carries neither marker nor badge.
+        let released_row = page
+            .lines()
+            .find(|l| l.contains("Research Lab"))
+            .expect("released row present");
+        assert!(
+            !released_row.contains("Unreleased"),
+            "released row should NOT carry the Unreleased badge:\n{released_row}"
+        );
+        // The orphan row carries the visible badge and the hidden filter
+        // marker (a span with class=row-unreleased) so the JS toggle can
+        // hide it by default.
+        let orphan_row = page
+            .lines()
+            .find(|l| l.contains("Metal Mining Base (Advanced)"))
+            .expect("orphan row present");
+        assert!(
+            orphan_row.contains("Unreleased"),
+            "orphan row should display Unreleased badge:\n{orphan_row}"
+        );
+        assert!(
+            orphan_row.contains("row-unreleased"),
+            "orphan row should carry the row-unreleased marker class for JS:\n{orphan_row}"
+        );
+        // A "Show unreleased" checkbox must appear on the page when any
+        // unreleased row exists, hidden-by-default (no `checked` attribute).
+        assert!(
+            page.contains("show-unreleased-toggle"),
+            "page should render the show-unreleased toggle when unreleased rows exist:\n{page}"
+        );
+        assert!(
+            page.contains("Show unreleased"),
+            "toggle label should read 'Show unreleased':\n{page}"
         );
     }
 

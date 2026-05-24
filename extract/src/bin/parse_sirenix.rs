@@ -135,6 +135,11 @@ struct Facility {
     is_obsolete: bool,
     can_be_scrapped: bool,
     can_be_turned_off: bool,
+    /// `isLocked` from the dump. True when the facility ships locked
+    /// behind research / contract / scenario-start. Cross-referenced
+    /// downstream against the research unlock graph to flag entries
+    /// that are locked AND unreachable.
+    is_locked: bool,
     /// Resources this facility outputs per day. Pulled from real structured
     /// data, not description text. Sources, in priority order:
     ///   * `facilityType == "Power"` with `energyProductionData.energyProduction > 0`
@@ -1368,6 +1373,7 @@ fn parse_facility(v: &Value, descriptor: &str) -> Option<Facility> {
         is_obsolete: b(&["isObsolete"]),
         can_be_scrapped: b(&["canBeScrapped"]),
         can_be_turned_off: b(&["canBeTurnedOff"]),
+        is_locked: b(&["isLocked"]),
         produces,
         consumes,
         build_time_days: f(&["timeToBuildInDays"]),
