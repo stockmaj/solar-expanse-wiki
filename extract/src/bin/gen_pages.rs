@@ -2078,10 +2078,11 @@ const REACHABLE_OVERRIDES: &[&str] = &[
     // Orbital Payload Container — spawned by launch facilities (elevator,
     // mass driver, spin launch, catapult) rather than research-unlocked.
     "spacecraft_capsule",
-    // Standard mining / probe modules — granted at scenario start in the
-    // mid/late epochs (The Expansion / Race Beyond). Aaron confirmed these
-    // are real player-buildable modules; the dump's SGD `serializationData`
-    // references them opaquely so the dumper can't see the grant path.
+    // Standard mining / probe modules — granted at scenario start in every
+    // epoch including the standard Early-Exploration one (player-confirmed).
+    // The dump's StartGameData `serializationData` references them opaquely,
+    // so the dumper can't see the grant path and they'd otherwise be flagged
+    // Unreleased.
     "module_metalmining",
     "module_icemining",
     "module_raremining",
