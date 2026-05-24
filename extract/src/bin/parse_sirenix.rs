@@ -30,6 +30,10 @@ struct Spacecraft {
     /// read this as "can transport humans". Zero on freighters, sails,
     /// payload containers, and small uncrewed craft.
     life_support_max: f64,
+    /// `isLocked` from the dump. Combined with the research/contract
+    /// unlock graph downstream to flag "Unreleased" — locked AND no
+    /// known unlock path.
+    is_locked: bool,
 }
 
 #[derive(Serialize, Debug, Default, PartialEq)]
@@ -81,6 +85,11 @@ struct Research {
     bonus_amount: f64,
     bonus_components: Vec<String>,    // e.g. ["eng_chem"]
     show_in_tree: bool,
+    /// `isLocked` flag from the dump. Most researches are `false`. The
+    /// 30-ish `true` entries are tech-tree nodes the dev has marked as
+    /// not-reachable (locked-for-UI) — surfaced downstream as
+    /// "Unreleased" on the research page.
+    is_locked: bool,
     contract_unlocks: Vec<String>,    // every contract id this research unlocks (from unlockData + unlockDataList)
     /// Era tier (0 early, 1 mid, 2 late) from `stage` in the dump.
     #[serde(default)]
@@ -894,6 +903,7 @@ fn parse_spacecraft(v: &Value) -> Option<Spacecraft> {
         build_time_days: f(&["timeToBuildInDays"]),
         launch_cost: f(&["costLaunch"]),
         life_support_max: lookup_f64(v, &["hull", "lifeSupportMaxBase"]).unwrap_or(0.0),
+        is_locked: b(&["isLocked"]),
     })
 }
 
@@ -1115,6 +1125,7 @@ fn parse_research(v: &Value) -> Option<Research> {
         bonus_amount,
         bonus_components,
         show_in_tree,
+        is_locked: lookup_bool(v, &["isLocked"]).unwrap_or(false),
         contract_unlocks,
         stage,
         secondary_unlocks,

@@ -581,6 +581,10 @@ struct ResearchStat {
     bonus_amount: f64,
     bonus_components: Vec<String>,
     show_in_tree: bool,
+    /// `isLocked` from the dump. ~30 research nodes are locked for UI
+    /// (no path opens them) — flagged Unreleased on the research page.
+    #[serde(default)]
+    is_locked: bool,
     #[serde(default)]
     contract_unlocks: Vec<String>,
     /// Era tier (0 early, 1 mid, 2 late) — drives the "Era" column.
@@ -661,6 +665,10 @@ struct SpacecraftStat {
     /// can sustain a crew (rendered as "Life support: Yes").
     #[serde(default)]
     life_support_max: f64,
+    /// `isLocked` from the dump. Combined with the research/contract
+    /// unlock graph to flag Unreleased rows on the spacecraft page.
+    #[serde(default)]
+    is_locked: bool,
 }
 
 #[derive(Deserialize, Clone)]
@@ -1657,13 +1665,24 @@ fn page_spacecraft(locale: &Locale, sirenix: &Sirenix) -> String {
         .collect();
 
     // Reverse map: spacecraft_id → research_id of the node that unlocks it.
-    // Built from research entries with `action == "UnlockSpacecraftType"`.
-    let research_unlocking_sc: BTreeMap<&str, &str> = sirenix
-        .research
-        .iter()
-        .filter(|r| r.action == "UnlockSpacecraftType")
-        .filter_map(|r| r.unlock_target.as_deref().map(|t| (t, r.id.as_str())))
-        .collect();
+    // Built from research entries with `action == "UnlockSpacecraftType"`
+    // (primary + secondary `unlockDataList[]` entries).
+    let research_unlocking_sc: BTreeMap<&str, &str> = {
+        let mut out: BTreeMap<&str, &str> = BTreeMap::new();
+        for r in &sirenix.research {
+            if r.action == "UnlockSpacecraftType" {
+                if let Some(t) = r.unlock_target.as_deref() {
+                    out.entry(t).or_insert(r.id.as_str());
+                }
+            }
+            for s in &r.secondary_unlocks {
+                if s.action == "UnlockSpacecraftType" {
+                    out.entry(s.target.as_str()).or_insert(r.id.as_str());
+                }
+            }
+        }
+        out
+    };
     let research_display_name: BTreeMap<&str, &str> = locale
         .research
         .iter()
@@ -1693,11 +1712,15 @@ lift them to space.\n\n",
     // Group by engine category, render a table per group.
     let mut current = u8::MAX;
     let mut rows: Vec<Vec<String>> = Vec::new();
-    let flush = |out: &mut String, rows: &mut Vec<Vec<String>>, header: &str| {
+    let mut current_has_unreleased = false;
+    let flush = |out: &mut String, rows: &mut Vec<Vec<String>>, header: &str, has_unreleased: bool| {
         if rows.is_empty() {
             return;
         }
         out.push_str(&format!("## {header}\n\n"));
+        if has_unreleased {
+            out.push_str(show_unreleased_toggle());
+        }
         out.push_str(&md_table_with_tips(
             &[
                 "Spacecraft",
@@ -1746,8 +1769,12 @@ lift them to space.\n\n",
                 4 => "Solar Sails",
                 _ => "Other",
             };
-            flush(&mut out, &mut rows, header);
+            flush(&mut out, &mut rows, header, current_has_unreleased);
             current = cat;
+            current_has_unreleased = false;
+        }
+        if is_unreleased(s.is_locked, s.id.as_str(), &research_unlocking_sc) {
+            current_has_unreleased = true;
         }
         let display_name = id_to_name.get(s.id.as_str()).copied().unwrap_or(s.id.as_str());
         let desc = id_to_desc.get(s.id.as_str()).copied().unwrap_or("");
@@ -1829,9 +1856,14 @@ lift them to space.\n\n",
             })
             .unwrap_or_default();
         let desc_cell = format!("{}{}", unlock_prefix, escape_cell(desc));
+        let unreleased_prefix = if is_unreleased(s.is_locked, s.id.as_str(), &research_unlocking_sc) {
+            unreleased_row_badge()
+        } else {
+            ""
+        };
         rows.push(vec![
             format!(
-                "{anchor}**{name}**",
+                "{anchor}{unreleased_prefix}**{name}**",
                 anchor = anchor_tag("spacecraft", &s.id),
                 name = escape_cell(display_name)
             ),
@@ -1857,7 +1889,7 @@ lift them to space.\n\n",
         4 => "Solar Sails",
         _ => "Other",
     };
-    flush(&mut out, &mut rows, header);
+    flush(&mut out, &mut rows, header, current_has_unreleased);
     out.push_str("\n");
 
     out.push_str(
@@ -2040,6 +2072,20 @@ const REACHABLE_OVERRIDES: &[&str] = &[
     "build_veh_assemblyInterstellarShip",
     "id_Spacecraft_InterstellarShip",
     "id_Spacecraft_InterstellarShip2",
+    // Centaur (`spacecraft_chem_mid`) — visible in all scenarios as an
+    // upper-stage rocket. 14 refs in StartGameData; reachable in normal play.
+    "spacecraft_chem_mid",
+    // Orbital Payload Container — spawned by launch facilities (elevator,
+    // mass driver, spin launch, catapult) rather than research-unlocked.
+    "spacecraft_capsule",
+    // Standard mining / probe modules — granted at scenario start in the
+    // mid/late epochs (The Expansion / Race Beyond). Aaron confirmed these
+    // are real player-buildable modules; the dump's SGD `serializationData`
+    // references them opaquely so the dumper can't see the grant path.
+    "module_metalmining",
+    "module_icemining",
+    "module_raremining",
+    "module_ground_probe",
 ];
 
 /// True if the entity is locked in the dump AND no research /
@@ -2268,9 +2314,15 @@ and so on.\n\n",
                     String::new()
                 };
                 let desc_cell = format!("{locked_prefix}{}", escape_cell(desc));
+                let unreleased_prefix = if is_unreleased(m.is_locked, m.id.as_str(), &module_unlocked_by) {
+                    unreleased_row_badge()
+                } else {
+                    ""
+                };
+                let name_cell = format!("{unreleased_prefix}**{}**", escape_cell(&display));
                 if is_mining {
                     vec![
-                        format!("**{}**", escape_cell(&display)),
+                        name_cell,
                         mass_cell,
                         role,
                         fmt_space_module_mines(&m.resources_to_mine, &resource_name),
@@ -2281,7 +2333,7 @@ and so on.\n\n",
                     ]
                 } else {
                     vec![
-                        format!("**{}**", escape_cell(&display)),
+                        name_cell,
                         mass_cell,
                         role,
                         cargo_cell.to_string(),
@@ -2293,6 +2345,12 @@ and so on.\n\n",
             })
             .collect();
         out.push_str(&format!("## {label}\n\n"));
+        let section_has_unreleased = modules.iter().any(|m| {
+            is_unreleased(m.is_locked, m.id.as_str(), &module_unlocked_by)
+        });
+        if section_has_unreleased {
+            out.push_str(show_unreleased_toggle());
+        }
         if is_mining {
             out.push_str(&md_table_with_tips(mining_header, mining_tips, &rows));
         } else {
@@ -2373,12 +2431,35 @@ fn page_launch_vehicles(locale: &Locale, sirenix: &Sirenix) -> String {
     let chemical: Vec<&LaunchVehicleStat> = entries.iter().copied().filter(|lv| !is_nuclear(lv)).collect();
     let nuclear: Vec<&LaunchVehicleStat> = entries.iter().copied().filter(is_nuclear).collect();
 
+    // LV reachability: by research action UnlockVehicleType (primary +
+    // secondary). Same shape as the facility helper but for the LV id space.
+    let lv_unlocked_by: BTreeMap<&str, &str> = {
+        let mut out: BTreeMap<&str, &str> = BTreeMap::new();
+        for r in &sirenix.research {
+            if r.action == "UnlockVehicleType" {
+                if let Some(t) = r.unlock_target.as_deref() {
+                    out.entry(t).or_insert(r.id.as_str());
+                }
+            }
+            for s in &r.secondary_unlocks {
+                if s.action == "UnlockVehicleType" {
+                    out.entry(s.target.as_str()).or_insert(r.id.as_str());
+                }
+            }
+        }
+        out
+    };
     let make_row = |lv: &LaunchVehicleStat| -> Vec<String> {
         let display = id_to_name.get(lv.id.as_str()).copied().unwrap_or(lv.id.as_str());
         let desc = id_to_desc.get(lv.id.as_str()).copied().unwrap_or("");
+        let unreleased_prefix = if is_unreleased(lv.is_locked, lv.id.as_str(), &lv_unlocked_by) {
+            unreleased_row_badge()
+        } else {
+            ""
+        };
         vec![
             format!(
-                "{anchor}**{name}**",
+                "{anchor}{unreleased_prefix}**{name}**",
                 anchor = anchor_tag("lv", &lv.id),
                 name = escape_cell(display)
             ),
@@ -2422,6 +2503,11 @@ fn page_launch_vehicles(locale: &Locale, sirenix: &Sirenix) -> String {
     let nuke_rows: Vec<Vec<String>> = nuclear.iter().map(|lv| make_row(lv)).collect();
     let chem_table = md_table_with_tips(&headers, &tooltips, &chem_rows);
     let nuke_table = md_table_with_tips(&headers, &tooltips, &nuke_rows);
+    let has_unreleased = |lvs: &[&LaunchVehicleStat]| -> bool {
+        lvs.iter().any(|lv| is_unreleased(lv.is_locked, lv.id.as_str(), &lv_unlocked_by))
+    };
+    let chem_toggle = if has_unreleased(&chemical) { show_unreleased_toggle() } else { "" };
+    let nuke_toggle = if has_unreleased(&nuclear) { show_unreleased_toggle() } else { "" };
 
     // Alternative-launch-methods table is generated from `sirenix.facilities`
     // filtered to LaunchFacility so the rows stay in sync with the facilities
@@ -2556,9 +2642,9 @@ Three propulsion families are unlocked across the tech tree:\n\n\
 - **Nuclear-thermal** rockets — hydrogen heated by a fission reactor and expelled as reaction mass. Higher specific impulse for the same payload class; unlocked later in the tech tree.\n\
 - **Mechanical / magnetic** launchers — non-rocket systems built as facilities. See [Alternative launch methods](#alternative-launch-methods) below.\n\n\
 ## Chemical rockets\n\n\
-{chem_table}\n\
+{chem_toggle}{chem_table}\n\
 ## Nuclear-thermal rockets\n\n\
-{nuke_table}\n\
+{nuke_toggle}{nuke_table}\n\
 ## Reading the tables\n\n\
 - **Max Payload** is the heaviest load (in tonnes) the vehicle can carry to low orbit.\n\
 - **Reusable** — *Yes* means the vehicle survives reentry and can fly again; *No* means each launch consumes the vehicle.\n\
@@ -5628,6 +5714,9 @@ research tree (Computing, Chemical Propulsion, Spacecraft, …).\n\n",
     {
         for (sub, items) in &by_sub {
             out.push_str(&format!("## {}\n\n", sub));
+            if items.iter().any(|r| r.is_locked) {
+                out.push_str(show_unreleased_toggle());
+            }
             {
             let mut items_sorted = items.clone();
             items_sorted.sort_by(|a, b| {
@@ -5649,8 +5738,17 @@ research tree (Computing, Chemical Propulsion, Spacecraft, …).\n\n",
                             .collect::<Vec<_>>()
                             .join("<br>")
                     };
+                    // Research has no second-level unlock graph (you reach a
+                    // node by completing its prereqs), so the Unreleased flag
+                    // is `is_locked` alone — the 30-ish nodes the dev has
+                    // marked locked-for-UI.
+                    let unreleased_prefix = if r.is_locked {
+                        unreleased_row_badge()
+                    } else {
+                        ""
+                    };
                     let name_cell = format!(
-                        "{anchor}<img src=\"../images/research/{id}.png\" width=\"16\" alt=\"\"/>&nbsp;**{name}**",
+                        "{anchor}{unreleased_prefix}<img src=\"../images/research/{id}.png\" width=\"16\" alt=\"\"/>&nbsp;**{name}**",
                         anchor = anchor_tag("research", &r.id),
                         id = r.id,
                         name = escape_cell(&display)
@@ -6963,6 +7061,7 @@ mod tests {
             build_time_days: 30.0,
             launch_cost: 1000.0,
             life_support_max: 0.0,
+            is_locked: false,
         }
     }
 
@@ -6979,6 +7078,7 @@ mod tests {
             bonus_amount: 0.0,
             bonus_components: vec![],
             show_in_tree: false,
+            is_locked: false,
             contract_unlocks: vec![],
             stage: 0,
             secondary_unlocks: vec![],
@@ -8293,6 +8393,7 @@ mod tests {
             bonus_amount: -40.0,
             bonus_components: vec!["module_crew_medium".into()],
             show_in_tree: true,
+            is_locked: false,
             contract_unlocks: vec![],
             stage: 0,
             secondary_unlocks: vec![SecondaryUnlockStat {
