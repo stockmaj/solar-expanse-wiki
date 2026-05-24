@@ -3,3 +3,10 @@
 __pycache__/
 .venv/
 .claude/
+
+# LLM agent context files — local-only; not part of the public wiki repo.
+# Rename/symlink between these per-tool (Claude Code reads CLAUDE.md,
+# Antigravity / Cursor read AGENTS.md).
+CLAUDE.md
+AGENTS.md
+GEMINI.md

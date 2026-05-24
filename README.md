@@ -52,7 +52,7 @@ See [LICENSE](LICENSE) for full text.
 
 ## Credits
 
-**Solar Expanse** © Maciej Miąsik / TJ Entertainment. This wiki is unofficial
+**Solar Expanse** © SpaceOps. This wiki is unofficial
 fan documentation; all game text and data are property of their respective
 holders and are presented here for reference under fair-use principles for
 non-commercial community use.
