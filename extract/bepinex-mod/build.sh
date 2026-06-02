@@ -16,6 +16,6 @@ if [[ ! -d "$GAME/BepInEx/plugins" ]]; then
 fi
 
 dotnet build "$HERE" -c Release --nologo --verbosity quiet
-DLL="$HERE/bin/Release/netstandard2.1/SolarExpanseWikiDumper.dll"
+DLL=$(find "$HERE/bin/Release" -name "SolarExpanseWikiDumper.dll" | head -1)
 cp "$DLL" "$GAME/BepInEx/plugins/SolarExpanseWikiDumper.dll"
 echo "installed → $GAME/BepInEx/plugins/SolarExpanseWikiDumper.dll"

@@ -33,9 +33,11 @@ relevant page.
 | Achievement | Trigger spacecraft |
 | --- | --- |
 | The Power of a Star | [Atlas (spacecraft)](../spacecraft/#spacecraft-spacecraft-asteroid-puller) |
+| Old Reliable | [Argo (spacecraft)](../spacecraft/#spacecraft-spacecraft-chem-extralarge) |
 | Old Reliable | [Stratos (spacecraft)](../spacecraft/#spacecraft-spacecraft-chem-large) |
 | Do Astronauts Dream of Electric Ship | [Selene (spacecraft)](../spacecraft/#spacecraft-spacecraft-chem-mid2) |
 | Old Reliable | [Iris (spacecraft)](../spacecraft/#spacecraft-spacecraft-chem-small) |
+| Do Astronauts Dream of Electric Ship | [Metis (spacecraft)](../spacecraft/#spacecraft-spacecraft-electric-metis) |
 | Do Astronauts Dream of Electric Ship | [Athena (spacecraft)](../spacecraft/#spacecraft-spacecraft-electric-mid) |
 | Do Astronauts Dream of Electric Ship | [Hermes (spacecraft)](../spacecraft/#spacecraft-spacecraft-electric-small) |
 | The Power of a Star | [Zeus (spacecraft)](../spacecraft/#spacecraft-spacecraft-fusion-large) |
