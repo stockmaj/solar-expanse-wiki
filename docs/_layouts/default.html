@@ -239,6 +239,84 @@
   })();
   </script>
 
+  <script>
+  // Export-CSV button injected above every <table> in <main>.
+  // Respects hidden rows (the "Show unreleased" toggle) and hidden columns
+  // (the `.no-sort` first-column suppression for contracts/missions).
+  (function () {
+    function cellText(cell) {
+      return (cell.textContent || '').replace(/\s+/g, ' ').trim();
+    }
+    function csvEscape(val) {
+      if (/[",\n\r]/.test(val)) return '"' + val.replace(/"/g, '""') + '"';
+      return val;
+    }
+    function isCellVisible(cell) {
+      return getComputedStyle(cell).display !== 'none';
+    }
+    function tableToCSV(table) {
+      var lines = [];
+      var headerRow = table.querySelector('thead tr') || table.querySelector('tr');
+      if (headerRow) {
+        lines.push(
+          Array.from(headerRow.querySelectorAll('th,td'))
+            .filter(isCellVisible)
+            .map(function (c) { return csvEscape(cellText(c)); })
+            .join(',')
+        );
+      }
+      var tbody = table.querySelector('tbody') || table;
+      Array.from(tbody.querySelectorAll('tr')).forEach(function (tr) {
+        if (tr === headerRow) return;
+        if (tr.style.display === 'none') return;
+        var cells = Array.from(tr.querySelectorAll('td')).filter(isCellVisible);
+        if (!cells.length) return;
+        lines.push(cells.map(function (c) { return csvEscape(cellText(c)); }).join(','));
+      });
+      return lines.join('\r\n');
+    }
+    function nearestHeading(el) {
+      var node = el.previousElementSibling;
+      while (node) {
+        if (/^H[1-4]$/.test(node.tagName)) return node.textContent.trim();
+        node = node.previousElementSibling;
+      }
+      return null;
+    }
+    function slugify(s) {
+      return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    }
+    function bind() {
+      document.querySelectorAll('main table').forEach(function (table) {
+        var btn = document.createElement('button');
+        btn.className = 'export-csv-btn';
+        btn.textContent = 'Export CSV';
+        btn.type = 'button';
+        btn.addEventListener('click', function () {
+          var csv = tableToCSV(table);
+          var heading = nearestHeading(table);
+          var filename = (heading ? slugify(heading) : 'table') + '.csv';
+          var blob = new Blob([csv], { type: 'text/csv' });
+          var url = URL.createObjectURL(blob);
+          var a = document.createElement('a');
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        });
+        table.parentNode.insertBefore(btn, table);
+      });
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', bind);
+    } else {
+      bind();
+    }
+  })();
+  </script>
+
   <footer class="site-footer">
     <div class="container">
       <small>
