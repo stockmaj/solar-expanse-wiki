@@ -379,8 +379,9 @@ main hr {
 
 /* ---------- Export-CSV button ---------- */
 
-.export-csv-btn {
+button.export-csv-btn {
   display: block;
+  width: fit-content;
   margin: 0 0 4px auto;
   padding: 2px 8px;
   font: inherit;
@@ -391,7 +392,7 @@ main hr {
   border-radius: 3px;
   cursor: pointer;
 }
-.export-csv-btn:hover {
+button.export-csv-btn:hover {
   color: var(--fg);
   border-color: var(--accent-dim);
 }

@@ -286,8 +286,13 @@
     function slugify(s) {
       return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
     }
+    var SKIP_CONTAINERS = '.calc, #calc-root, .corp-comparison-split, .corp-comparison-right';
     function bind() {
       document.querySelectorAll('main table').forEach(function (table) {
+        // Skip tables inside interactive/calculator containers — they use
+        // dynamic JS data and the button would break their layout or pick up
+        // the wrong .calc button styles.
+        if (table.closest(SKIP_CONTAINERS)) return;
         var btn = document.createElement('button');
         btn.className = 'export-csv-btn';
         btn.textContent = 'Export CSV';
