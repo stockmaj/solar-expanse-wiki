@@ -4,6 +4,9 @@ __pycache__/
 .venv/
 .claude/
 
+# _obsolete-suffixed icons are generated side-products; plain names carry the content.
+docs/images/research/*_obsolete.png
+
 # LLM agent context files — local-only; not part of the public wiki repo.
 # Rename/symlink between these per-tool (Claude Code reads CLAUDE.md,
 # Antigravity / Cursor read AGENTS.md).

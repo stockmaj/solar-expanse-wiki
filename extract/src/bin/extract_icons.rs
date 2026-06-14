@@ -6,17 +6,20 @@ use std::path::{Path, PathBuf};
 
 const TARGET_SIZE: u32 = 24;
 
-/// A category of icons to crop from the game's sprite atlas — drives the
-/// per-prefix loop in `main()`.  Each category names the MonoBehaviour prefix
-/// (e.g. `id_resource_`), the YAML field that carries the Sprite GUID, the
-/// subdirectory under the output root, and an optional prefix-strip for the
-/// output filename so e.g. `id_resource_HEL3.asset` → `hel3.png`.
+/// A category of icons to crop from sprite atlases.  `tint` is applied as a
+/// multiply-blend to each pixel's RGB after cropping; use it for categories
+/// whose atlas stores white-on-transparent masks (e.g. research icons) that
+/// Unity tints at runtime.  `None` leaves colors unchanged.
 struct Category {
     monob_prefix: &'static str,
     sprite_field: &'static str,
     out_subdir: &'static str,
     strip_prefix: &'static str,
+    tint: Option<(u8, u8, u8)>,
 }
+
+/// Wiki accent colour (#ffb347) used to tint white sprite masks.
+const ACCENT: (u8, u8, u8) = (0xff, 0xb3, 0x47);
 
 const CATEGORIES: &[Category] = &[
     Category {
@@ -24,18 +27,21 @@ const CATEGORIES: &[Category] = &[
         sprite_field: "sprite2",
         out_subdir: "resources",
         strip_prefix: "id_resource_",
+        tint: None,
     },
     Category {
         monob_prefix: "research_",
         sprite_field: "sprite",
         out_subdir: "research",
         strip_prefix: "",
+        tint: Some(ACCENT),
     },
     Category {
         monob_prefix: "planet_",
         sprite_field: "sprite",
         out_subdir: "planet-types",
         strip_prefix: "",
+        tint: None,
     },
 ];
 
@@ -164,10 +170,26 @@ fn main() -> Result<()> {
 
         let cropped = atlas.crop_imm(x, y_from_top, w, h);
         let resized = cropped.resize(TARGET_SIZE, TARGET_SIZE, FilterType::Lanczos3);
+        let resized = if let Some(tint) = cat.tint {
+            apply_tint(resized, tint)
+        } else {
+            resized
+        };
         let out_path = out_dir.join(cat.out_subdir).join(format!("{out_name}.png"));
         resized.save(&out_path)
             .with_context(|| format!("writing {}", out_path.display()))?;
         *written_per_cat.entry(cat.out_subdir).or_insert(0) += 1;
+
+        // Some items exist only as _obsolete assets (no plain .asset file).
+        // Always write the plain name too; _obsolete content beats a blank
+        // plain file that may linger from a prior run.
+        if let Some(plain) = out_name.strip_suffix("_obsolete") {
+            if !plain.is_empty() {
+                let plain_path = out_dir.join(cat.out_subdir).join(format!("{plain}.png"));
+                resized.save(&plain_path)
+                    .with_context(|| format!("writing {}", plain_path.display()))?;
+            }
+        }
     }
 
     for cat in CATEGORIES {
@@ -182,6 +204,23 @@ fn main() -> Result<()> {
         );
     }
     Ok(())
+}
+
+// The ResearchIconsAtlas stores black-on-transparent: RGB is always 0,
+// alpha encodes the icon shape.  Unity fills with the tint color at
+// runtime.  We replicate that by replacing RGB with the tint on any pixel
+// that has non-zero alpha.
+fn apply_tint(img: image::DynamicImage, tint: (u8, u8, u8)) -> image::DynamicImage {
+    let mut rgba = img.to_rgba8();
+    let (tr, tg, tb) = tint;
+    for p in rgba.pixels_mut() {
+        if p[3] > 0 {
+            p[0] = tr;
+            p[1] = tg;
+            p[2] = tb;
+        }
+    }
+    image::DynamicImage::ImageRgba8(rgba)
 }
 
 fn read_meta_guid(p: &Path) -> Result<Option<String>> {
@@ -336,6 +375,56 @@ mod tests {
         assert!((r.y - 547.5).abs() < 0.01);
         assert!((r.width - 196.8).abs() < 0.01);
         assert!((r.height - 186.8).abs() < 0.01);
+    }
+
+    #[test]
+    fn apply_tint_white_pixel_becomes_accent() {
+        let mut img = image::RgbaImage::new(1, 1);
+        img.put_pixel(0, 0, image::Rgba([255, 255, 255, 255]));
+        let result = apply_tint(image::DynamicImage::ImageRgba8(img), ACCENT);
+        let p = result.to_rgba8().get_pixel(0, 0).clone();
+        assert_eq!(p[0], ACCENT.0);
+        assert_eq!(p[1], ACCENT.1);
+        assert_eq!(p[2], ACCENT.2);
+        assert_eq!(p[3], 255);
+    }
+
+    #[test]
+    fn apply_tint_transparent_pixel_stays_transparent() {
+        let mut img = image::RgbaImage::new(1, 1);
+        img.put_pixel(0, 0, image::Rgba([255, 255, 255, 0]));
+        let result = apply_tint(image::DynamicImage::ImageRgba8(img), ACCENT);
+        let p = result.to_rgba8().get_pixel(0, 0).clone();
+        assert_eq!(p[3], 0);
+    }
+
+    #[test]
+    fn apply_tint_preserves_alpha_for_partial_transparency() {
+        let mut img = image::RgbaImage::new(1, 1);
+        img.put_pixel(0, 0, image::Rgba([255, 255, 255, 128]));
+        let result = apply_tint(image::DynamicImage::ImageRgba8(img), ACCENT);
+        let p = result.to_rgba8().get_pixel(0, 0).clone();
+        assert_eq!(p[0], ACCENT.0);
+        assert_eq!(p[3], 128);
+    }
+
+    #[test]
+    fn apply_tint_black_opaque_pixel_becomes_accent() {
+        // Atlas stores black-on-transparent; opaque black pixels must become tint color.
+        let mut img = image::RgbaImage::new(1, 1);
+        img.put_pixel(0, 0, image::Rgba([0, 0, 0, 255]));
+        let result = apply_tint(image::DynamicImage::ImageRgba8(img), ACCENT);
+        let p = result.to_rgba8().get_pixel(0, 0).clone();
+        assert_eq!([p[0], p[1], p[2]], [ACCENT.0, ACCENT.1, ACCENT.2]);
+    }
+
+    #[test]
+    fn apply_tint_fully_transparent_pixel_unchanged() {
+        let mut img = image::RgbaImage::new(1, 1);
+        img.put_pixel(0, 0, image::Rgba([0, 0, 0, 0]));
+        let result = apply_tint(image::DynamicImage::ImageRgba8(img), ACCENT);
+        let p = result.to_rgba8().get_pixel(0, 0).clone();
+        assert_eq!([p[0], p[1], p[2], p[3]], [0, 0, 0, 0]);
     }
 
     #[test]
