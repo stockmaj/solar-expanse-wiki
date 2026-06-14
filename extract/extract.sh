@@ -180,8 +180,9 @@ check_sirenix_dump() {
     $dump
 
   The BepInEx mod is installed but has not run yet.  Launch Solar Expanse,
-  wait ~5 seconds after the main menu loads, then quit.  The mod will write
-  the dump on its first run.
+  start or load any game scenario, wait a few seconds once the game world
+  is visible, then quit.  The mod fires on gameplay-scene load (not the
+  main menu), so you must get into an actual game.
 
   After that, re-run this script to continue.
 EOF

@@ -3989,6 +3989,15 @@ fn title_case_words(s: &str) -> String {
     out
 }
 
+/// Hand-curated contract-to-contract prerequisite relationships that are stored as
+/// `PartOfContract` nodes in `StartGameData` serialization — not in any contract's
+/// `unlock_rewards` list — so the automatic reverse-lookup misses them.
+const PREREQ_CONTRACT_OVERRIDES: &[(&str, &str)] = &[
+    // Lunar Depot is unlocked as PartOfContract(Space Dock) in StartGameData
+    // serialization nodes — not via Space Dock's reward chain.
+    ("contract_moon_lunardepot", "contract_tutorial_spacedock"),
+];
+
 fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
     let contract_name: BTreeMap<&str, &str> = locale
         .contracts
@@ -4831,6 +4840,16 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
                     }
                 }
             }
+            // Hand-curated overrides for PartOfContract relationships that don't
+            // appear in any contract's reward chain.
+            for (contract_id, prereq_id) in PREREQ_CONTRACT_OVERRIDES {
+                if *contract_id == c.id.as_str() {
+                    let pretty = contract_name.get(prereq_id).copied().unwrap_or("");
+                    if !pretty.is_empty() {
+                        prereq_parts.push(link_same_page("contract", prereq_id, &escape_cell(pretty)));
+                    }
+                }
+            }
             if let Some(srcs) = unlocked_by.get(c.id.as_str()) {
                 for src in srcs {
                     if src.contains("_test") {
@@ -4841,6 +4860,17 @@ fn page_contracts(locale: &Locale, sirenix: &Sirenix) -> String {
                         continue;
                     }
                     prereq_parts.push(link_same_page("contract", src, &escape_cell(pretty)));
+                }
+            }
+            // Research-gated contracts: show the research display name so players
+            // know what to complete before this contract is offered.
+            if let Some(rs) = research_unlockers_of_contract.get(c.id.as_str()) {
+                for r_id in rs {
+                    let pretty = research_name.get(r_id).copied().unwrap_or("");
+                    if pretty.is_empty() {
+                        continue;
+                    }
+                    prereq_parts.push(format!("Research: {}", escape_cell(pretty)));
                 }
             }
             let prereq_cell = if prereq_parts.is_empty() {
@@ -12276,6 +12306,86 @@ mod tests {
         let path = std::env::temp_dir().join("solar_expanse_wiki_does_not_exist_xyz.asset");
         let _ = std::fs::remove_file(&path);
         assert!(detect_game_version_from_project_settings(&path).is_none());
+    }
+
+    // ---------- Fix: research prereqs and override prereqs appear in the Prereq column ----------
+
+    /// A contract whose unlock path runs through research (not a parent contract)
+    /// should show "Research: <display name>" in its Prereq cell rather than "—".
+    #[test]
+    fn prereq_column_shows_research_unlocker_name() {
+        let mut locale = contracts_fixture_locale();
+        // Add the research entry so gen_pages can look up its display name.
+        locale.research.push(ResearchEntry {
+            id: "research_fusionpower_1".into(),
+            category: "general".into(),
+            name: "Fusion Theory".into(),
+            description: String::new(),
+        });
+        // Add the contract being tested.
+        locale.contracts.push(NameDesc {
+            id: "contract_general_fusionpower".into(),
+            name: "Fusion Power".into(),
+            description: "Build a fusion reactor.".into(),
+        });
+        let mut fusion_research = make_research("research_fusionpower_1", "None", None);
+        fusion_research.contract_unlocks = vec!["contract_general_fusionpower".into()];
+        let sirenix = Sirenix {
+            research: vec![fusion_research],
+            contracts: vec![make_contract("contract_general_fusionpower", vec![], vec![])],
+            ..Default::default()
+        };
+        let page = page_contracts(&locale, &sirenix);
+        let row = page
+            .lines()
+            .find(|l| l.contains("Fusion Power"))
+            .expect("Fusion Power row present");
+        assert!(
+            row.contains("Fusion Theory"),
+            "research unlocker name 'Fusion Theory' missing from Fusion Power prereq cell: {row}"
+        );
+        assert!(
+            !row.contains("research_fusionpower_1"),
+            "raw research id leaked into prereq cell: {row}"
+        );
+    }
+
+    /// A contract listed in PREREQ_CONTRACT_OVERRIDES should show its manually-specified
+    /// contract parent in the Prereq cell even though that parent doesn't appear in
+    /// the parent's reward chain.
+    #[test]
+    fn prereq_column_override_adds_contract_parent() {
+        let locale = contracts_fixture_locale();
+        // contracts_fixture_locale already includes contract_moon_lunardepot... it
+        // doesn't, so add it here along with the parent Space Dock.
+        let mut locale = locale;
+        locale.contracts.push(NameDesc {
+            id: "contract_moon_lunardepot".into(),
+            name: "Lunar Depot".into(),
+            description: "Build a depot on the Moon.".into(),
+        });
+        // contract_tutorial_spacedock is already in contracts_fixture_locale.
+        let sirenix = Sirenix {
+            contracts: vec![
+                // Space Dock does NOT list Lunar Depot in its unlock_rewards.
+                make_contract("contract_tutorial_spacedock", vec![], vec![]),
+                make_contract("contract_moon_lunardepot", vec![], vec![]),
+            ],
+            ..Default::default()
+        };
+        let page = page_contracts(&locale, &sirenix);
+        let row = page
+            .lines()
+            .find(|l| l.contains("Lunar Depot"))
+            .expect("Lunar Depot row present");
+        assert!(
+            row.contains("Space Dock"),
+            "override prereq 'Space Dock' missing from Lunar Depot prereq cell: {row}"
+        );
+        assert!(
+            !row.contains("contract_tutorial_spacedock"),
+            "raw override contract id leaked into prereq cell: {row}"
+        );
     }
 }
 
