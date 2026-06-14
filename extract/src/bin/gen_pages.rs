@@ -2075,14 +2075,8 @@ const REACHABLE_OVERRIDES: &[&str] = &[
     // Orbital Payload Container — spawned by launch facilities (elevator,
     // mass driver, spin launch, catapult) rather than research-unlocked.
     "spacecraft_capsule",
-    // Standard mining / probe modules — granted at scenario start in every
-    // epoch including the standard Early-Exploration one (player-confirmed).
-    // The dump's StartGameData `serializationData` references them opaquely,
-    // so the dumper can't see the grant path and they'd otherwise be flagged
-    // Unreleased.
-    "module_metalmining",
-    "module_icemining",
-    "module_raremining",
+    // Ground Probe — scenario-start grant confirmed in StartGameColonization,
+    // StartGameExpansion, and StartGameRaceBeyond assets.
     "module_ground_probe",
 ];
 
@@ -2106,12 +2100,11 @@ fn is_unreleased(
     true
 }
 
-/// `<sub class="unreleased-tag">Unreleased</sub>` badge + a hidden
-/// `<span class="row-unreleased" hidden></span>` marker the JS toggle
-/// uses to filter the row out by default. Both go in the row's first
-/// cell so a single class selector catches the row.
+/// Hidden `<span class="row-unreleased">` marker the JS toggle uses to
+/// filter the row out by default.  No visible text — the toggle label
+/// ("Show unreleased") is the only indicator players need.
 fn unreleased_row_badge() -> &'static str {
-    "<span class=\"row-unreleased\" hidden></span><sub class=\"unreleased-tag\" title=\"Marked isLocked=true in the dump with no research/contract path that unlocks it — not reachable in-game today.\">Unreleased</sub><br>"
+    "<span class=\"row-unreleased\" hidden></span>"
 }
 
 /// Show/hide toggle rendered above a table when at least one row is
@@ -9880,17 +9873,13 @@ mod tests {
             !released_row.contains("Unreleased"),
             "released row should NOT carry the Unreleased badge:\n{released_row}"
         );
-        // The orphan row carries the visible badge and the hidden filter
-        // marker (a span with class=row-unreleased) so the JS toggle can
-        // hide it by default.
+        // The orphan row carries the hidden filter marker (span with
+        // class=row-unreleased) so the JS toggle can hide it by default.
+        // No visible "Unreleased" text — the toggle label is sufficient.
         let orphan_row = page
             .lines()
             .find(|l| l.contains("Metal Mining Base (Advanced)"))
             .expect("orphan row present");
-        assert!(
-            orphan_row.contains("Unreleased"),
-            "orphan row should display Unreleased badge:\n{orphan_row}"
-        );
         assert!(
             orphan_row.contains("row-unreleased"),
             "orphan row should carry the row-unreleased marker class for JS:\n{orphan_row}"

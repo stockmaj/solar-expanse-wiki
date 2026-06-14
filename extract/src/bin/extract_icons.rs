@@ -39,8 +39,10 @@ const CATEGORIES: &[Category] = &[
     },
 ];
 
-/// Crop sprite icons out of `solar_expanse_icons.png` for each category in
+/// Crop sprite icons from each sprite's own texture atlas for each category in
 /// `CATEGORIES` and write them as small PNGs under `<output dir>/<subdir>/`.
+/// Each sprite YAML records its source texture via `m_RD.texture`; atlases are
+/// loaded on first use and cached so large textures aren't reopened repeatedly.
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     if args.len() != 3 {
@@ -52,17 +54,7 @@ fn main() -> Result<()> {
 
     let sprite_dir = export.join("Assets/Sprite");
     let monob_dir = export.join("Assets/MonoBehaviour");
-    let atlas_path = export.join("Assets/Texture2D/solar_expanse_icons.png");
-    if !atlas_path.exists() {
-        return Err(anyhow!(
-            "atlas PNG not found: {} — did AssetRipper export Texture2D/?",
-            atlas_path.display()
-        ));
-    }
-
-    let atlas = image::open(&atlas_path)
-        .with_context(|| format!("opening atlas {}", atlas_path.display()))?;
-    let atlas_h = atlas.height();
+    let texture_dir = export.join("Assets/Texture2D");
 
     // Build guid → Sprite-asset-path map (shared across categories).
     let mut guid_to_sprite: HashMap<String, PathBuf> = HashMap::new();
@@ -75,6 +67,21 @@ fn main() -> Result<()> {
             }
         }
     }
+
+    // Build guid → texture-PNG-path map so each sprite can load its own atlas.
+    let mut guid_to_texture: HashMap<String, PathBuf> = HashMap::new();
+    for entry in fs::read_dir(&texture_dir)? {
+        let path = entry?.path();
+        if path.extension().map_or(false, |e| e == "meta") {
+            if let Some(guid) = read_meta_guid(&path)? {
+                let texture_path = path.with_extension(""); // drop .meta
+                guid_to_texture.insert(guid, texture_path);
+            }
+        }
+    }
+
+    // Cache of loaded atlas images keyed by texture GUID.
+    let mut texture_cache: HashMap<String, image::DynamicImage> = HashMap::new();
 
     // Walk MonoBehaviour/ once, dispatching each matching file to its
     // category's output dir.  Skipping non-matching files keeps the loop O(n).
@@ -123,6 +130,29 @@ fn main() -> Result<()> {
             Some(r) => r,
             None => continue,
         };
+
+        // Each sprite's m_RD.texture names the atlas it lives in.  Load it on
+        // first use and cache it — different categories use different atlases
+        // (e.g. research icons are in ResearchIconsAtlas.png, not
+        // solar_expanse_icons.png).
+        let texture_guid = match parse_sprite_guid(&sprite_yaml, "texture") {
+            Some(g) => g,
+            None => continue,
+        };
+        if !texture_cache.contains_key(&texture_guid) {
+            let tex_path = match guid_to_texture.get(&texture_guid) {
+                Some(p) => p.clone(),
+                None => continue,
+            };
+            let img = image::open(&tex_path)
+                .with_context(|| format!("opening texture {}", tex_path.display()))?;
+            texture_cache.insert(texture_guid.clone(), img);
+        }
+        let atlas = match texture_cache.get(&texture_guid) {
+            Some(a) => a,
+            None => continue,
+        };
+        let atlas_h = atlas.height();
 
         // Unity stores sprite rects with Y measured from the bottom of the
         // texture.  PNG coordinates run top-down, so we flip Y.
@@ -278,6 +308,24 @@ mod tests {
         // give up).
         let yaml = "  sprite: {fileID: 0}";
         assert_eq!(parse_sprite_guid(yaml, "sprite"), None);
+    }
+
+    #[test]
+    fn parse_sprite_guid_extracts_texture_from_sprite_yaml() {
+        // Sprite YAML has texture: in m_RD (with a guid) and again in
+        // m_AtlasRD (fileID: 0, no guid).  Must return the first real guid.
+        let yaml = "\
+  m_RD:\n\
+    serializedVersion: 3\n\
+    texture: {fileID: 2800000, guid: 996a5f8d66e59be4c9e157635e05709a, type: 3}\n\
+    alphaTexture: {fileID: 0}\n\
+  m_AtlasRD:\n\
+    serializedVersion: 3\n\
+    texture: {fileID: 0}\n";
+        assert_eq!(
+            parse_sprite_guid(yaml, "texture").as_deref(),
+            Some("996a5f8d66e59be4c9e157635e05709a")
+        );
     }
 
     #[test]
