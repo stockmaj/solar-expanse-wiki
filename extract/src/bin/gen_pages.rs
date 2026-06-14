@@ -2299,10 +2299,13 @@ and so on.\n\n",
                 } else {
                     "—".into()
                 };
-                // Locked-at-start annotation. When we know the research
-                // that unlocks the module, surface its display name so
-                // players can plan their tech path; otherwise fall back to
-                // the bare "Locked at start" line.
+                // Locked-at-start annotation. Show "Locked at start" only
+                // when we know the research that unlocks the module. Modules
+                // that are locked but unreleased get the unreleased badge
+                // instead. Modules that are locked but reachable via a
+                // scenario-start grant (REACHABLE_OVERRIDES) show nothing —
+                // "Locked at start" would be misleading since they're
+                // available from game start without any research.
                 let locked_prefix = if m.is_locked {
                     match module_unlocked_by.get(m.id.as_str()).copied() {
                         Some(rid) => {
@@ -2315,7 +2318,7 @@ and so on.\n\n",
                             );
                             format!("<sub>Locked at start (unlocks: {link})</sub><br>")
                         }
-                        None => "<sub>Locked at start</sub><br>".to_string(),
+                        None => String::new(),
                     }
                 } else {
                     String::new()
@@ -8487,14 +8490,13 @@ mod tests {
         );
     }
 
-    /// `module_ground_probe` and `module_space_probe` (or
-    /// `id_SpaceModule_Probe`) carry identical Probe stats; the ONLY
-    /// difference is `isLocked`. The page should make the locked-at-start
-    /// distinction obvious — render both rows but flag the ground variant
-    /// (which is locked) explicitly. Players otherwise see two seemingly
-    /// duplicate rows.
+    /// `module_ground_probe` and `module_space_probe` carry identical Probe
+    /// stats; the ONLY difference is `isLocked`. Both rows should render.
+    /// The ground probe is locked-but-reachable (scenario-start grant) so
+    /// it no longer shows "Locked at start" — that text is reserved for
+    /// modules with a named research-unlock path.
     #[test]
-    fn space_modules_page_flags_locked_ground_probe_distinctly() {
+    fn space_modules_page_renders_both_probe_variants() {
         let mut locale = space_modules_fixture_locale();
         locale.cargo.push(NameDesc {
             id: "module_ground_probe".into(),
@@ -8524,14 +8526,14 @@ mod tests {
             probes_section.contains(">**Probe**") || probes_section.contains("**Probe**"),
             "Space Probe row missing:\n{probes_section}"
         );
-        // Ground variant carries the locked annotation; space variant does not.
+        // Ground probe has no research-unlock path so no "Locked at start" text.
         let ground_row = probes_section
             .lines()
             .find(|l| l.contains("Ground Probe"))
             .expect("ground probe row");
         assert!(
-            ground_row.contains("Locked at start"),
-            "Ground Probe row should be labelled locked:\n{ground_row}"
+            !ground_row.contains("Locked at start"),
+            "Ground Probe should not show 'Locked at start' (it's a scenario-start grant):\n{ground_row}"
         );
         let space_row = probes_section
             .lines()

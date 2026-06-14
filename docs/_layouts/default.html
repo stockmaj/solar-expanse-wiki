@@ -58,23 +58,23 @@
 
         {%- comment -%} ---- Fleet ---- {%- endcomment -%}
         {%- assign fleet_active = false -%}
-        {%- if u contains '/spacecraft' or u contains '/launch-vehicles' or u contains '/space-modules' -%}{%- assign fleet_active = true -%}{%- endif -%}
+        {%- if u contains '/spacecraft' or u contains '/launch-vehicles' -%}{%- assign fleet_active = true -%}{%- endif -%}
         <div class="nav-group{% if fleet_active %} active{% endif %}">
           <button class="nav-trigger" type="button" aria-haspopup="true" aria-expanded="false">Fleet<span class="nav-caret" aria-hidden="true">▾</span></button>
           <div class="nav-dropdown" role="menu">
             <a href="{{ '/spacecraft/' | relative_url }}"{% if u contains '/spacecraft' %} class="active"{% endif %}>Spacecraft</a>
-            <a href="{{ '/space-modules/' | relative_url }}"{% if u contains '/space-modules' %} class="active"{% endif %}>Space Modules</a>
             <a href="{{ '/launch-vehicles/' | relative_url }}"{% if u contains '/launch-vehicles' %} class="active"{% endif %}>Launch Vehicles</a>
           </div>
         </div>
 
         {%- comment -%} ---- Build ---- {%- endcomment -%}
         {%- assign build_active = false -%}
-        {%- if u contains '/facilities' or u contains '/resources' or u contains '/terraforming' -%}{%- assign build_active = true -%}{%- endif -%}
+        {%- if u contains '/facilities' or u contains '/transportable-modules' or u contains '/resources' or u contains '/terraforming' -%}{%- assign build_active = true -%}{%- endif -%}
         <div class="nav-group{% if build_active %} active{% endif %}">
           <button class="nav-trigger" type="button" aria-haspopup="true" aria-expanded="false">Build<span class="nav-caret" aria-hidden="true">▾</span></button>
           <div class="nav-dropdown" role="menu">
             <a href="{{ '/facilities/' | relative_url }}"{% if u contains '/facilities' %} class="active"{% endif %}>Facilities</a>
+            <a href="{{ '/transportable-modules/' | relative_url }}"{% if u contains '/transportable-modules' %} class="active"{% endif %}>Transportable Modules</a>
             <a href="{{ '/resources/' | relative_url }}"{% if u contains '/resources' %} class="active"{% endif %}>Resources</a>
             <a href="{{ '/terraforming/' | relative_url }}"{% if u contains '/terraforming' %} class="active"{% endif %}>Terraforming</a>
           </div>
@@ -207,6 +207,8 @@
         // Find the nearest following <table>.  Walks across sibling elements
         // so Markdown's paragraph-wrapped layout doesn't trip us up.
         var node = cb.closest('.show-unreleased') || cb.parentElement;
+        // Jekyll/kramdown wraps inline HTML in <p>; climb past it if needed.
+        if (node && !node.nextElementSibling) { node = node.parentElement || node; }
         var table = null;
         while (node && node.nextElementSibling) {
           node = node.nextElementSibling;
