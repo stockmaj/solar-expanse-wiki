@@ -566,6 +566,9 @@ struct SpaceModuleStat {
     /// mine. Only populated for Mining-ability modules; empty otherwise.
     #[serde(default)]
     resources_to_mine: Vec<String>,
+    /// Daily cash upkeep. Multiply by 30 to match the game's monthly figure.
+    #[serde(default)]
+    maintenance_cost_per_day: f64,
 }
 
 #[derive(Deserialize, Clone)]
@@ -1896,7 +1899,7 @@ lift them to space.\n\n",
 - **Requires LV** is derived from the dump's `needLaunchVehicleToGoToMoon` flag: *Any body* when the flag is true (the craft needs an LV everywhere); *Earth only* when the flag is false; *Built in orbit* when `orbitSC` is true (never sits on a surface). The *Earth only* label reflects this static flag — confirm against the in-game UI for the gameplay-level rule.\n\n\
 ## See also\n\n\
 - [Launch Vehicles](../launch-vehicles/) — surface-to-orbit lifters\n\
-- [Space Modules](../space-modules/) — mining rigs, refiners, probes, telescopes, habitats, and crew compartments that ride on these craft\n\
+- [Transportable Modules](../transportable-modules/) — mining rigs, refiners, probes, telescopes, habitats, and crew compartments that ride on these craft\n\
 - [Research](../research/) — propulsion tech tree\n",
     );
     out
@@ -2207,7 +2210,7 @@ fn page_space_modules(locale: &Locale, sirenix: &Sirenix) -> String {
     }
 
     let mut out = String::from(
-        "# Space Modules\n\n\
+        "# Transportable Modules\n\n\
 Spacecraft payload — mining rigs, refiners, probes, telescopes, habitats, power\n\
 plants, and crew compartments that ride on (or alongside) interplanetary craft.\n\
 Most are loaded as cargo on a launch vehicle and deployed at the destination;\n\
@@ -2227,6 +2230,7 @@ and so on.\n\n",
         "Cargo",
         "Build cost",
         "Time (d)",
+        "Maint ($/mo)",
         "Description",
     ];
     let base_tips: &[Option<&str>] = &[
@@ -2236,6 +2240,7 @@ and so on.\n\n",
         Some("Whether the module can be loaded into a launch vehicle as cargo"),
         Some("Resources required to construct"),
         Some("Build time in days"),
+        Some("Monthly maintenance cost ($/30-day month) — the dump stores a per-day rate; we multiply by 30 to match the in-game UI."),
         None,
     ];
     let mining_header: &[&str] = &[
@@ -2246,6 +2251,7 @@ and so on.\n\n",
         "Cargo",
         "Build cost",
         "Time (d)",
+        "Maint ($/mo)",
         "Description",
     ];
     let mining_tips: &[Option<&str>] = &[
@@ -2256,6 +2262,7 @@ and so on.\n\n",
         Some("Whether the module can be loaded into a launch vehicle as cargo"),
         Some("Resources required to construct"),
         Some("Build time in days"),
+        Some("Monthly maintenance cost ($/30-day month) — the dump stores a per-day rate; we multiply by 30 to match the in-game UI."),
         None,
     ];
 
@@ -2287,6 +2294,11 @@ and so on.\n\n",
                     "—".into()
                 };
                 let mass_cell = if m.mass > 0.0 { fmt_amount(m.mass) } else { "—".into() };
+                let maint = if m.maintenance_cost_per_day > 0.0 {
+                    fmt_abbrev(m.maintenance_cost_per_day * DAYS_PER_MONTH)
+                } else {
+                    "—".into()
+                };
                 // Locked-at-start annotation. When we know the research
                 // that unlocks the module, surface its display name so
                 // players can plan their tech path; otherwise fall back to
@@ -2324,6 +2336,7 @@ and so on.\n\n",
                         cargo_cell.to_string(),
                         cost,
                         time,
+                        maint,
                         desc_cell,
                     ]
                 } else {
@@ -2334,6 +2347,7 @@ and so on.\n\n",
                         cargo_cell.to_string(),
                         cost,
                         time,
+                        maint,
                         desc_cell,
                     ]
                 }
@@ -2361,6 +2375,7 @@ and so on.\n\n",
 - **Mines** (Mining section only) lists the resources a rig can extract from the body it lands on.\n\
 - **Cargo** indicates whether the module can ride to orbit inside a launch vehicle's cargo bay. Modules that say *No* must be assembled directly in an orbital shipyard.\n\
 - **Build cost / Time** are the resources and days required to build the module — either on the surface (most cargo-loadable modules) or in orbit.\n\
+- **Maint ($/mo)** is the monthly cash upkeep while the module is active — the dump stores a per-day rate; we multiply by 30 to match the in-game UI.\n\
 - **Locked at start** rows are unavailable until you research the listed technology (or, when no research direct-unlocks the module, until the scenario or contract chain grants it).\n\n\
 ## See also\n\n\
 - [Spacecraft](../spacecraft/) — the craft these modules ride on\n\
@@ -5351,7 +5366,11 @@ Facilities are split into two families:\n\n\
 - **Ground facilities** sit on a body's surface. They use local workers and\n\
   may need atmospheric conditions to function.\n\
 - **Orbital modules** attach to a space station or shipyard in orbit. They\n\
-  don't need a habitable surface, but you have to build the station first.\n\n\
+  don't need a habitable surface, but you have to build the station first.\n\
+- **[Transportable modules](../transportable-modules/)** are loaded as cargo\n\
+  onto interplanetary craft and deployed at a destination body, providing\n\
+  mining, refining, crew capacity, and other capabilities without a fixed\n\
+  surface installation.\n\n\
 ## Ground facilities\n\n\
 {ground_filter}{ground_toggle}{ground_table}\n\
 ## Orbital modules\n\n\
@@ -5680,6 +5699,53 @@ fn page_research(locale: &Locale, sirenix: &Sirenix) -> String {
         out
     };
 
+    // Build a lookup: research_id → (earliest_year, corps_at_that_year).
+    // "Earliest year" is the start year of the first scenario in which any
+    // corp has the research pre-completed.
+    let epoch_year: BTreeMap<&str, i32> = sirenix
+        .epochs
+        .iter()
+        .filter_map(|e| {
+            let year: i32 = extract_epoch_year(&e.start_date_string)?.parse().ok()?;
+            Some((e.id.as_str(), year))
+        })
+        .collect();
+    let mut research_starts: BTreeMap<&str, (i32, Vec<&str>)> = BTreeMap::new();
+    for s in &sirenix.scenario_starts {
+        let year = match epoch_year.get(s.scenario_id.as_str()) {
+            Some(&y) => y,
+            None => continue,
+        };
+        for corp in &s.corp_starts {
+            for rid in &corp.completed_research {
+                let entry = research_starts.entry(rid.as_str()).or_insert((year, vec![]));
+                if year < entry.0 {
+                    *entry = (year, vec![corp.company_id.as_str()]);
+                } else if year == entry.0 && !entry.1.contains(&corp.company_id.as_str()) {
+                    entry.1.push(corp.company_id.as_str());
+                }
+            }
+        }
+    }
+    for entry in research_starts.values_mut() {
+        entry.1.sort();
+    }
+    let max_corps = sirenix
+        .scenario_starts
+        .iter()
+        .map(|s| s.corp_starts.len())
+        .max()
+        .unwrap_or(0);
+    let fmt_starting_corps = |rid: &str| -> String {
+        match research_starts.get(rid) {
+            None => "—".to_string(),
+            Some((year, corps)) if max_corps > 0 && corps.len() >= max_corps => {
+                format!("All ({})", year)
+            }
+            Some((year, corps)) => format!("{} ({})", corps.join(", "), year),
+        }
+    };
+
     // Bucket directly by sub-branch.  The game's tech-tree UI doesn't show
     // the top-level branch (Engineering/Physics/Biotech) division — it
     // displays the sub-branches as the top-level categories — so the wiki
@@ -5750,6 +5816,7 @@ research tree (Computing, Chemical Propulsion, Spacecraft, …).\n\n",
                         name_cell,
                         fmt_work_hours(r.work_hours),
                         era_label(r.stage).to_string(),
+                        fmt_starting_corps(&r.id),
                         prereqs,
                         fmt_research_unlock(r, &facility_name, &facility_anchored, &spacecraft_name, &lv_name),
                         escape_cell(&desc_for(&r.id)),
@@ -5757,11 +5824,12 @@ research tree (Computing, Chemical Propulsion, Spacecraft, …).\n\n",
                 })
                 .collect();
             out.push_str(&md_table_with_tips(
-                &["Research", "Cost (h)", "Era", "Prereqs", "Unlocks", "Description"],
+                &["Research", "Cost (h)", "Era", "Starting Corps", "Prereqs", "Unlocks", "Description"],
                 &[
                     None,
                     Some("Cost in work-hours (`workHourToComplete` from the dump). Actual time-in-days depends on your labs' research output, which isn't surfaced statically."),
                     Some("Tech tree era — broad progression tier of this research."),
+                    Some("Which corporations start with this research already completed, and in which scenario year. '—' means no corporation starts with it pre-researched."),
                     None,
                     None,
                     None,
@@ -6272,9 +6340,9 @@ the names, descriptions, and stat tables here match exactly what you see in-game
 | **[Celestial Bodies](celestial-bodies/)** | The Sun, planets, moons, asteroids, comets, and exoplanet systems. |\n\
 | [Exoplanets](exoplanets/) | Destination systems reachable via a generation ship. |\n\
 | [Spacecraft](spacecraft/) | Interplanetary craft. |\n\
-| [Space Modules](space-modules/) | Spacecraft payload — mining rigs, refiners, probes, telescopes, habitats, power plants, and crew compartments. |\n\
 | [Launch Vehicles](launch-vehicles/) | Surface-to-orbit lifters. |\n\
 | [Facilities](facilities/) | Ground buildings and orbital modules — power, mining, refining, habitats, life support, etc. |\n\
+| [Transportable Modules](transportable-modules/) | Spacecraft payload — mining rigs, refiners, probes, telescopes, habitats, power plants, and crew compartments. |\n\
 | [Research](research/) | Tech tree. |\n\
 | [Missions](missions/) | Mission planning — Plan Mission walk-through, mission types, launch-window pointer. |\n\
 | [Contracts](contracts/) | Story and freelance contracts — the in-game Contracts tab — that drive progression. |\n\
@@ -8171,6 +8239,7 @@ mod tests {
             build_on_orbit_allowed: true,
             space_module_type: module_type.into(),
             resources_to_mine: vec![],
+            maintenance_cost_per_day: 0.0,
         }
     }
 
@@ -8374,6 +8443,7 @@ mod tests {
             build_on_orbit_allowed: false,
             space_module_type: "PowerSupply".into(),
             resources_to_mine: vec![],
+            maintenance_cost_per_day: 0.0,
         };
         let research = ResearchStat {
             id: "research_lifesup_2".into(),
@@ -8502,6 +8572,7 @@ mod tests {
             build_on_orbit_allowed: false,
             space_module_type: String::new(),
             resources_to_mine: vec![],
+            maintenance_cost_per_day: 0.0,
         };
         let useful_locked = make_space_module(
             "module_metalmining",
@@ -8549,6 +8620,151 @@ mod tests {
             "table should expose a Module column:\n{page}");
         assert!(row.contains("Mining"),
             "row should expose the role name:\n{row}");
+    }
+
+    #[test]
+    fn space_modules_page_renders_upkeep_column_header() {
+        let locale = space_modules_fixture_locale();
+        let sirenix = Sirenix {
+            space_modules: vec![make_space_module("module_basemining", "Engine", "Mining", 0.2, false)],
+            ..Default::default()
+        };
+        let page = page_space_modules(&locale, &sirenix);
+        assert!(
+            page.contains("Maint"),
+            "page should include a Maint column header:\n{page}"
+        );
+    }
+
+    #[test]
+    fn space_modules_page_renders_upkeep_value() {
+        let locale = space_modules_fixture_locale();
+        let mut m = make_space_module("module_basemining", "Engine", "Mining", 0.2, false);
+        m.maintenance_cost_per_day = 10.0;
+        let sirenix = Sirenix {
+            space_modules: vec![m],
+            ..Default::default()
+        };
+        let page = page_space_modules(&locale, &sirenix);
+        // 10 per day × 30 days = 300 per month
+        let row = page.lines().find(|l| l.contains("Mining Module")).expect("row present");
+        assert!(
+            row.contains("300"),
+            "row should show upkeep of 300 (10/day * 30):\n{row}"
+        );
+    }
+
+    #[test]
+    fn research_page_renders_starting_corps_column() {
+        let locale = nav_fixture_locale();
+        let sirenix = Sirenix {
+            research: vec![make_research("research_lifesup_1", "UnlockFacility", Some("geothermal"))],
+            epochs: vec![EpochStat {
+                id: "StartGameEpoch_EarlyExploration".into(),
+                start_date_string: "01.01.2000 00:00:00".into(),
+                is_locked: false,
+                possible_player_companies: vec![],
+            }],
+            scenario_starts: vec![ScenarioStartStat {
+                scenario_id: "StartGameEpoch_EarlyExploration".into(),
+                corp_starts: vec![CorpStartStat {
+                    company_id: "NASA".into(),
+                    starting_money: 0.0,
+                    completed_research: vec!["research_lifesup_1".into()],
+                    starting_launch_vehicles: 0,
+                    starting_spacecraft: 0,
+                    starting_facilities: vec![],
+                }],
+                body_habitability: vec![],
+            }],
+            ..Default::default()
+        };
+        let page = page_research(&locale, &sirenix);
+        assert!(
+            page.contains("Starting Corps"),
+            "page should include a Starting Corps column:\n{page}"
+        );
+    }
+
+    #[test]
+    fn research_page_shows_single_corp_with_year() {
+        let locale = nav_fixture_locale();
+        let sirenix = Sirenix {
+            research: vec![make_research("research_lifesup_1", "UnlockFacility", Some("geothermal"))],
+            epochs: vec![EpochStat {
+                id: "StartGameEpoch_EarlyExploration".into(),
+                start_date_string: "01.01.2000 00:00:00".into(),
+                is_locked: false,
+                possible_player_companies: vec![],
+            }],
+            scenario_starts: vec![ScenarioStartStat {
+                scenario_id: "StartGameEpoch_EarlyExploration".into(),
+                corp_starts: vec![
+                    CorpStartStat {
+                        company_id: "NASA".into(),
+                        starting_money: 0.0,
+                        completed_research: vec!["research_lifesup_1".into()],
+                        starting_launch_vehicles: 0,
+                        starting_spacecraft: 0,
+                        starting_facilities: vec![],
+                    },
+                    CorpStartStat {
+                        company_id: "ESA".into(),
+                        starting_money: 0.0,
+                        completed_research: vec![],
+                        starting_launch_vehicles: 0,
+                        starting_spacecraft: 0,
+                        starting_facilities: vec![],
+                    },
+                ],
+                body_habitability: vec![],
+            }],
+            ..Default::default()
+        };
+        let page = page_research(&locale, &sirenix);
+        let row = page.lines().find(|l| l.contains("Life Support 1") || l.contains("research_lifesup_1")).expect("research row present");
+        assert!(
+            row.contains("NASA (2000)"),
+            "row should show 'NASA (2000)' for single-corp starting research:\n{row}"
+        );
+    }
+
+    #[test]
+    fn research_page_shows_all_when_every_corp_has_it() {
+        let locale = nav_fixture_locale();
+        let all_corps = ["CNSA", "ESA", "NASA", "Roscosmos", "Solex"];
+        let corp_starts: Vec<CorpStartStat> = all_corps
+            .iter()
+            .map(|c| CorpStartStat {
+                company_id: (*c).into(),
+                starting_money: 0.0,
+                completed_research: vec!["research_lifesup_1".into()],
+                starting_launch_vehicles: 0,
+                starting_spacecraft: 0,
+                starting_facilities: vec![],
+            })
+            .collect();
+        let sirenix = Sirenix {
+            research: vec![make_research("research_lifesup_1", "UnlockFacility", Some("geothermal"))],
+            epochs: vec![EpochStat {
+                id: "StartGameEpoch_EarlyExploration".into(),
+                start_date_string: "01.01.2000 00:00:00".into(),
+                is_locked: false,
+                possible_player_companies: vec![],
+            }],
+            scenario_starts: vec![ScenarioStartStat {
+                scenario_id: "StartGameEpoch_EarlyExploration".into(),
+                corp_starts,
+                body_habitability: vec![],
+            }],
+            ..Default::default()
+        };
+        let page = page_research(&locale, &sirenix);
+        let row = page.lines().find(|l| l.contains("Life Support 1") || l.contains("research_lifesup_1")).expect("research row present");
+        assert!(
+            row.contains("All (2000)"),
+            "row should show 'All (2000)' when all corps start with the research:\n{row}"
+        );
     }
 
     /// `id_Spacecraft_InterstellarShip` is a real player-buildable hull
@@ -12183,7 +12399,7 @@ fn main() -> Result<()> {
     write_file(&wiki_root, "celestial-bodies/launch-windows.md", &page_launch_windows(&ctx))?;
     write_file(&wiki_root, "celestial-bodies/scenario-state.md", &page_scenario_state(&sirenix))?;
     write_file(&wiki_root, "spacecraft/README.md", &page_spacecraft(&locale, &sirenix))?;
-    write_file(&wiki_root, "space-modules/README.md", &page_space_modules(&locale, &sirenix))?;
+    write_file(&wiki_root, "transportable-modules/README.md", &page_space_modules(&locale, &sirenix))?;
     write_file(&wiki_root, "launch-vehicles/README.md", &page_launch_vehicles(&locale, &sirenix))?;
     write_file(&wiki_root, "facilities/README.md", &page_facilities(&locale, &sirenix))?;
     write_file(&wiki_root, "corporations/README.md", &page_corporations(&locale, &sirenix))?;

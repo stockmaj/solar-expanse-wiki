@@ -555,6 +555,8 @@ struct SpaceModule {
     /// `spaceModuleType` enum: Engine / PowerSupply / Utility / None.
     /// Drives section grouping on the wiki page.
     space_module_type: String,
+    /// Daily cash upkeep. Multiply by 30 to match the game's monthly figure.
+    maintenance_cost_per_day: f64,
     /// Resources this module can mine — drawn from `resourcesToMine[]`.
     /// Stored in the normalized form (no `id_resource_` prefix, lowercased)
     /// so the renderer can resolve them via the resources locale and the
@@ -1632,6 +1634,7 @@ fn parse_space_module(v: &Value) -> Option<SpaceModule> {
     let build_on_orbit_allowed =
         lookup_bool(v, &["buildOnOrbitSpaceModuleAllow"]).unwrap_or(false);
     let build_time_days = lookup_f64(v, &["timeToBuildInDays"]).unwrap_or(0.0);
+    let maintenance_cost_per_day = lookup_f64(v, &["maintenanceCostPerDay"]).unwrap_or(0.0);
     let build_cost = parse_build_cost(v.pointer("/price/listResources"));
     // `resourcesToMine[]` mirrors the facility parser's reading (above) —
     // simple list of `{name: "id_resource_xxx"}` entries that we normalize
@@ -1660,6 +1663,7 @@ fn parse_space_module(v: &Value) -> Option<SpaceModule> {
         build_on_orbit_allowed,
         space_module_type,
         resources_to_mine,
+        maintenance_cost_per_day,
     })
 }
 
@@ -2986,6 +2990,31 @@ mod tests {
         let m = parse_space_module(&v).expect("module_power should parse");
         assert_eq!(m.special_ability, "EnergyProduction, EnergyStorage");
         assert_eq!(m.special_ability_parameter, 2.0);
+    }
+
+    #[test]
+    fn parses_space_module_maintenance_cost_per_day() {
+        let v = serde_json::json!({
+            "id": "module_basemining",
+            "spaceModuleType": "Utility",
+            "specialAbilityFacilityNew": "Mining",
+            "specialAbilityParameter": 1.0,
+            "maintenanceCostPerDay": 30
+        });
+        let m = parse_space_module(&v).expect("module should parse");
+        assert_eq!(m.maintenance_cost_per_day, 30.0);
+    }
+
+    #[test]
+    fn space_module_maintenance_defaults_to_zero_when_absent() {
+        let v = serde_json::json!({
+            "id": "module_basemining",
+            "spaceModuleType": "Utility",
+            "specialAbilityFacilityNew": "Mining",
+            "specialAbilityParameter": 1.0
+        });
+        let m = parse_space_module(&v).expect("module should parse");
+        assert_eq!(m.maintenance_cost_per_day, 0.0);
     }
 
     /// `build_asteroid_engine_module` is a `SpaceModuleDescriptor` but its

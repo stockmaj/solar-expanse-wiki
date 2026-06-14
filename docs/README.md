@@ -13,9 +13,9 @@ the names, descriptions, and stat tables here match exactly what you see in-game
 | **[Celestial Bodies](celestial-bodies/)** | The Sun, planets, moons, asteroids, comets, and exoplanet systems. |
 | [Exoplanets](exoplanets/) | Destination systems reachable via a generation ship. |
 | [Spacecraft](spacecraft/) | Interplanetary craft. |
-| [Space Modules](space-modules/) | Spacecraft payload — mining rigs, refiners, probes, telescopes, habitats, power plants, and crew compartments. |
 | [Launch Vehicles](launch-vehicles/) | Surface-to-orbit lifters. |
 | [Facilities](facilities/) | Ground buildings and orbital modules — power, mining, refining, habitats, life support, etc. |
+| [Transportable Modules](transportable-modules/) | Spacecraft payload — mining rigs, refiners, probes, telescopes, habitats, power plants, and crew compartments. |
 | [Research](research/) | Tech tree. |
 | [Missions](missions/) | Mission planning — Plan Mission walk-through, mission types, launch-window pointer. |
 | [Contracts](contracts/) | Story and freelance contracts — the in-game Contracts tab — that drive progression. |

@@ -72,5 +72,5 @@ lift them to space.
 ## See also
 
 - [Launch Vehicles](../launch-vehicles/) — surface-to-orbit lifters
-- [Space Modules](../space-modules/) — mining rigs, refiners, probes, telescopes, habitats, and crew compartments that ride on these craft
+- [Transportable Modules](../transportable-modules/) — mining rigs, refiners, probes, telescopes, habitats, and crew compartments that ride on these craft
 - [Research](../research/) — propulsion tech tree

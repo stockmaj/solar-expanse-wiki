@@ -12,6 +12,10 @@ Facilities are split into two families:
 may need atmospheric conditions to function.
 - **Orbital modules** attach to a space station or shipyard in orbit. They
 don't need a habitable surface, but you have to build the station first.
+- **[Transportable modules](../transportable-modules/)** are loaded as cargo
+onto interplanetary craft and deployed at a destination body, providing
+mining, refining, crew capacity, and other capabilities without a fixed
+surface installation.
 
 ## Ground facilities
 
