@@ -672,6 +672,10 @@ struct SpacecraftStat {
     /// unlock graph to flag Unreleased rows on the spacecraft page.
     #[serde(default)]
     is_locked: bool,
+    /// `solarParameter` from the dump; `Some` only for solar-engine craft.
+    /// Range AU ≈ sqrt(solar_range_param). 9999 = unlimited (Zephyr sentinel).
+    #[serde(default)]
+    solar_range_param: Option<f64>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -1639,6 +1643,17 @@ fn fmt_exhaust(v: f64) -> String {
     }
 }
 
+// Range in AU = sqrt(solarParameter * sunParameter) * bonus.
+// sunParameter defaults to 1f (ObjectInfoManager.mainObjectInfoSunSolarSystemSunParameter).
+// 9999 is the sentinel meaning unlimited (Zephyr plasma magnet sail).
+fn fmt_solar_range(param: Option<f64>) -> String {
+    match param {
+        Some(p) if p >= 9999.0 => "Unlimited".into(),
+        Some(p) => format!("{:.1} AU", p.sqrt()),
+        None => "—".into(),
+    }
+}
+
 fn page_spacecraft(locale: &Locale, sirenix: &Sirenix) -> String {
     let id_to_name: BTreeMap<&str, &str> = locale
         .spacecraft
@@ -1710,7 +1725,7 @@ lift them to space.\n\n",
     let mut current = u8::MAX;
     let mut rows: Vec<Vec<String>> = Vec::new();
     let mut current_has_unreleased = false;
-    let flush = |out: &mut String, rows: &mut Vec<Vec<String>>, header: &str, has_unreleased: bool| {
+    let flush = |out: &mut String, rows: &mut Vec<Vec<String>>, header: &str, has_unreleased: bool, is_solar_sails: bool| {
         if rows.is_empty() {
             return;
         }
@@ -1718,12 +1733,19 @@ lift them to space.\n\n",
         if has_unreleased {
             out.push_str(show_unreleased_toggle());
         }
+        // Solar sails have no fuel; replace that column with max operating range.
+        let col3_name = if is_solar_sails { "Max range (AU)" } else { "Fuel (t)" };
+        let col3_tip: Option<&str> = if is_solar_sails {
+            Some("Maximum operating distance from the sun. Computed as sqrt(solarParameter) AU (assumes default sun; research bonuses increase this). 9999 sentinel = Unlimited.")
+        } else {
+            Some("Fuel capacity in tonnes")
+        };
         out.push_str(&md_table_with_tips(
             &[
                 "Spacecraft",
                 "Mass (t)",
                 "Cargo (t)",
-                "Fuel (t)",
+                col3_name,
                 "Thrust",
                 "Exhaust V",
                 "Life support",
@@ -1738,7 +1760,7 @@ lift them to space.\n\n",
                 None,
                 Some("Dry mass in tonnes"),
                 Some("Cargo capacity in tonnes"),
-                Some("Fuel capacity in tonnes"),
+                col3_tip,
                 Some("Default engine thrust"),
                 Some("Effective exhaust velocity — chemical ~3-5 km/s, nuclear ~8-15, fusion 20+"),
                 Some("Whether the hull has life support — `hull.lifeSupportMaxBase > 0` in the dump. Yes means the craft can carry crew; No means crew cannot board (the game blocks crew assignment per `ToolTip.CargoCrewSCnoLifeSupport`)."),
@@ -1766,7 +1788,7 @@ lift them to space.\n\n",
                 4 => "Solar Sails",
                 _ => "Other",
             };
-            flush(&mut out, &mut rows, header, current_has_unreleased);
+            flush(&mut out, &mut rows, header, current_has_unreleased, current == 4);
             current = cat;
             current_has_unreleased = false;
         }
@@ -1858,6 +1880,11 @@ lift them to space.\n\n",
         } else {
             ""
         };
+        let fuel_or_range = if cat == 4 {
+            fmt_solar_range(s.solar_range_param)
+        } else {
+            fmt_amount(s.fuel_capacity)
+        };
         rows.push(vec![
             format!(
                 "{anchor}{unreleased_prefix}**{name}**",
@@ -1866,7 +1893,7 @@ lift them to space.\n\n",
             ),
             fmt_amount(s.mass),
             cargo_cell,
-            fmt_amount(s.fuel_capacity),
+            fuel_or_range,
             thrust,
             exhaust,
             if s.life_support_max > 0.0 { "Yes".into() } else { "No".into() },
@@ -1886,7 +1913,7 @@ lift them to space.\n\n",
         4 => "Solar Sails",
         _ => "Other",
     };
-    flush(&mut out, &mut rows, header, current_has_unreleased);
+    flush(&mut out, &mut rows, header, current_has_unreleased, current == 4);
     out.push_str("\n");
 
     out.push_str(
@@ -7150,6 +7177,7 @@ mod tests {
             launch_cost: 1000.0,
             life_support_max: 0.0,
             is_locked: false,
+            solar_range_param: None,
         }
     }
 
@@ -8856,6 +8884,89 @@ mod tests {
             row.contains("Built in orbit") || row.contains("Orbital build"),
             "orbital-build craft should declare 'Built in orbit' in the LV column:\n{row}"
         );
+    }
+
+    fn make_sail_stat(id: &str, solar_range_param: f64) -> SpacecraftStat {
+        let mut s = make_sc_stat(id, false);
+        s.engine_type = "solar".into();
+        s.fuel_capacity = 0.0;
+        s.solar_range_param = Some(solar_range_param);
+        s
+    }
+
+    #[test]
+    fn solar_sails_section_does_not_show_fuel_placeholder() {
+        // The C# default for fuelCapacity is 1000f. Solar sails must not show
+        // that placeholder — the column is replaced by "Max range (AU)".
+        let mut locale = nav_fixture_locale();
+        locale.spacecraft.push(NameDesc {
+            id: "spacecraft_sail_long".into(),
+            name: "Zephyr".into(),
+            description: "Plasma magnet sail.".into(),
+        });
+        let sirenix = Sirenix {
+            spacecraft: vec![make_sail_stat("spacecraft_sail_long", 9999.0)],
+            ..Default::default()
+        };
+        let page = page_spacecraft(&locale, &sirenix);
+        let row = page.lines().find(|l| l.contains("Zephyr")).expect("Zephyr row");
+        assert!(!row.contains("| 1000 |"),
+            "solar sail row must not show the fuelCapacity placeholder 1000:\n{row}");
+    }
+
+    #[test]
+    fn solar_sails_table_has_max_range_column() {
+        let mut locale = nav_fixture_locale();
+        locale.spacecraft.push(NameDesc {
+            id: "spacecraft_sail_long".into(),
+            name: "Zephyr".into(),
+            description: "Plasma magnet sail.".into(),
+        });
+        let sirenix = Sirenix {
+            spacecraft: vec![make_sail_stat("spacecraft_sail_long", 9999.0)],
+            ..Default::default()
+        };
+        let page = page_spacecraft(&locale, &sirenix);
+        assert!(page.contains("Max range"),
+            "Solar Sails section must have a Max range column:\n{page}");
+    }
+
+    #[test]
+    fn solar_sail_unlimited_range_shown_for_sentinel_param() {
+        // solarParameter=9999 is the sentinel for unlimited range (Zephyr).
+        let mut locale = nav_fixture_locale();
+        locale.spacecraft.push(NameDesc {
+            id: "spacecraft_sail_long".into(),
+            name: "Zephyr".into(),
+            description: "Plasma magnet sail.".into(),
+        });
+        let sirenix = Sirenix {
+            spacecraft: vec![make_sail_stat("spacecraft_sail_long", 9999.0)],
+            ..Default::default()
+        };
+        let page = page_spacecraft(&locale, &sirenix);
+        let row = page.lines().find(|l| l.contains("Zephyr")).expect("Zephyr row");
+        assert!(row.contains("Unlimited"),
+            "Zephyr (solarParameter=9999) should show Unlimited range:\n{row}");
+    }
+
+    #[test]
+    fn solar_sail_limited_range_shown_as_au() {
+        // solarParameter=10 → sqrt(10 * 1.0) ≈ 3.2 AU (Talos / Daedalus).
+        let mut locale = nav_fixture_locale();
+        locale.spacecraft.push(NameDesc {
+            id: "spacecraft_sail_mid".into(),
+            name: "Talos".into(),
+            description: "Solar sail.".into(),
+        });
+        let sirenix = Sirenix {
+            spacecraft: vec![make_sail_stat("spacecraft_sail_mid", 10.0)],
+            ..Default::default()
+        };
+        let page = page_spacecraft(&locale, &sirenix);
+        let row = page.lines().find(|l| l.contains("Talos")).expect("Talos row");
+        assert!(row.contains("AU"),
+            "limited-range sail (solarParameter=10) should show AU value:\n{row}");
     }
 
     #[test]

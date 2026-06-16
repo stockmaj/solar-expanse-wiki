@@ -34,6 +34,12 @@ struct Spacecraft {
     /// unlock graph downstream to flag "Unreleased" — locked AND no
     /// known unlock path.
     is_locked: bool,
+    /// `solarParameter` from the dump, present only when `solarSC=true`.
+    /// Range in AU ≈ sqrt(solar_range_param * sunParameter). sunParameter
+    /// defaults to 1.0 for Sol (ObjectInfoManager.mainObjectInfoSunSolarSystem-
+    /// SunParameter). 9999 is the sentinel for unlimited range (Zephyr).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    solar_range_param: Option<f64>,
 }
 
 #[derive(Serialize, Debug, Default, PartialEq)]
@@ -890,13 +896,26 @@ fn parse_spacecraft(v: &Value) -> Option<Spacecraft> {
     let top_cargo = f(&["cargoCapacity"]);
     let cargo_capacity = if hull_cargo > 0.0 { hull_cargo } else { top_cargo };
 
+    // hull.fuelCapacityBase is the authoritative fuel value when the key
+    // exists (0 is valid — solar sails have no fuel tank). Top-level
+    // fuelCapacity is a C# field default (1000f placeholder) for cases where
+    // the hull block is absent.
+    let fuel_capacity = lookup_f64(v, &["hull", "fuelCapacityBase"])
+        .unwrap_or_else(|| f(&["fuelCapacity"]));
+
+    let solar_range_param = if b(&["solarSC"]) {
+        Some(f(&["solarParameter"]))
+    } else {
+        None
+    };
+
     Some(Spacecraft {
         id,
         engine_module,
         engine_type,
         mass: f(&["mass"]),
         cargo_capacity,
-        fuel_capacity: f(&["fuelCapacity"]),
+        fuel_capacity,
         reusability: f(&["reusability"]),
         needs_launch_vehicle: b(&["needLaunchVehicleToGoToMoon"]),
         built_in_orbit: b(&["orbitSC"]),
@@ -906,6 +925,7 @@ fn parse_spacecraft(v: &Value) -> Option<Spacecraft> {
         launch_cost: f(&["costLaunch"]),
         life_support_max: lookup_f64(v, &["hull", "lifeSupportMaxBase"]).unwrap_or(0.0),
         is_locked: b(&["isLocked"]),
+        solar_range_param,
     })
 }
 
@@ -5425,5 +5445,67 @@ mod tests {
         assert_eq!(b.gravity, 0.0);
         assert_eq!(b.water, 0.0);
         assert_eq!(b.radiation, 0.0);
+    }
+
+    // --- Solar sail fuel and range ---
+
+    #[test]
+    fn solar_sail_fuel_capacity_uses_hull_base_zero() {
+        // Solar sails have hull.fuelCapacityBase=0 (no fuel tank) but the
+        // top-level fuelCapacity is 1000 (C# field default placeholder).
+        // The parser must prefer hull.fuelCapacityBase when the key exists.
+        let v = serde_json::json!({
+            "id": "spacecraft_sail_long",
+            "engineType": "solar",
+            "solarSC": true,
+            "solarParameter": 9999,
+            "fuelCapacity": 1000,
+            "hull": {
+                "fuelCapacityBase": 0,
+                "cargoCapacityBase": 0
+            }
+        });
+        let sc = parse_spacecraft(&v).expect("should parse");
+        assert_eq!(sc.fuel_capacity, 0.0,
+            "solar sail fuel must come from hull.fuelCapacityBase (0), not top-level placeholder (1000)");
+    }
+
+    #[test]
+    fn solar_sail_range_param_populated() {
+        let v = serde_json::json!({
+            "id": "spacecraft_sail_long",
+            "engineType": "solar",
+            "solarSC": true,
+            "solarParameter": 9999,
+            "fuelCapacity": 1000,
+            "hull": { "fuelCapacityBase": 0, "cargoCapacityBase": 0 }
+        });
+        let sc = parse_spacecraft(&v).expect("should parse");
+        assert_eq!(sc.solar_range_param, Some(9999.0));
+    }
+
+    #[test]
+    fn non_solar_spacecraft_has_no_range_param() {
+        let sc = parse_spacecraft(&iris_fixture()).expect("should parse");
+        assert_eq!(sc.solar_range_param, None);
+    }
+
+    #[test]
+    fn hull_fuel_capacity_base_wins_over_top_level_placeholder() {
+        // Spacecraft that have hull.fuelCapacityBase set to a real value
+        // (e.g. spacecraft_asteroid_puller: 12000 real vs 500 placeholder)
+        // should use the hull value.
+        let v = serde_json::json!({
+            "id": "spacecraft_fusion_large",
+            "engineType": "fusion",
+            "fuelCapacity": 500,
+            "hull": {
+                "fuelCapacityBase": 12000,
+                "cargoCapacityBase": 0
+            }
+        });
+        let sc = parse_spacecraft(&v).expect("should parse");
+        assert_eq!(sc.fuel_capacity, 12000.0,
+            "hull.fuelCapacityBase (12000) must win over top-level placeholder (500)");
     }
 }
