@@ -5148,9 +5148,8 @@ fn fmt_habitat_constraint(c: &HabitatConstraintStat) -> String {
             // (tidal heating, radiogenic heat). Not player-terraformable.
             // Per-body values are in scenario data, not in the dump.
             format!(
-                "<span data-tip=\"Geothermal activity level. Must be between {min} and {max} \
-                 for this facility to be buildable here. Bodies with InternalFlux = 0 \
-                 have no geothermal activity and cannot host it.\">InternalFlux {min}–{max}</span>",
+                "<span data-tip=\"Geothermal activity level — must be within this range \
+                 for the facility to be buildable here.\">InternalFlux {min}–{max}</span>",
                 min = fmt(c.min),
                 max = fmt(c.max),
             )
@@ -9972,8 +9971,8 @@ mod tests {
             "InternalFlux constraint must render with a data-tip tooltip <span data-tip=...>:\n{row}"
         );
         assert!(
-            row.contains("geotherm"),
-            "InternalFlux tooltip must explain geothermal activity to the player:\n{row}"
+            row.contains("Geothermal activity level"),
+            "InternalFlux tooltip must explain what InternalFlux is:\n{row}"
         );
     }
 
