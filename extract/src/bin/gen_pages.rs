@@ -5143,9 +5143,21 @@ fn fmt_habitat_constraint(c: &HabitatConstraintStat) -> String {
                 format!("Pressure {}–{}", fmt(c.min), fmt(c.max))
             }
         }
+        "InternalFlux" => {
+            // InternalFlux reflects a body's inherent geothermal activity
+            // (tidal heating, radiogenic heat). Not player-terraformable.
+            // Per-body values are in scenario data, not in the dump.
+            format!(
+                "<span title=\"Geothermal activity level. Must be between {min} and {max} \
+                 for this facility to be buildable here. Bodies with InternalFlux = 0 \
+                 have no geothermal activity and cannot host it.\">InternalFlux {min}–{max}</span>",
+                min = fmt(c.min),
+                max = fmt(c.max),
+            )
+        }
         // For every other parameter (Temperature, Gravity, Radiation, Water,
-        // Composition, InternalFlux) we render generically rather than guess
-        // at a player-friendly label. The label itself is the raw enum name
+        // Composition) we render generically rather than guess at a
+        // player-friendly label. The label itself is the raw enum name
         // straight from the dump.
         param => format!("{} {}–{}", param, fmt(c.min), fmt(c.max)),
     }
@@ -9931,6 +9943,37 @@ mod tests {
         assert!(
             !row.contains("ObjectType:"),
             "raw synthetic key leaked: {row}"
+        );
+    }
+
+    #[test]
+    fn facilities_page_internalflux_constraint_has_tooltip() {
+        // Geothermal carries an InternalFlux 0.1–1 gate. The cell must render
+        // a <span title="..."> tooltip so players know what InternalFlux means
+        // without having to look it up elsewhere.
+        let locale = facility_fixture_locale();
+        let mut f = facility_stat("lab", "Other");
+        f.habitat_constraints = vec![HabitatConstraintStat {
+            parameter: "InternalFlux".into(),
+            min: 0.1,
+            max: 1.0,
+        }];
+        let sirenix = Sirenix {
+            facilities: vec![f],
+            ..Default::default()
+        };
+        let page = page_facilities(&locale, &sirenix);
+        let row = page
+            .lines()
+            .find(|l| l.contains("Research Lab"))
+            .expect("Research Lab row present");
+        assert!(
+            row.contains("<span title=") && row.contains("InternalFlux"),
+            "InternalFlux constraint must render with a tooltip <span title=...>:\n{row}"
+        );
+        assert!(
+            row.contains("geotherm"),
+            "InternalFlux tooltip must explain geothermal activity to the player:\n{row}"
         );
     }
 
