@@ -5148,7 +5148,7 @@ fn fmt_habitat_constraint(c: &HabitatConstraintStat) -> String {
             // (tidal heating, radiogenic heat). Not player-terraformable.
             // Per-body values are in scenario data, not in the dump.
             format!(
-                "<span title=\"Geothermal activity level. Must be between {min} and {max} \
+                "<span data-tip=\"Geothermal activity level. Must be between {min} and {max} \
                  for this facility to be buildable here. Bodies with InternalFlux = 0 \
                  have no geothermal activity and cannot host it.\">InternalFlux {min}–{max}</span>",
                 min = fmt(c.min),
@@ -9968,8 +9968,8 @@ mod tests {
             .find(|l| l.contains("Research Lab"))
             .expect("Research Lab row present");
         assert!(
-            row.contains("<span title=") && row.contains("InternalFlux"),
-            "InternalFlux constraint must render with a tooltip <span title=...>:\n{row}"
+            row.contains("<span data-tip=") && row.contains("InternalFlux"),
+            "InternalFlux constraint must render with a data-tip tooltip <span data-tip=...>:\n{row}"
         );
         assert!(
             row.contains("geotherm"),

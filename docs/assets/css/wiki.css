@@ -369,6 +369,33 @@ span[title]:hover::after {
  * the browser tooltip with a transparent inline title-tooltip trick. */
 span[title]:hover { /* keep title for a11y; we just add the CSS popup */ }
 
+/* data-tip: same styled popup as span[title] but WITHOUT the browser's
+ * native title tooltip (no title attr = no double-popup).  Use this for
+ * longer cell-level tooltips where the native popup would collide. */
+span[data-tip] {
+  position: relative;
+  cursor: help;
+}
+span[data-tip]:hover::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1d242e;
+  color: var(--fg);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 12px;
+  white-space: normal;
+  max-width: 320px;
+  z-index: 20;
+  pointer-events: none;
+  margin-bottom: 4px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+}
+
 /* ---------- Misc ---------- */
 
 main hr {
