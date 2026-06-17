@@ -389,6 +389,7 @@ span[data-tip]:hover::after {
   padding: 3px 8px;
   font-size: 12px;
   white-space: normal;
+  width: max-content;
   max-width: 320px;
   z-index: 20;
   pointer-events: none;
