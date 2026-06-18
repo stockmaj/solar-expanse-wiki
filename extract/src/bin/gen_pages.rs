@@ -313,7 +313,6 @@ struct ScenarioBodyHabitabilityStat {
     magnetic_field: f64,
     #[serde(default)]
     albedo: f64,
-    #[allow(dead_code)]
     #[serde(default)]
     internal_flux: f64,
     #[allow(dead_code)]
@@ -852,6 +851,39 @@ fn fmt_km(v: Option<f64>) -> String {
     }
 }
 
+/// Format an InternalFlux value (0–1) with up to 3 decimal places, trimming
+/// trailing zeros. Returns "—" for None.
+fn fmt_flux(v: Option<f64>) -> String {
+    match v {
+        None => "—".to_string(),
+        Some(x) => {
+            let s = format!("{x:.3}");
+            let s = s.trim_end_matches('0');
+            let s = s.trim_end_matches('.');
+            s.to_string()
+        }
+    }
+}
+
+/// Return the InternalFlux value for `display_name` from scenario habitability
+/// data. Prefers TheExpansion; falls back to any scenario with this body.
+/// Returns None if the body is absent or its flux is zero.
+fn body_internal_flux(sirenix: &Sirenix, display_name: &str) -> Option<f64> {
+    let expansion_id = "StartGameEpoch_TheExpansion";
+    let find = |s: &ScenarioStartStat| -> Option<f64> {
+        s.body_habitability
+            .iter()
+            .find(|b| b.body_name == display_name && b.internal_flux > 0.0)
+            .map(|b| b.internal_flux)
+    };
+    sirenix
+        .scenario_starts
+        .iter()
+        .find(|s| s.scenario_id == expansion_id)
+        .and_then(find)
+        .or_else(|| sirenix.scenario_starts.iter().find_map(find))
+}
+
 fn md_table(headers: &[&str], rows: &[Vec<String>]) -> String {
     md_table_with_tips(headers, &[], rows)
 }
@@ -897,7 +929,7 @@ fn write_file(root: &Path, rel: &str, content: &str) -> Result<()> {
     Ok(())
 }
 
-fn page_planets(ctx: &WikiCtx) -> String {
+fn page_planets(ctx: &WikiCtx, sirenix: &Sirenix) -> String {
     let moons_by_parent = moons_by_parent();
     let moon_counts: BTreeMap<&str, usize> = moons_by_parent
         .iter()
@@ -915,6 +947,7 @@ fn page_planets(ctx: &WikiCtx) -> String {
             let e = body.and_then(|b| b.eccentricity);
             let i = body.and_then(|b| b.inclination_deg);
             let moons = moon_counts.get(p).copied().unwrap_or(0);
+            let flux = fmt_flux(body_internal_flux(sirenix, display));
             vec![
                 format!("**{display}**"),
                 fmt_mass(mass),
@@ -923,12 +956,15 @@ fn page_planets(ctx: &WikiCtx) -> String {
                 fmt_opt(e, 4),
                 fmt_opt(i, 2),
                 if moons > 0 { moons.to_string() } else { "—".into() },
+                flux,
             ]
         })
         .collect();
 
-    let table = md_table(
-        &["Planet", "Mass (×10²⁴ kg)", "Radius (km)", "Semi-major axis (AU)", "Eccentricity", "Inclination (°)", "Moons"],
+    let table = md_table_with_tips(
+        &["Planet", "Mass (×10²⁴ kg)", "Radius (km)", "Semi-major axis (AU)", "Eccentricity", "Inclination (°)", "Moons", "InternalFlux"],
+        &[None, None, None, None, None, None, None,
+          Some("Geothermal activity level (0–1). A Geothermal Power Facility requires InternalFlux 0.1–1 to be built here.")],
         &rows,
     );
 
@@ -944,7 +980,7 @@ Planets available in Solar Expanse.\n\n\
     )
 }
 
-fn page_moons(ctx: &WikiCtx) -> String {
+fn page_moons(ctx: &WikiCtx, sirenix: &Sirenix) -> String {
     let mut out = String::from(
         "# Moons\n\n\
 Natural satellites orbiting each planet, grouped by parent body. Distance is\n\
@@ -961,17 +997,21 @@ measured from the parent planet's center.\n\n",
                 let dist = body.and_then(moon_distance_km);
                 let e = body.and_then(|b| b.eccentricity);
                 let i = body.and_then(|b| b.inclination_deg);
+                let flux = fmt_flux(body_internal_flux(sirenix, display));
                 vec![
                     format!("**{display}**"),
                     fmt_mass(mass),
                     fmt_km(dist),
                     fmt_opt(e, 4),
                     fmt_opt(i, 2),
+                    flux,
                 ]
             })
             .collect();
-        let table = md_table(
-            &["Moon", "Mass (×10²⁴ kg)", "Distance (km)", "Eccentricity", "Inclination (°)"],
+        let table = md_table_with_tips(
+            &["Moon", "Mass (×10²⁴ kg)", "Distance (km)", "Eccentricity", "Inclination (°)", "InternalFlux"],
+            &[None, None, None, None, None,
+              Some("Geothermal activity level (0–1). A Geothermal Power Facility requires InternalFlux 0.1–1 to be built here.")],
             &rows,
         );
         out.push_str(&format!("## Moons of {parent_name}\n\n{table}\n"));
@@ -12540,6 +12580,133 @@ mod tests {
             "raw override contract id leaked into prereq cell: {row}"
         );
     }
+
+    fn planets_fixture_locale() -> Locale {
+        let body = |id: &str| CelestialBody { id: id.into(), name: id.into() };
+        Locale {
+            celestial_bodies: vec![
+                body("Mercury"), body("Venus"), body("Earth"), body("Mars"),
+                body("Jupiter"), body("Saturn"), body("Uranus"), body("Neptune"), body("Pluto"),
+                body("Moon"), body("Io"),
+            ],
+            spacecraft: vec![],
+            launch_vehicles: vec![],
+            research: vec![],
+            corporations: vec![],
+            contracts: vec![],
+            resources: vec![],
+            facilities: vec![],
+            habitability_scales: BTreeMap::new(),
+            cargo: vec![],
+        }
+    }
+
+    fn planets_fixture_sirenix(bodies: Vec<(&str, f64)>) -> Sirenix {
+        Sirenix {
+            scenario_starts: vec![ScenarioStartStat {
+                scenario_id: "StartGameEpoch_TheExpansion".into(),
+                corp_starts: vec![],
+                body_habitability: bodies
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, (name, flux))| ScenarioBodyHabitabilityStat {
+                        body_id: i as i32,
+                        body_name: name.into(),
+                        internal_flux: flux,
+                        ..Default::default()
+                    })
+                    .collect(),
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn planets_page_has_internalflux_column_with_tooltip() {
+        let locale = planets_fixture_locale();
+        let stats = Stats { bodies: vec![] };
+        let ctx = WikiCtx::build(&locale, &stats);
+        let sirenix = planets_fixture_sirenix(vec![("Earth", 0.08), ("Mars", 0.08)]);
+        let page = page_planets(&ctx, &sirenix);
+        assert!(
+            page.contains("InternalFlux"),
+            "planets page must include an InternalFlux column header"
+        );
+        assert!(
+            page.contains("Geothermal activity level"),
+            "InternalFlux column header must carry a Geothermal activity level tooltip"
+        );
+    }
+
+    #[test]
+    fn planets_page_internalflux_value_rendered() {
+        let locale = planets_fixture_locale();
+        let stats = Stats { bodies: vec![] };
+        let ctx = WikiCtx::build(&locale, &stats);
+        let sirenix = planets_fixture_sirenix(vec![("Earth", 0.08), ("Jupiter", 0.5)]);
+        let page = page_planets(&ctx, &sirenix);
+        let earth_row = page.lines().find(|l| l.contains("**Earth**")).expect("Earth row present");
+        assert!(
+            earth_row.contains("0.08"),
+            "Earth row must show InternalFlux 0.08: {earth_row}"
+        );
+        let jupiter_row = page.lines().find(|l| l.contains("**Jupiter**")).expect("Jupiter row present");
+        assert!(
+            jupiter_row.contains("0.5"),
+            "Jupiter row must show InternalFlux 0.5: {jupiter_row}"
+        );
+    }
+
+    #[test]
+    fn moons_page_has_internalflux_column_with_tooltip() {
+        let locale = planets_fixture_locale();
+        let stats = Stats { bodies: vec![] };
+        let ctx = WikiCtx::build(&locale, &stats);
+        let sirenix = planets_fixture_sirenix(vec![("Moon", 0.01), ("Io", 0.4)]);
+        let page = page_moons(&ctx, &sirenix);
+        assert!(
+            page.contains("InternalFlux"),
+            "moons page must include an InternalFlux column header"
+        );
+        let io_row = page.lines().find(|l| l.contains("**Io**")).expect("Io row present");
+        assert!(
+            io_row.contains("0.4"),
+            "Io row must show InternalFlux 0.4: {io_row}"
+        );
+    }
+
+    #[test]
+    fn body_internal_flux_prefers_expansion_scenario() {
+        let sirenix = Sirenix {
+            scenario_starts: vec![
+                ScenarioStartStat {
+                    scenario_id: "StartGameEpoch_Colonization".into(),
+                    corp_starts: vec![],
+                    body_habitability: vec![ScenarioBodyHabitabilityStat {
+                        body_id: 1, body_name: "Mars".into(), internal_flux: 0.99, ..Default::default()
+                    }],
+                },
+                ScenarioStartStat {
+                    scenario_id: "StartGameEpoch_TheExpansion".into(),
+                    corp_starts: vec![],
+                    body_habitability: vec![ScenarioBodyHabitabilityStat {
+                        body_id: 1, body_name: "Mars".into(), internal_flux: 0.08, ..Default::default()
+                    }],
+                },
+            ],
+            ..Default::default()
+        };
+        assert_eq!(body_internal_flux(&sirenix, "Mars"), Some(0.08));
+    }
+
+    #[test]
+    fn fmt_flux_trims_trailing_zeros() {
+        assert_eq!(fmt_flux(None), "—");
+        assert_eq!(fmt_flux(Some(0.5)), "0.5");
+        assert_eq!(fmt_flux(Some(0.08)), "0.08");
+        assert_eq!(fmt_flux(Some(0.001)), "0.001");
+        assert_eq!(fmt_flux(Some(0.4)), "0.4");
+    }
 }
 
 /// Parse the Unity engine's `bundleVersion` line out of a
@@ -12645,8 +12812,8 @@ fn main() -> Result<()> {
 
     write_file(&wiki_root, "README.md", &page_root())?;
     write_file(&wiki_root, "celestial-bodies/README.md", &page_celestial_index())?;
-    write_file(&wiki_root, "celestial-bodies/planets.md", &page_planets(&ctx))?;
-    write_file(&wiki_root, "celestial-bodies/moons.md", &page_moons(&ctx))?;
+    write_file(&wiki_root, "celestial-bodies/planets.md", &page_planets(&ctx, &sirenix))?;
+    write_file(&wiki_root, "celestial-bodies/moons.md", &page_moons(&ctx, &sirenix))?;
     write_file(&wiki_root, "celestial-bodies/asteroids.md", &page_asteroids(&ctx))?;
     write_file(&wiki_root, "celestial-bodies/comets.md", &page_comets(&ctx))?;
     write_file(&wiki_root, "celestial-bodies/exoplanets.md", &page_exoplanets(&ctx, &sirenix))?;
