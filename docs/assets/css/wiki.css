@@ -320,10 +320,27 @@ main table th.sort::after {
 main table th.sort-asc::after  { content: "↑"; color: var(--accent); opacity: 1; }
 main table th.sort-desc::after { content: "↓"; color: var(--accent); opacity: 1; }
 
-/* Typeahead/datalist inputs (calc-from, calc-to, ga-from, etc.) select
- * their entire value on focus so the user can type a new body name
- * without manually deleting the old one. */
-input[list]:focus { outline: 1px solid var(--accent); }
+/* Custom combobox for the boiling-point body selector. */
+.body-combo { position: relative; }
+.body-combo-list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  min-width: 100%;
+  max-height: 220px;
+  overflow-y: auto;
+  background: var(--bg-elev);
+  border: 1px solid var(--accent-dim);
+  border-radius: 0 0 4px 4px;
+  z-index: 200;
+}
+.body-combo-list div {
+  padding: 5px 10px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: var(--fg);
+}
+.body-combo-list div:hover { background: var(--accent-dim); color: var(--bg); }
 
 /* Resource icons sit on the text baseline. */
 main table img[src*="/images/resources/"] {

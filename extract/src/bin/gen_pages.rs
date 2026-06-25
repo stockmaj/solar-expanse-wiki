@@ -3330,8 +3330,10 @@ types exist:\n\n\
 - **Human** — colonists; produced over time by habitats and consumed by jobs.\n\n\
 <div class=\"calc\" id=\"boiling-selector\">\n\
 <label>Body:\n\
-<input type=\"text\" id=\"boiling-body-input\" list=\"boiling-body-list\" value=\"Earth\" autocomplete=\"off\"></label>\n\
-<datalist id=\"boiling-body-list\"></datalist>\n\
+<div class=\"body-combo\">\n\
+<input type=\"text\" id=\"boiling-body-input\" autocomplete=\"off\" placeholder=\"Search bodies…\">\n\
+<div id=\"boiling-body-dropdown\" class=\"body-combo-list\" hidden></div>\n\
+</div></label>\n\
 <label>Pressure (atm):\n\
 <input type=\"number\" id=\"boiling-pressure\" min=\"0\" step=\"any\" value=\"{earth_pressure}\"></label>\n\
 </div>\n\n\

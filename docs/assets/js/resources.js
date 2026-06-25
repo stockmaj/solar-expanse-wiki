@@ -1,6 +1,6 @@
 // Boiling-point selector for the resources page.
-// Reads body pressure data embedded as JSON by gen_pages.rs, populates the
-// datalist typeahead, and recalculates the Boiling pt. column whenever the
+// Reads body pressure data embedded as JSON by gen_pages.rs, populates a
+// custom combobox, and recalculates the Boiling pt. column whenever the
 // selected body or pressure changes.
 //
 // Formula: TerraformationConfig.cs line 599 (Clausius-Clapeyron).
@@ -18,15 +18,8 @@
 
   var bodyInput = document.getElementById('boiling-body-input');
   var pressureInput = document.getElementById('boiling-pressure');
-  var datalist = document.getElementById('boiling-body-list');
-  if (!bodyInput || !pressureInput || !datalist) return;
-
-  // Populate datalist with all named bodies.
-  bodies.forEach(function (b) {
-    var opt = document.createElement('option');
-    opt.value = b.name;
-    datalist.appendChild(opt);
-  });
+  var dropdown = document.getElementById('boiling-body-dropdown');
+  if (!bodyInput || !pressureInput || !dropdown) return;
 
   // Game formula — TerraformationConfig.cs line 599.
   function effectiveBoilingTemp(tRef, latentHeat, pressure) {
@@ -53,40 +46,66 @@
     return bodies.find(function (b) { return b.name.toLowerCase() === lower; });
   }
 
-  // Initialize at Earth pressure.
-  var earthBody = findBody('Earth');
-  var initPressure = earthBody ? earthBody.pressure : 1.0;
-  pressureInput.value = initPressure;
-  updateTable(initPressure);
+  var lastValidBody = findBody('Earth') || bodies[0];
 
-  var lastValidBody = earthBody ? earthBody.name : 'Earth';
-
-  // Clear on focus or click so the full dropdown list appears immediately,
-  // even if the input already has focus when the dropdown arrow is clicked.
-  function clearBodyInput() {
-    bodyInput.value = '';
+  function selectBody(b) {
+    lastValidBody = b;
+    bodyInput.value = b.name;
+    pressureInput.value = b.pressure;
+    updateTable(b.pressure);
+    closeDropdown();
   }
-  bodyInput.addEventListener('focus', clearBodyInput);
-  bodyInput.addEventListener('click', clearBodyInput);
 
-  // Restore the last valid body if the user blurs without picking one.
+  function buildDropdown(filter) {
+    var q = filter ? filter.toLowerCase() : '';
+    var matches = q
+      ? bodies.filter(function (b) { return b.name.toLowerCase().indexOf(q) !== -1; })
+      : bodies;
+    dropdown.innerHTML = '';
+    matches.forEach(function (b) {
+      var div = document.createElement('div');
+      div.textContent = b.name;
+      div.addEventListener('mousedown', function (e) {
+        e.preventDefault(); // keep input focused
+        selectBody(b);
+      });
+      dropdown.appendChild(div);
+    });
+    dropdown.hidden = matches.length === 0;
+  }
+
+  function openDropdown() {
+    buildDropdown(bodyInput.value);
+  }
+
+  function closeDropdown() {
+    dropdown.hidden = true;
+  }
+
+  // Show full list on focus or click; clear so user can type immediately.
+  bodyInput.addEventListener('focus', function () {
+    bodyInput.value = '';
+    buildDropdown('');
+  });
+  bodyInput.addEventListener('click', function () {
+    bodyInput.value = '';
+    buildDropdown('');
+  });
+
+  // Filter as user types.
+  bodyInput.addEventListener('input', function () {
+    buildDropdown(bodyInput.value);
+  });
+
+  // On blur: close dropdown; restore last valid body if nothing was selected.
   bodyInput.addEventListener('blur', function () {
+    closeDropdown();
     if (!findBody(bodyInput.value)) {
-      bodyInput.value = lastValidBody;
+      bodyInput.value = lastValidBody ? lastValidBody.name : '';
     }
   });
 
-  // When user selects a body from the list, sync pressure and update table.
-  bodyInput.addEventListener('change', function () {
-    var match = findBody(bodyInput.value);
-    if (match) {
-      lastValidBody = match.name;
-      pressureInput.value = match.pressure;
-      updateTable(match.pressure);
-    }
-  });
-
-  // When user types directly in the pressure field, update table immediately.
+  // Manual pressure input clears body label and updates table.
   pressureInput.addEventListener('input', function () {
     var p = parseFloat(pressureInput.value);
     if (!isNaN(p) && p >= 0) {
@@ -94,4 +113,11 @@
       updateTable(p);
     }
   });
+
+  // Initialize at Earth pressure.
+  if (lastValidBody) {
+    bodyInput.value = lastValidBody.name;
+    pressureInput.value = lastValidBody.pressure;
+    updateTable(lastValidBody.pressure);
+  }
 })();

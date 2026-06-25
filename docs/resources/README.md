@@ -10,8 +10,10 @@ types exist:
 
 <div class="calc" id="boiling-selector">
 <label>Body:
-<input type="text" id="boiling-body-input" list="boiling-body-list" value="Earth" autocomplete="off"></label>
-<datalist id="boiling-body-list"></datalist>
+<div class="body-combo">
+<input type="text" id="boiling-body-input" autocomplete="off" placeholder="Search bodies…">
+<div id="boiling-body-dropdown" class="body-combo-list" hidden></div>
+</div></label>
 <label>Pressure (atm):
 <input type="number" id="boiling-pressure" min="0" step="any" value="1.0006607249937516"></label>
 </div>
