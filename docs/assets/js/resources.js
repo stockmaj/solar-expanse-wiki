@@ -61,10 +61,13 @@
 
   var lastValidBody = earthBody ? earthBody.name : 'Earth';
 
-  // Clear on focus so the full dropdown list appears immediately.
-  bodyInput.addEventListener('focus', function () {
+  // Clear on focus or click so the full dropdown list appears immediately,
+  // even if the input already has focus when the dropdown arrow is clicked.
+  function clearBodyInput() {
     bodyInput.value = '';
-  });
+  }
+  bodyInput.addEventListener('focus', clearBodyInput);
+  bodyInput.addEventListener('click', clearBodyInput);
 
   // Restore the last valid body if the user blurs without picking one.
   bodyInput.addEventListener('blur', function () {
