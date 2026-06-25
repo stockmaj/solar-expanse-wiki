@@ -3194,11 +3194,11 @@ fn page_resources(locale: &Locale, sirenix: &Sirenix) -> String {
                 s.body_habitability
                     .iter()
                     .filter(|b| {
-                        b.body_name
-                            .chars()
-                            .next()
-                            .map(|c| c.is_alphabetic())
-                            .unwrap_or(false)
+                        // Exclude purely-numeric IDs (raw object indices like
+                        // "0", "78", "124"). Named bodies like "21 Lutetia"
+                        // start with a digit but contain non-digit characters.
+                        !b.body_name.chars().all(|c| c.is_ascii_digit())
+                            && !b.body_name.is_empty()
                     })
                     .map(|b| serde_json::json!({"name": b.body_name, "pressure": b.pressure}))
                     .collect()
