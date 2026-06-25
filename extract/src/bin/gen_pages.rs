@@ -3268,7 +3268,7 @@ fn page_resources(locale: &Locale, sirenix: &Sirenix) -> String {
             // with data attributes so the JS can recalculate when the body changes.
             let boiling_cell = match &r.terraformation_info {
                 Some(ti) => format!(
-                    "<span class=\"boiling-temp\" data-ref-k=\"{}\" data-latent-heat=\"{}\">{}</span>",
+                    "<span class=\"boiling-temp\" data-ref-k=\"{}\" data-latent-heat=\"{}\" title=\"Effective boiling temp at selected body&#39;s pressure. Use the body selector above to change.\">{}</span>",
                     ti.boiling_temperature_k,
                     ti.vaporization_latent_heat,
                     fmt_phase_temperature(ti.boiling_temperature_k),
@@ -3328,6 +3328,7 @@ types exist:\n\n\
 - **Normal** — physical materials, the bulk of the economy.\n\
 - **Energy** — power; produced and consumed in real time, with limited storage in batteries.\n\
 - **Human** — colonists; produced over time by habitats and consumed by jobs.\n\n\
+<p>Select a body or enter a pressure to update the <strong>Boiling pt.</strong> column:</p>\n\
 <div class=\"calc\" id=\"boiling-selector\">\n\
 <div class=\"body-combo\">\n\
 <label for=\"boiling-body-input\">Body:</label>\n\
@@ -7605,6 +7606,10 @@ mod tests {
         assert!(
             water_row.contains("373"),
             "boiling K must appear in span text:\n{water_row}"
+        );
+        assert!(
+            water_row.contains("title="),
+            "span must carry a title tooltip:\n{water_row}"
         );
     }
 
