@@ -59,6 +59,11 @@
   pressureInput.value = initPressure;
   updateTable(initPressure);
 
+  // Select all text on focus so the user can start typing immediately.
+  bodyInput.addEventListener('focus', function () {
+    bodyInput.select();
+  });
+
   // When user finalizes a body name (select from list or blur), sync pressure.
   bodyInput.addEventListener('change', function () {
     var match = findBody(bodyInput.value);
