@@ -22,12 +22,17 @@
   if (!bodyInput || !pressureInput || !dropdown) return;
 
   // Game formula — TerraformationConfig.cs line 599.
+  // Returns null when pressure is above the formula's valid range (denominator
+  // goes negative — Clausius-Clapeyron breaks down at extreme pressures).
   function effectiveBoilingTemp(tRef, latentHeat, pressure) {
     if (pressure <= 0) return tRef;
-    return Math.max(0, 1 / (1 / tRef - (8.314 / latentHeat) * Math.log(pressure)));
+    var denom = 1 / tRef - (8.314 / latentHeat) * Math.log(pressure);
+    if (denom <= 0) return null;
+    return 1 / denom;
   }
 
   function formatTemp(k) {
+    if (k === null) return '—'; // — above formula range
     var c = Math.round(k - 273.15);
     return Math.round(k) + ' K / ' + c + ' °C';
   }
