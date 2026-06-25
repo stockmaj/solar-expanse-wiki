@@ -320,8 +320,16 @@ main table th.sort::after {
 main table th.sort-asc::after  { content: "↑"; color: var(--accent); opacity: 1; }
 main table th.sort-desc::after { content: "↓"; color: var(--accent); opacity: 1; }
 
-/* Custom combobox for the boiling-point body selector. */
-.body-combo { position: relative; }
+/* Custom combobox for the boiling-point body selector.
+ * .body-combo is a flex child of .calc, styled to match .calc label. */
+.body-combo {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--fg-muted);
+}
 .body-combo-list {
   position: absolute;
   top: 100%;

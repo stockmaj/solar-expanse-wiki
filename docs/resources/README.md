@@ -9,11 +9,11 @@ types exist:
 - **Human** — colonists; produced over time by habitats and consumed by jobs.
 
 <div class="calc" id="boiling-selector">
-<label>Body:
 <div class="body-combo">
+<label for="boiling-body-input">Body:</label>
 <input type="text" id="boiling-body-input" autocomplete="off" placeholder="Search bodies…">
 <div id="boiling-body-dropdown" class="body-combo-list" hidden></div>
-</div></label>
+</div>
 <label>Pressure (atm):
 <input type="number" id="boiling-pressure" min="0" step="any" value="1.0006607249937516"></label>
 </div>

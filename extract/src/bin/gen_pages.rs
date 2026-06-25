@@ -3329,11 +3329,11 @@ types exist:\n\n\
 - **Energy** — power; produced and consumed in real time, with limited storage in batteries.\n\
 - **Human** — colonists; produced over time by habitats and consumed by jobs.\n\n\
 <div class=\"calc\" id=\"boiling-selector\">\n\
-<label>Body:\n\
 <div class=\"body-combo\">\n\
+<label for=\"boiling-body-input\">Body:</label>\n\
 <input type=\"text\" id=\"boiling-body-input\" autocomplete=\"off\" placeholder=\"Search bodies…\">\n\
 <div id=\"boiling-body-dropdown\" class=\"body-combo-list\" hidden></div>\n\
-</div></label>\n\
+</div>\n\
 <label>Pressure (atm):\n\
 <input type=\"number\" id=\"boiling-pressure\" min=\"0\" step=\"any\" value=\"{earth_pressure}\"></label>\n\
 </div>\n\n\
