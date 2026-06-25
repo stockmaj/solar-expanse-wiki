@@ -59,15 +59,25 @@
   pressureInput.value = initPressure;
   updateTable(initPressure);
 
-  // Select all text on focus so the user can start typing immediately.
+  var lastValidBody = earthBody ? earthBody.name : 'Earth';
+
+  // Clear on focus so the full dropdown list appears immediately.
   bodyInput.addEventListener('focus', function () {
-    bodyInput.select();
+    bodyInput.value = '';
   });
 
-  // When user finalizes a body name (select from list or blur), sync pressure.
+  // Restore the last valid body if the user blurs without picking one.
+  bodyInput.addEventListener('blur', function () {
+    if (!findBody(bodyInput.value)) {
+      bodyInput.value = lastValidBody;
+    }
+  });
+
+  // When user selects a body from the list, sync pressure and update table.
   bodyInput.addEventListener('change', function () {
     var match = findBody(bodyInput.value);
     if (match) {
+      lastValidBody = match.name;
       pressureInput.value = match.pressure;
       updateTable(match.pressure);
     }
