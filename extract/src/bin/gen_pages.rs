@@ -3182,6 +3182,43 @@ fn page_resources(locale: &Locale, sirenix: &Sirenix) -> String {
         })
         .map(|b| &b.fees_per_t);
 
+    // Body pressures from The Expansion scenario for the boiling-point selector.
+    // Only named bodies (those whose name starts with a letter) are included;
+    // numeric-ID entries are asteroids without player-facing names.
+    let expansion_bodies: Vec<serde_json::Value> = {
+        let mut bodies: Vec<serde_json::Value> = sirenix
+            .scenario_starts
+            .iter()
+            .find(|s| s.scenario_id == "StartGameEpoch_TheExpansion")
+            .map(|s| {
+                s.body_habitability
+                    .iter()
+                    .filter(|b| {
+                        b.body_name
+                            .chars()
+                            .next()
+                            .map(|c| c.is_alphabetic())
+                            .unwrap_or(false)
+                    })
+                    .map(|b| serde_json::json!({"name": b.body_name, "pressure": b.pressure}))
+                    .collect()
+            })
+            .unwrap_or_default();
+        bodies.sort_by(|a, b| {
+            a["name"]
+                .as_str()
+                .unwrap_or("")
+                .cmp(b["name"].as_str().unwrap_or(""))
+        });
+        bodies
+    };
+    let bodies_json = serde_json::to_string(&expansion_bodies).expect("bodies JSON");
+    let earth_pressure = expansion_bodies
+        .iter()
+        .find(|b| b["name"].as_str() == Some("Earth"))
+        .and_then(|b| b["pressure"].as_f64())
+        .unwrap_or(1.0);
+
     let rows: Vec<Vec<String>> = entries
         .iter()
         .map(|r| {
@@ -3227,6 +3264,17 @@ fn page_resources(locale: &Locale, sirenix: &Sirenix) -> String {
                 .get(r.id.as_str())
                 .map(|s| s.as_str())
                 .unwrap_or("");
+            // Boiling point cell — resources with terraformation_info get a span
+            // with data attributes so the JS can recalculate when the body changes.
+            let boiling_cell = match &r.terraformation_info {
+                Some(ti) => format!(
+                    "<span class=\"boiling-temp\" data-ref-k=\"{}\" data-latent-heat=\"{}\">{}</span>",
+                    ti.boiling_temperature_k,
+                    ti.vaporization_latent_heat,
+                    fmt_phase_temperature(ti.boiling_temperature_k),
+                ),
+                None => "—".to_string(),
+            };
             // Inline anchor so other pages (facilities, research) can deep-link to this row.
             let anchor = anchor_tag("resource", &r.id);
             // Icon path mirrors `fmt_build_cost`: filename is the resource id
@@ -3242,6 +3290,7 @@ fn page_resources(locale: &Locale, sirenix: &Sirenix) -> String {
                 r.resource_type.clone(),
                 license_cell,
                 price,
+                boiling_cell,
                 prod_cell,
                 cons_cell,
                 escape_cell(desc),
@@ -3254,6 +3303,7 @@ fn page_resources(locale: &Locale, sirenix: &Sirenix) -> String {
             "Type",
             "License (Earth, $/t)",
             "Market base ($/t)",
+            "Boiling pt.",
             "Producers",
             "Consumers",
             "Description",
@@ -3263,6 +3313,7 @@ fn page_resources(locale: &Locale, sirenix: &Sirenix) -> String {
             Some("Normal (physical), Energy (real-time power), or Human (colonists)"),
             Some("Earth licensing fee per tonne extracted. Earth is the only body with non-zero fees in the shipped data."),
             Some("Base clearing price used as the market price anchor — supply and demand push actual prices around it"),
+            Some("Effective boiling temperature at the selected body's atmospheric pressure. Select a body above to update. Game formula: TerraformationConfig.cs line 599 (Clausius-Clapeyron)."),
             Some("Facilities whose structured production data lists this resource as an output"),
             Some("Facilities whose structured production data lists this resource as an input"),
             None,
@@ -3277,13 +3328,23 @@ types exist:\n\n\
 - **Normal** — physical materials, the bulk of the economy.\n\
 - **Energy** — power; produced and consumed in real time, with limited storage in batteries.\n\
 - **Human** — colonists; produced over time by habitats and consumed by jobs.\n\n\
+<div class=\"calc\" id=\"boiling-selector\">\n\
+<label>Body:\n\
+<input type=\"text\" id=\"boiling-body-input\" list=\"boiling-body-list\" value=\"Earth\" autocomplete=\"off\"></label>\n\
+<datalist id=\"boiling-body-list\"></datalist>\n\
+<label>Pressure (atm):\n\
+<input type=\"number\" id=\"boiling-pressure\" min=\"0\" step=\"any\" value=\"{earth_pressure}\"></label>\n\
+</div>\n\n\
 {table}\n\
 ## Reading the table\n\n\
 - **License (Earth, $/t)** is the per-tonne fee Earth charges for extracting each resource. Earth is the only body in the shipped data with non-zero license fees — every other body's `licenseFeePerTonne` map is empty.\n\
 - **Market base ($/t)** is the starting clearing-price anchor used by the global market; supply and demand move actual prices around it.\n\
+- **Boiling pt.** is the effective boiling temperature at the selected body's atmospheric pressure, computed with the game's own Clausius-Clapeyron formula (`TerraformationConfig.cs` line 599). Defaults to Earth. Use the selector above to change the body or enter a pressure directly (in Earth atmospheres). Resources without phase data show —.\n\
 - **Producers** and **Consumers** are pulled from each facility's structured production data (`refinerData`, `energyProductionData`, `resourcesToMine`, `byproducts`) — not from tooltip text — so refineries don't get mis-credited as producing their inputs. Per-day rates aren't extractable from the static descriptors; the in-game tooltip remains the source of truth for rate numbers.\n\n\
 ## See also\n\n\
-- [Terraforming](../terraforming/) — per-resource thermal / phase constants (boiling and melting points, latent heat, heat capacity, optical depth) that drive the atmosphere sim.\n"
+- [Terraforming](../terraforming/) — per-resource thermal / phase constants (boiling and melting points, latent heat, heat capacity, optical depth) that drive the atmosphere sim.\n\n\
+<script type=\"application/json\" id=\"boiling-bodies\">{bodies_json}</script>\n\
+<script src=\"{{{{ '/assets/js/resources.js' | relative_url }}}}?v={{{{ site.data.wiki.generated_at }}}}\"></script>\n"
     )
 }
 
@@ -3800,16 +3861,9 @@ fn fmt_phase_temperature(k: f64) -> String {
     if !k.is_finite() || k <= 0.0 {
         return "—".to_string();
     }
-    let c = k - 273.15;
-    let k_str = if (k - k.round()).abs() < 0.05 {
-        format!("{:.0}", k)
-    } else {
-        format!("{:.1}", k)
-    };
-    // Round celsius to the nearest whole degree for table readability —
-    // matches the way real-world phase-change tables print values.
-    let c_str = format!("{:.0}", c.round());
-    format!("{k_str} / {c_str} °C")
+    let k_str = format!("{:.0}", k.round());
+    let c_str = format!("{:.0}", (k - 273.15).round());
+    format!("{k_str} K / {c_str} °C")
 }
 
 /// Compact f64 → string for the thermal-constant cells: integers print
@@ -7388,19 +7442,19 @@ mod tests {
             .lines()
             .find(|l| l.contains("resource-alloy"))
             .expect("Alloy row present:\n");
-        // Resource | Type | License (Earth) | Market base | Producers | Consumers | Description
+        // Resource | Type | License (Earth) | Market base | Boiling pt. | Producers | Consumers | Description
         let cells: Vec<&str> = alloy_row.split('|').collect();
         // Pipe-split rows have leading + trailing empty cells: ["", " Resource ", ..., ""].
-        // With seven data columns we expect 9 entries.
+        // With eight data columns we expect 10 entries.
         assert_eq!(
             cells.len(),
-            9,
-            "row should have seven columns (Resource, Type, License (Earth), Market base, Producers, Consumers, Description):\n{alloy_row}"
+            10,
+            "row should have eight columns (Resource, Type, License (Earth), Market base, Boiling pt., Producers, Consumers, Description):\n{alloy_row}"
         );
-        // Consumers is column 6 (1-indexed data columns: 1=Resource, 2=Type,
-        // 3=License, 4=Market, 5=Producers, 6=Consumers, 7=Description), so
-        // cells[6] in the split (since cells[0] is the leading empty).
-        let consumers_cell = cells[6].trim();
+        // Consumers is column 7 (1-indexed data columns: 1=Resource, 2=Type,
+        // 3=License, 4=Market, 5=Boiling pt., 6=Producers, 7=Consumers, 8=Description),
+        // so cells[7] in the split (since cells[0] is the leading empty).
+        let consumers_cell = cells[7].trim();
         assert_eq!(
             consumers_cell, "—",
             "Consumers cell should render an em-dash when nothing consumes the resource:\n{alloy_row}"
@@ -7513,6 +7567,97 @@ mod tests {
         assert_eq!(
             license_cell, "—",
             "License (Earth) cell should fall back to em-dash when license_fees is empty:\n{alloy_row}"
+        );
+    }
+
+    #[test]
+    fn resources_page_boiling_column_renders_span_for_resource_with_ti() {
+        // A resource with terraformation_info gets a .boiling-temp span so the
+        // JS can recalculate the displayed temperature when the body changes.
+        let mut locale = resources_fixture_locale();
+        locale.resources.push(ResourceEntry { id: "water".into(), name: "Water".into() });
+        let mut water = make_resource_stat("water", "Normal");
+        water.terraformation_info = Some(TerraformationInfoStat {
+            boiling_temperature_k: 373.15,
+            vaporization_latent_heat: 50000.0,
+            ..Default::default()
+        });
+        let sirenix = Sirenix { resources: vec![water], ..Default::default() };
+        let page = page_resources(&locale, &sirenix);
+        let water_row = page
+            .lines()
+            .find(|l| l.contains("resource-water"))
+            .expect("water row must be present");
+        assert!(
+            water_row.contains("class=\"boiling-temp\""),
+            "span must carry boiling-temp class:\n{water_row}"
+        );
+        assert!(
+            water_row.contains("data-ref-k="),
+            "span must carry data-ref-k attribute:\n{water_row}"
+        );
+        assert!(
+            water_row.contains("data-latent-heat="),
+            "span must carry data-latent-heat attribute:\n{water_row}"
+        );
+        assert!(
+            water_row.contains("373"),
+            "boiling K must appear in span text:\n{water_row}"
+        );
+    }
+
+    #[test]
+    fn resources_page_boiling_column_renders_dash_without_ti() {
+        // Resources without terraformation_info get an em-dash, not a span.
+        let locale = resources_fixture_locale();
+        let sirenix = Sirenix {
+            resources: vec![make_resource_stat("alloy", "Normal")],
+            ..Default::default()
+        };
+        let page = page_resources(&locale, &sirenix);
+        let alloy_row = page
+            .lines()
+            .find(|l| l.contains("resource-alloy"))
+            .expect("alloy row must be present");
+        assert!(
+            !alloy_row.contains("boiling-temp"),
+            "no boiling-temp span when TI is absent:\n{alloy_row}"
+        );
+    }
+
+    #[test]
+    fn resources_page_embeds_body_pressure_json_for_named_bodies() {
+        // Named bodies from The Expansion scenario appear in the embedded JSON.
+        // Numeric-ID bodies (asteroids without locale names) must be filtered out.
+        let locale = nav_fixture_locale();
+        let sirenix = Sirenix {
+            scenario_starts: vec![ScenarioStartStat {
+                scenario_id: "StartGameEpoch_TheExpansion".into(),
+                body_habitability: vec![
+                    ScenarioBodyHabitabilityStat {
+                        body_name: "Earth".into(),
+                        pressure: 1.001,
+                        ..Default::default()
+                    },
+                    ScenarioBodyHabitabilityStat {
+                        body_name: "42".into(), // numeric — must be excluded
+                        pressure: 5.0,
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let page = page_resources(&locale, &sirenix);
+        assert!(
+            page.contains("boiling-bodies"),
+            "page must embed the boiling-bodies element"
+        );
+        assert!(page.contains("\"Earth\""), "Earth must appear in the body list");
+        assert!(
+            !page.contains("\"42\""),
+            "numeric body IDs must be filtered out of the body list"
         );
     }
 
