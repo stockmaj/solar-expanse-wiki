@@ -24,6 +24,7 @@ the names, descriptions, and stat tables here match exactly what you see in-game
 | [Asteroid Taxonomy](asteroid-taxonomy/) | Asteroid classes and the per-class resource roll table the game uses when you mine a deposit. |
 | [Terraforming](terraforming/) | Per-resource thermal / phase constants — boiling and melting points, latent heat, heat capacity, optical depth — that drive the atmosphere sim. |
 | [Corporations](corporations/) | Playable starting factions. |
+| [Controls](controls.md) | Keyboard shortcuts — organized by context (map view, launch, orbital transfer planning, etc.). |
 
 ## How to use this wiki
 

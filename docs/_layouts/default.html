@@ -93,14 +93,15 @@
           </div>
         </div>
 
-        {%- comment -%} ---- Compare ---- {%- endcomment -%}
-        {%- assign compare_active = false -%}
-        {%- if u contains '/corporations' or u contains '/calculator' -%}{%- assign compare_active = true -%}{%- endif -%}
-        <div class="nav-group{% if compare_active %} active{% endif %}">
-          <button class="nav-trigger" type="button" aria-haspopup="true" aria-expanded="false">Compare<span class="nav-caret" aria-hidden="true">▾</span></button>
+        {%- comment -%} ---- Gameplay ---- {%- endcomment -%}
+        {%- assign gameplay_active = false -%}
+        {%- if u contains '/corporations' or u contains '/calculator' or u contains '/controls' -%}{%- assign gameplay_active = true -%}{%- endif -%}
+        <div class="nav-group{% if gameplay_active %} active{% endif %}">
+          <button class="nav-trigger" type="button" aria-haspopup="true" aria-expanded="false">Gameplay<span class="nav-caret" aria-hidden="true">▾</span></button>
           <div class="nav-dropdown" role="menu">
             <a href="{{ '/corporations/' | relative_url }}"{% if u contains '/corporations' %} class="active"{% endif %}>Corporations</a>
             <a href="{{ '/calculator.html' | relative_url }}"{% if u contains '/calculator' %} class="active"{% endif %}>Calculator</a>
+            <a href="{{ '/controls.html' | relative_url }}"{% if u contains '/controls' %} class="active"{% endif %}>Controls</a>
           </div>
         </div>
       </nav>
