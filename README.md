@@ -18,7 +18,7 @@ not the page.
 The pipeline:
 
 ```
-AssetRipper  ──► extracts Unity scene + asset YAML into extract/cache/project/
+AssetRipper  ──► extracts Unity scene + asset YAML into ~/src/solar-expanse-game-source/
 BepInEx mod  ──► dumps Sirenix-serialized ScriptableObjects to sirenix-dump.json
 parse-locale ──► CSV localization → locale.json
 parse-stats  ──► Unity scene YAML → stats.json (per-body orbital data)

@@ -15,6 +15,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WIKI_ROOT="$(cd "$HERE/.." && pwd)"
 CACHE="$HERE/cache"
+GAME_SOURCE="${SOLAR_EXPANSE_GAME_SOURCE:-$HOME/src/solar-expanse-game-source}"
 TOOLS="$HERE/tools"
 PORT="${ASSETRIPPER_PORT:-7700}"
 
@@ -63,14 +64,14 @@ ensure_cargo() {
 }
 
 run_assetripper() {
-    if [[ "${FAST:-0}" == "1" && -f "$CACHE/project/ExportedProject/Assets/Scenes/MyScene.unity" ]]; then
-        log "FAST=1 set, reusing existing dump at $CACHE/project"
+    if [[ "${FAST:-0}" == "1" && -f "$GAME_SOURCE/ExportedProject/Assets/Scenes/MyScene.unity" ]]; then
+        log "FAST=1 set, reusing existing dump at $GAME_SOURCE"
         return
     fi
     ensure_assetripper
 
     log "starting AssetRipper headless on port $PORT"
-    rm -rf "$CACHE/project" && mkdir -p "$CACHE/project"
+    rm -rf "$GAME_SOURCE" && mkdir -p "$GAME_SOURCE"
 
     "$ASSETRIPPER_BIN" --headless --port "$PORT" --log-path "$CACHE/assetripper.log" \
         > "$CACHE/assetripper.stdout" 2>&1 &
@@ -90,7 +91,7 @@ run_assetripper() {
 
     log "exporting Unity project (this takes ~30 s)"
     curl -fsS -X POST "http://localhost:$PORT/Export/UnityProject" \
-        --data-urlencode "path=$CACHE/project" \
+        --data-urlencode "path=$GAME_SOURCE" \
         -o /dev/null
 
     # Tail the log until the export reports completion
@@ -110,7 +111,7 @@ run_pipeline() {
     local bindir="$HERE/target/release"
 
     local en_us="$GAME_DATA/StreamingAssets/Languages/en-US.csv"
-    local scene="$CACHE/project/ExportedProject/Assets/Scenes/MyScene.unity"
+    local scene="$GAME_SOURCE/ExportedProject/Assets/Scenes/MyScene.unity"
 
     log "parse-locale"
     "$bindir/parse-locale" "$en_us" "$CACHE/locale.json"
@@ -123,7 +124,7 @@ run_pipeline() {
 
     log "parse-terraformation-config"
     "$bindir/parse-terraformation-config" \
-        "$CACHE/project/ExportedProject/Assets/MonoBehaviour/TerraformationConfig.asset" \
+        "$GAME_SOURCE/ExportedProject/Assets/MonoBehaviour/TerraformationConfig.asset" \
         "$CACHE/terraformation.json"
 
     log "extract-icons"
@@ -131,9 +132,9 @@ run_pipeline() {
     # planet-types/) under the given root, so the root is `docs/images` —
     # not `docs/images/resources`, which would produce a doubled
     # `images/resources/resources/` path.
-    "$bindir/extract-icons" "$CACHE/project/ExportedProject" "$WIKI_ROOT/docs/images"
+    "$bindir/extract-icons" "$GAME_SOURCE/ExportedProject" "$WIKI_ROOT/docs/images"
 
-    local proj_settings="$CACHE/project/ExportedProject/ProjectSettings/ProjectSettings.asset"
+    local proj_settings="$GAME_SOURCE/ExportedProject/ProjectSettings/ProjectSettings.asset"
     local game_version="unknown"
     if [[ -f "$proj_settings" ]]; then
         # Unity stores the game version as `  bundleVersion: 0.26.5.15.14 BETA`.
@@ -149,11 +150,32 @@ run_pipeline() {
 }
 
 check_sirenix_dump() {
-    local dump="$GAME_DATA/StreamingAssets/sirenix-dump.json"
+    local streaming="$GAME_DATA/StreamingAssets"
+    local legacy="$streaming/sirenix-dump.json"
     local mod_src="$HERE/bepinex-mod/bin/Release/netstandard2.1/SolarExpanseWikiDumper.dll"
     local mod_dst="$GAME_DATA/../BepInEx/plugins/SolarExpanseWikiDumper.dll"
 
-    if [[ -f "$dump" ]]; then
+    # Prefer the newest per-combo file (sirenix-dump-*.json) over the legacy
+    # sirenix-dump.json, which can be stale if the mod ran more recently.
+    local newest=""
+    local combo
+    for combo in "$streaming"/sirenix-dump-*.json; do
+        [[ -f "$combo" ]] || continue
+        if [[ -z "$newest" || "$combo" -nt "$newest" ]]; then
+            newest="$combo"
+        fi
+    done
+
+    local dump=""
+    if [[ -n "$newest" && ( ! -f "$legacy" || "$newest" -nt "$legacy" ) ]]; then
+        dump="$newest"
+        cp "$newest" "$legacy"
+        log "using per-combo dump: $(basename "$newest")"
+    elif [[ -f "$legacy" ]]; then
+        dump="$legacy"
+    fi
+
+    if [[ -n "$dump" ]]; then
         cp "$dump" "$CACHE/sirenix-dump.json"
         log "sirenix dump available ($(du -h "$dump" | cut -f1))"
         return
@@ -176,8 +198,8 @@ check_sirenix_dump() {
 
     cat <<EOF >&2
 
-  No sirenix-dump.json found at:
-    $dump
+  No sirenix-dump.json or sirenix-dump-*.json found in:
+    $streaming
 
   The BepInEx mod is installed but has not run yet.  Launch Solar Expanse,
   start or load any game scenario, wait a few seconds once the game world
