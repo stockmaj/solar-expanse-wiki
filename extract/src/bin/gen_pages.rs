@@ -1986,6 +1986,41 @@ lift them to space.\n\n",
 /// Modules with empty `special_ability` (the parser's collapse for the
 /// asset's `"None"` sentinel) return the empty string — they're filtered
 /// out by the caller before reaching grouping.
+///
+/// Whether `m` will actually render as a row on the Transportable Modules
+/// page. Shared between `page_space_modules` (which needs this to build its
+/// per-section tables) and `page_research` (which needs to know — without
+/// duplicating the rules — whether a research node's `module_*` unlock will
+/// have an anchor to link to). Drop:
+///   * entries without a locale name (we'd be forced to leak the id)
+///   * entries with no `specialAbilityFacilityNew`, or one this generator
+///     doesn't map to a section — these are the placeholder/test rows
+///     (Engine Type 1, Cargo Type 1, Control Center, Empty, Hubel Telescope)
+///     that aren't real player-facing equipment. The parser collapses the
+///     asset's `"None"` sentinel to "" so `special_ability.is_empty()`
+///     catches all of them.
+///   * locked entries with no real data — defensive belt-and-suspenders for
+///     any module that slips through with a role but zero stats.
+fn space_module_renders(m: &SpaceModuleStat, cargo_name: &BTreeMap<&str, &str>) -> bool {
+    let name = cargo_name.get(m.id.as_str()).copied().unwrap_or("");
+    if name.is_empty() {
+        return false;
+    }
+    if m.special_ability.is_empty() {
+        return false;
+    }
+    if space_module_section(m).is_empty() {
+        return false;
+    }
+    let has_data = m.special_ability_parameter > 0.0
+        || !m.build_cost.is_empty()
+        || m.mass > 0.0;
+    if m.is_locked && !has_data {
+        return false;
+    }
+    true
+}
+
 fn space_module_section(m: &SpaceModuleStat) -> &'static str {
     let primary = m
         .special_ability
@@ -1997,12 +2032,13 @@ fn space_module_section(m: &SpaceModuleStat) -> &'static str {
         "Mining" => "Mining",
         "Refiner" => "Refining",
         "Probe" => "Probes",
+        "Lab" => "Research",
         "CrewTransport" => "Crew Transport",
         "CrewCapacity" => "Crew Capacity",
         "EnergyProduction" | "EnergyStorage" => "Power Generation",
         "ConstructionEquipment" => "Construction",
         "InstallationModule" => "Installation",
-        "ConstructShip" => "Ship Construction",
+        "ConstructShip" | "BuildSpacecraft" => "Ship Construction",
         _ => "",
     }
 }
@@ -2014,13 +2050,14 @@ fn space_module_section_order(label: &str) -> u8 {
         "Mining" => 0,
         "Refining" => 1,
         "Probes" => 2,
-        "Crew Transport" => 3,
-        "Crew Capacity" => 4,
-        "Power Generation" => 5,
-        "Construction" => 6,
-        "Installation" => 7,
-        "Ship Construction" => 8,
-        _ => 9,
+        "Research" => 3,
+        "Crew Transport" => 4,
+        "Crew Capacity" => 5,
+        "Power Generation" => 6,
+        "Construction" => 7,
+        "Installation" => 8,
+        "Ship Construction" => 9,
+        _ => 10,
     }
 }
 
@@ -2048,6 +2085,8 @@ fn fmt_space_module_role(ability: &str, magnitude: f64) -> String {
             "EnergyStorage" => "Energy storage".to_string(),
             "ConstructionEquipment" => "Construction".to_string(),
             "ConstructShip" => "Ship construction".to_string(),
+            "BuildSpacecraft" => "Spacecraft assembly".to_string(),
+            "Lab" => "Lab".to_string(),
             other => other.to_string(),
         })
         .collect();
@@ -2181,22 +2220,30 @@ fn show_unreleased_toggle() -> &'static str {
     "<label class=\"show-unreleased\"><input type=\"checkbox\" class=\"show-unreleased-toggle\"> Show unreleased</label>\n\n"
 }
 
+/// True for the two facility id families the generator treats as real
+/// buildable facilities: the usual `build_<id>` and the Space Stations
+/// feature's unprefixed `station_<id>` (station_modular_construction,
+/// station_rotary_construction, station_rotary_segment).
+fn is_facility_target_id(id: &str) -> bool {
+    id.starts_with("build_") || id.starts_with("station_")
+}
+
 /// Build the `facility_id → research_id` map covering BOTH the primary
 /// `unlock_target` (when `action == "UnlockFacility"`) and the secondary
 /// `unlockDataList[]` entries with the same action. Mirrors the module
-/// helper above — distinct only in that it accepts `build_*` ids.
+/// helper above — distinct only in that it accepts facility ids.
 fn build_facility_unlocking_research(sirenix: &Sirenix) -> BTreeMap<&str, &str> {
     let mut out: BTreeMap<&str, &str> = BTreeMap::new();
     for r in &sirenix.research {
         if r.action == "UnlockFacility" {
             if let Some(target) = r.unlock_target.as_deref() {
-                if target.starts_with("build_") {
+                if is_facility_target_id(target) {
                     out.entry(target).or_insert(r.id.as_str());
                 }
             }
         }
         for s in &r.secondary_unlocks {
-            if s.action == "UnlockFacility" && s.target.starts_with("build_") {
+            if s.action == "UnlockFacility" && is_facility_target_id(s.target.as_str()) {
                 out.entry(s.target.as_str()).or_insert(r.id.as_str());
             }
         }
@@ -2231,41 +2278,12 @@ fn page_space_modules(locale: &Locale, sirenix: &Sirenix) -> String {
         .collect();
     let module_unlocked_by = build_module_unlocking_research(sirenix);
 
-    // Decide which modules render. Drop:
-    //   * entries without a locale name (we'd be forced to leak the id)
-    //   * entries with no `specialAbilityFacilityNew` — these are the
-    //     placeholder/test rows (Engine Type 1, Cargo Type 1, Control
-    //     Center, Empty, Hubel Telescope) that aren't real player-facing
-    //     equipment. The parser collapses the asset's `"None"` sentinel
-    //     to "" so `special_ability.is_empty()` catches all of them.
-    //   * locked entries with no real data — defensive belt-and-suspenders
-    //     for any module that slips through with a role but zero stats.
-    let keep = |m: &SpaceModuleStat| -> bool {
-        let name = cargo_name.get(m.id.as_str()).copied().unwrap_or("");
-        if name.is_empty() {
-            return false;
-        }
-        if m.special_ability.is_empty() {
-            return false;
-        }
-        let has_data = m.special_ability_parameter > 0.0
-            || !m.build_cost.is_empty()
-            || m.mass > 0.0;
-        if m.is_locked && !has_data {
-            return false;
-        }
-        true
-    };
-
     let mut by_section: BTreeMap<&'static str, Vec<&SpaceModuleStat>> = BTreeMap::new();
     for m in &sirenix.space_modules {
-        if !keep(m) {
+        if !space_module_renders(m, &cargo_name) {
             continue;
         }
         let section = space_module_section(m);
-        if section.is_empty() {
-            continue;
-        }
         by_section.entry(section).or_default().push(m);
     }
 
@@ -2389,7 +2407,11 @@ and so on.\n\n",
                 } else {
                     ""
                 };
-                let name_cell = format!("{unreleased_prefix}**{}**", escape_cell(&display));
+                let name_cell = format!(
+                    "{anchor}{unreleased_prefix}**{name}**",
+                    anchor = anchor_tag("module", &m.id),
+                    name = escape_cell(&display),
+                );
                 if is_mining {
                     vec![
                         name_cell,
@@ -3097,18 +3119,40 @@ fn page_resources(locale: &Locale, sirenix: &Sirenix) -> String {
         .map(|f| (f.id.as_str(), f.name.as_str()))
         .collect();
 
+    // Facilities that will actually get a rendered row (and therefore an
+    // anchor) on the Facilities page. Mirrors page_facilities'/page_research's
+    // own filter: obsolete, FacilitySegment, Orbital-descriptor (spacecraft
+    // payload, not a ground/orbital facility), and nameless entries never
+    // render there. Resources page cross-references must only ever link to
+    // facilities in this set — anything else 404s and, since the fallback
+    // display text is the raw id, leaks an internal id into a player-facing
+    // table (e.g. `build_he3mine_big`, which has no locale name anywhere in
+    // the game's own data).
+    let facility_anchored: std::collections::BTreeSet<&str> = sirenix
+        .facilities
+        .iter()
+        .filter(|f| !f.is_obsolete)
+        .filter(|f| f.facility_type != "FacilitySegment")
+        .filter(|f| f.descriptor != "Orbital")
+        .map(|f| f.id.strip_prefix("build_").unwrap_or(&f.id))
+        .filter(|id| {
+            fac_name.get(id).map_or(false, |n| !n.is_empty())
+        })
+        .collect();
+
     // Resolve a sirenix FacilityStat id (which carries the `build_` prefix used
     // throughout the dump) to the `(anchor_id, pretty_display)` pair the
     // resources page should link with. The locale keys facilities without the
     // prefix, and the facilities page anchors are built the same way, so we
     // strip the prefix once here and reuse the result for both link sides.
-    let resolve_facility = |fid: &str| -> (String, String) {
+    // Returns `None` when the facility won't have an anchor to link to.
+    let resolve_facility = |fid: &str| -> Option<(String, String)> {
         let id_no_prefix = fid.strip_prefix("build_").unwrap_or(fid);
-        let display = fac_name
-            .get(id_no_prefix)
-            .copied()
-            .unwrap_or(id_no_prefix);
-        (id_no_prefix.to_string(), smart_title_case(display))
+        if !facility_anchored.contains(id_no_prefix) {
+            return None;
+        }
+        let display = fac_name.get(id_no_prefix).copied().unwrap_or(id_no_prefix);
+        Some((id_no_prefix.to_string(), smart_title_case(display)))
     };
 
     // Look up facilities whose structured `produces` data lists `resource_id`.
@@ -3123,7 +3167,7 @@ fn page_resources(locale: &Locale, sirenix: &Sirenix) -> String {
             let mut hits: Vec<(String, String)> = facilities
                 .iter()
                 .filter(|f| f.produces.iter().any(|rc| rc.resource_id == resource_id))
-                .map(|f| resolve_facility(&f.id))
+                .filter_map(|f| resolve_facility(&f.id))
                 .collect();
             hits.sort_by(|a, b| a.1.cmp(&b.1));
             hits.dedup_by(|a, b| a.1 == b.1);
@@ -3136,7 +3180,7 @@ fn page_resources(locale: &Locale, sirenix: &Sirenix) -> String {
             let mut hits: Vec<(String, String)> = facilities
                 .iter()
                 .filter(|f| f.consumes.iter().any(|rc| rc.resource_id == resource_id))
-                .map(|f| resolve_facility(&f.id))
+                .filter_map(|f| resolve_facility(&f.id))
                 .collect();
             hits.sort_by(|a, b| a.1.cmp(&b.1));
             hits.dedup_by(|a, b| a.1 == b.1);
@@ -3950,6 +3994,14 @@ fn resolve_objective_target(
 ) -> String {
     if let Some(rest) = target.strip_prefix("build_") {
         return smart_title_case(fac_name.get(rest).copied().unwrap_or(rest));
+    }
+    // Space Stations facilities (station_modular_construction,
+    // station_rotary_construction) skip the `build_` prefix entirely — see
+    // `is_facility_target_id`. Their locale id is the full target, unstripped.
+    if is_facility_target_id(target) {
+        if let Some(name) = fac_name.get(target).copied().filter(|n| !n.is_empty()) {
+            return smart_title_case(name);
+        }
     }
     if let Some(rest) = target.strip_prefix("id_resource_") {
         return resource_name.get(rest).copied().unwrap_or(rest).to_string();
@@ -5269,6 +5321,51 @@ fn fmt_habitat_constraints(cs: &[HabitatConstraintStat]) -> String {
         .join("<br>")
 }
 
+/// The "Release Station" facility family (`build_<resource>_deposition`)
+/// ships with two data quirks straight from the game's own locale CSV:
+///   * every description is the unsubstituted template "Releases {0} to the
+///     surface" — the game engine fills `{0}` from the facility's released
+///     resource at runtime, but the extracted locale string is never given
+///     that substitution.
+///   * the Uranium/Fissiles member's display name is hardcoded in the CSV as
+///     "Uran Release Station" — using the internal resource short-code
+///     ("uran") instead of the resource's real display name ("Fissiles").
+/// Every member of this family produces exactly one resource (verified
+/// against the current dump), so that resource is unambiguous. Fix both
+/// quirks by deriving the resource from each facility's structured
+/// `produces` list and resolving its name via the same `locale.resources`
+/// lookup every other page uses — this fixes the name for all 11 members
+/// consistently (not just Uran), since they should all show the resource's
+/// real display name rather than a hand-written CSV string.
+fn normalize_deposition_facility_locale(locale: &mut Locale, sirenix: &Sirenix) {
+    let resource_name: BTreeMap<&str, &str> = locale
+        .resources
+        .iter()
+        .map(|r| (r.id.as_str(), r.name.as_str()))
+        .collect();
+    // facility id (with the `build_` prefix, as sirenix stores it) → released resource id.
+    let produced: BTreeMap<&str, &str> = sirenix
+        .facilities
+        .iter()
+        .filter(|f| f.id.ends_with("_deposition"))
+        .filter_map(|f| f.produces.first().map(|rc| (f.id.as_str(), rc.resource_id.as_str())))
+        .collect();
+    for f in locale.facilities.iter_mut() {
+        if !f.id.ends_with("_deposition") {
+            continue;
+        }
+        let build_id = format!("build_{}", f.id);
+        let Some(resource_id) = produced.get(build_id.as_str()) else {
+            continue;
+        };
+        let Some(resource_display) = resource_name.get(resource_id) else {
+            continue;
+        };
+        f.name = format!("{resource_display} Release Station");
+        f.description = f.description.replace("{0}", resource_display);
+    }
+}
+
 fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
     let facility_name: BTreeMap<&str, &str> = locale
         .facilities
@@ -5325,20 +5422,24 @@ fn page_facilities(locale: &Locale, sirenix: &Sirenix) -> String {
             continue;
         }
         // Split by where the facility can be placed.  Surface → ground table,
-        // Orbit → orbital table.  A facility with BOTH ("Surface, Orbit") is
-        // emitted in BOTH tables — player wants to see it in whichever
-        // context they're scanning.  The anchor uniqueness was handled
-        // upstream by emitting `<a id="...">` only on the first occurrence.
+        // Orbit → orbital table.  Each facility renders exactly once — a
+        // shared `<a id="...">` anchor emitted into both tables would be an
+        // invalid duplicate HTML id, and every facility that currently
+        // carries both flags (the three Spin-Grav habitats) is a `build_
+        // space_*` id — every *other* `build_space_*` facility is Orbit-only,
+        // so an extra "Surface" flag on just these three looks like a data
+        // quirk rather than an intentional dual-placement design; treat
+        // Orbit as authoritative when both are set.  `SpaceStation`
+        // (the buildable station-segment placement) is also orbital — a
+        // Space Station only ever exists in orbit.
         let p = f.placement.as_str();
-        let surface_ok = p.contains("Surface") || p.contains("SurfaceAndAsteroid");
-        let orbit_ok = p.contains("Orbit");
-        if surface_ok {
-            ground.push(f);
-        }
+        let orbit_ok = p.contains("Orbit") || p.contains("SpaceStation");
+        let surface_ok = !orbit_ok && (p.contains("Surface") || p.contains("SurfaceAndAsteroid"));
         if orbit_ok {
             orbital.push(f);
-        }
-        if !surface_ok && !orbit_ok {
+        } else if surface_ok {
+            ground.push(f);
+        } else {
             // Placement empty / unknown — default to ground rather than drop.
             ground.push(f);
         }
@@ -5641,10 +5742,54 @@ fn era_label(stage: u8) -> &'static str {
 /// Render a single `SecondaryUnlockStat` as one line of the Unlocks cell.
 /// Bonuses look like `+20 Component thrust`; facility/spacecraft/LV unlocks
 /// look like `Facility: Habitat Dome` (linked when an anchor exists).
+/// Resolve a research node's `UnlockFacility` action target to display text
+/// (without the leading label — callers prepend "Builds " / "Facility: ").
+/// Tries a real facility first (`facility_name`/`facility_anchored`), then a
+/// real Transportable Module (`cargo_name`/`module_anchored`) — research
+/// nodes use the same `UnlockFacility` action for both facilities and
+/// spacecraft-payload modules (e.g. the Space Station core modules), and
+/// only the facilities page filters out module targets. Falls back to a
+/// humanized (but never linked) version of the raw id when neither bucket
+/// has a name for it.
+fn resolve_facility_or_module_unlock(
+    target: &str,
+    facility_name: &BTreeMap<&str, &str>,
+    facility_anchored: &std::collections::BTreeSet<&str>,
+    cargo_name: &BTreeMap<&str, &str>,
+    module_anchored: &std::collections::BTreeSet<&str>,
+) -> String {
+    let key = target.strip_prefix("build_").unwrap_or(target);
+    if let Some(name) = facility_name.get(key).copied().filter(|n| !n.is_empty()) {
+        let pretty = smart_title_case(name);
+        return if facility_anchored.contains(key) {
+            link_cross_page("facilities", "facility", key, &format!("**{pretty}**"))
+        } else {
+            format!("**{pretty}**")
+        };
+    }
+    if let Some(name) = cargo_name.get(target).copied().filter(|n| !n.is_empty()) {
+        let pretty = smart_title_case(name);
+        return if module_anchored.contains(target) {
+            link_cross_page("transportable-modules", "module", target, &format!("**{pretty}**"))
+        } else {
+            format!("**{pretty}**")
+        };
+    }
+    // No locale name in either bucket; humanize the raw id.
+    let pretty = if key.contains('_') || key.chars().all(|c| c.is_lowercase() || c == '_' || c.is_ascii_digit()) {
+        title_case_words(&key.replace('_', " "))
+    } else {
+        smart_title_case(key)
+    };
+    format!("**{pretty}**")
+}
+
 fn fmt_secondary_unlock(
     s: &SecondaryUnlockStat,
     facility_name: &BTreeMap<&str, &str>,
     facility_anchored: &std::collections::BTreeSet<&str>,
+    cargo_name: &BTreeMap<&str, &str>,
+    module_anchored: &std::collections::BTreeSet<&str>,
     spacecraft_name: &BTreeMap<&str, &str>,
     lv_name: &BTreeMap<&str, &str>,
 ) -> String {
@@ -5655,24 +5800,14 @@ fn fmt_secondary_unlock(
             format!("{sign}{} {}", fmt_amount(s.bonus_parameter), kind)
         }
         "UnlockFacility" => {
-            let key = s.target.strip_prefix("build_").unwrap_or(&s.target);
-            let resolved_name = facility_name.get(key).copied();
-            let pretty = match resolved_name {
-                Some(name) if !name.is_empty() => smart_title_case(name),
-                _ => {
-                    if key.contains('_') || key.chars().all(|c| c.is_lowercase() || c == '_' || c.is_ascii_digit()) {
-                        title_case_words(&key.replace('_', " "))
-                    } else {
-                        smart_title_case(key)
-                    }
-                }
-            };
-            if facility_anchored.contains(key) {
-                let link = link_cross_page("facilities", "facility", key, &format!("**{pretty}**"));
-                format!("Facility: {link}")
-            } else {
-                format!("Facility: **{pretty}**")
-            }
+            let pretty = resolve_facility_or_module_unlock(
+                &s.target,
+                facility_name,
+                facility_anchored,
+                cargo_name,
+                module_anchored,
+            );
+            format!("Facility: {pretty}")
         }
         "UnlockSpacecraftType" => {
             let pretty = spacecraft_name.get(s.target.as_str()).copied().unwrap_or(s.target.as_str());
@@ -5692,10 +5827,20 @@ fn fmt_research_unlock(
     r: &ResearchStat,
     facility_name: &BTreeMap<&str, &str>,
     facility_anchored: &std::collections::BTreeSet<&str>,
+    cargo_name: &BTreeMap<&str, &str>,
+    module_anchored: &std::collections::BTreeSet<&str>,
     spacecraft_name: &BTreeMap<&str, &str>,
     lv_name: &BTreeMap<&str, &str>,
 ) -> String {
-    let primary = fmt_research_unlock_primary(r, facility_name, facility_anchored, spacecraft_name, lv_name);
+    let primary = fmt_research_unlock_primary(
+        r,
+        facility_name,
+        facility_anchored,
+        cargo_name,
+        module_anchored,
+        spacecraft_name,
+        lv_name,
+    );
     if r.secondary_unlocks.is_empty() {
         return primary;
     }
@@ -5704,7 +5849,15 @@ fn fmt_research_unlock(
         lines.push(primary);
     }
     for s in &r.secondary_unlocks {
-        lines.push(fmt_secondary_unlock(s, facility_name, facility_anchored, spacecraft_name, lv_name));
+        lines.push(fmt_secondary_unlock(
+            s,
+            facility_name,
+            facility_anchored,
+            cargo_name,
+            module_anchored,
+            spacecraft_name,
+            lv_name,
+        ));
     }
     if lines.is_empty() { "—".into() } else { lines.join("<br>") }
 }
@@ -5713,39 +5866,22 @@ fn fmt_research_unlock_primary(
     r: &ResearchStat,
     facility_name: &BTreeMap<&str, &str>,
     facility_anchored: &std::collections::BTreeSet<&str>,
+    cargo_name: &BTreeMap<&str, &str>,
+    module_anchored: &std::collections::BTreeSet<&str>,
     spacecraft_name: &BTreeMap<&str, &str>,
     lv_name: &BTreeMap<&str, &str>,
 ) -> String {
     match r.action.as_str() {
         "UnlockFacility" => {
             let target = r.unlock_target.as_deref().unwrap_or("");
-            // Facility unlock targets are full ids like "build_outpost"; locale ids are bare ("outpost").
-            let key = target.strip_prefix("build_").unwrap_or(target);
-            // Some research nodes carry `UnlockFacility` actions whose target
-            // is a spacecraft module (e.g. `module_crew_compartment`,
-            // `asteroid_engine_module`) — the facilities page filters those
-            // out, so the would-be anchor `facility-…` doesn't exist.  Only
-            // emit a cross-page link when an anchor is actually rendered.
-            let resolved_name = facility_name.get(key).copied();
-            let pretty = match resolved_name {
-                Some(name) if !name.is_empty() => smart_title_case(name),
-                _ => {
-                    // No locale name; humanize the raw id.
-                    if key.contains('_')
-                        || key.chars().all(|c| c.is_lowercase() || c == '_' || c.is_ascii_digit())
-                    {
-                        title_case_words(&key.replace('_', " "))
-                    } else {
-                        smart_title_case(key)
-                    }
-                }
-            };
-            if facility_anchored.contains(key) {
-                let link = link_cross_page("facilities", "facility", key, &format!("**{pretty}**"));
-                format!("Builds {link}")
-            } else {
-                format!("Builds **{pretty}**")
-            }
+            let pretty = resolve_facility_or_module_unlock(
+                target,
+                facility_name,
+                facility_anchored,
+                cargo_name,
+                module_anchored,
+            );
+            format!("Builds {pretty}")
         }
         "UnlockSpacecraftType" => {
             let target = r.unlock_target.as_deref().unwrap_or("");
@@ -5824,6 +5960,16 @@ fn page_research(locale: &Locale, sirenix: &Sirenix) -> String {
         .iter()
         .map(|s| (s.id.as_str(), s.name.as_str()))
         .collect();
+    // Transportable-modules names — the `module_*` / `id_SpaceModule_*`
+    // payload equipment (mining rigs, crew capacity, the Space Station core
+    // modules) live in `locale.cargo`, not `locale.facilities`. A research
+    // node's `UnlockFacility` action can target either bucket; check this
+    // one when the facility bucket comes up empty.
+    let cargo_name: BTreeMap<&str, &str> = locale
+        .cargo
+        .iter()
+        .map(|c| (c.id.as_str(), c.name.as_str()))
+        .collect();
 
     // Mirror page_facilities' filter so we only emit cross-page links when an
     // anchor will actually be rendered there.  Orbital descriptors (e.g. crew
@@ -5842,6 +5988,15 @@ fn page_research(locale: &Locale, sirenix: &Sirenix) -> String {
                 .iter()
                 .any(|lf| lf.id == *id && !lf.name.is_empty())
         })
+        .collect();
+    // Mirror page_space_modules' render filter (`space_module_renders`) so we
+    // only link a `module_*` unlock target to the Transportable Modules page
+    // when it will actually have an anchor there.
+    let module_anchored: std::collections::BTreeSet<&str> = sirenix
+        .space_modules
+        .iter()
+        .filter(|m| space_module_renders(m, &cargo_name))
+        .map(|m| m.id.as_str())
         .collect();
 
     // Every research node a player can interact with goes on the page.  `showInTree`
@@ -5979,7 +6134,15 @@ research tree (Computing, Chemical Propulsion, Spacecraft, …).\n\n",
                         era_label(r.stage).to_string(),
                         fmt_starting_corps(&r.id),
                         prereqs,
-                        fmt_research_unlock(r, &facility_name, &facility_anchored, &spacecraft_name, &lv_name),
+                        fmt_research_unlock(
+                            r,
+                            &facility_name,
+                            &facility_anchored,
+                            &cargo_name,
+                            &module_anchored,
+                            &spacecraft_name,
+                            &lv_name,
+                        ),
                         escape_cell(&desc_for(&r.id)),
                     ]
                 })
@@ -6981,6 +7144,38 @@ mod tests {
         }
     }
 
+    /// Regression test: Space Stations facilities skip the `build_` prefix
+    /// (`station_modular_construction`), so a contract's `BuildFacility`
+    /// objective targeting one used to fall through
+    /// `resolve_objective_target`'s final generic fallback and render the
+    /// raw, lowercase, unresolved id instead of the real locale name.
+    #[test]
+    fn build_facility_objective_resolves_station_prefixed_facility_name() {
+        let mut locale = contracts_fixture_locale();
+        locale.facilities.push(Facility {
+            id: "station_modular_construction".into(),
+            name: "Modular Microgravity Station".into(),
+            description: String::new(),
+        });
+        let sirenix = Sirenix {
+            contracts: vec![make_contract(
+                "contract_tutorial_moonlanding",
+                vec![obj("BuildFacility", 1.0, Some("station_modular_construction"))],
+                vec![],
+            )],
+            ..Default::default()
+        };
+        let page = page_contracts(&locale, &sirenix);
+        assert!(
+            page.contains("Modular Microgravity Station"),
+            "real facility name missing from objective text:\n{page}"
+        );
+        assert!(
+            !page.contains("station modular construction"),
+            "raw unresolved lowercase id leaked into objective text:\n{page}"
+        );
+    }
+
     #[test]
     fn make_research_renders_research_display_name_no_quantity() {
         let locale = contracts_fixture_locale();
@@ -7340,6 +7535,35 @@ mod tests {
         assert!(
             page.contains("[Geothermal Power](../facilities/#facility-geothermal)"),
             "producers cell should link facility name to facilities-page anchor:\n{page}"
+        );
+    }
+
+    /// Regression test for the `he3mine_big` bug: a facility that produces a
+    /// resource but has NO locale name (so it never renders a row — and
+    /// therefore never gets an anchor — on the facilities page) must be
+    /// silently dropped from the resources-page producer list, not shown as
+    /// a raw-id link to a nonexistent anchor.
+    #[test]
+    fn resources_page_producer_list_drops_facility_without_locale_name() {
+        let locale = nav_fixture_locale();
+        let mut nameless = facility_stat("build_he3mine_big", "Mining");
+        nameless.produces = vec![ResourceCost {
+            resource_id: "hel3".into(),
+            amount: 5.0,
+        }];
+        let sirenix = Sirenix {
+            resources: vec![make_resource_stat("hel3", "Normal")],
+            facilities: vec![nameless],
+            ..Default::default()
+        };
+        let page = page_resources(&locale, &sirenix);
+        assert!(
+            !page.contains("he3mine_big"),
+            "nameless facility must not leak its raw id into the resources page:\n{page}"
+        );
+        assert!(
+            !page.contains("#facility-he3mine-big") && !page.contains("#facility-he3mine_big"),
+            "resources page must not link to a facility anchor that never renders:\n{page}"
         );
     }
 
@@ -8573,6 +8797,59 @@ mod tests {
             "internal id 'module_basemining' must not appear in player-facing markup");
         assert!(!page.contains("id_SpaceModule_ISRU"),
             "internal id 'id_SpaceModule_ISRU' must not appear in player-facing markup");
+    }
+
+    /// Regression test for the Space Station modules that went missing
+    /// entirely: `module_station_lab` ("Lab" ability) and
+    /// `module_station_drydock` ("BuildSpacecraft" ability) used
+    /// `specialAbilityFacilityNew` values `space_module_section` didn't map
+    /// to any section, so they silently vanished from the page even though
+    /// they have real locale names and real data.
+    #[test]
+    fn space_modules_page_renders_lab_and_buildspacecraft_abilities() {
+        let mut locale = space_modules_fixture_locale();
+        locale.cargo.push(NameDesc {
+            id: "module_station_lab".into(),
+            name: "Laboratory Module".into(),
+            description: "Conducts experiments.".into(),
+        });
+        locale.cargo.push(NameDesc {
+            id: "module_station_drydock".into(),
+            name: "Spacecraft Construction Module".into(),
+            description: "Assembles spacecraft.".into(),
+        });
+        let sirenix = Sirenix {
+            space_modules: vec![
+                make_space_module("module_station_lab", "Engine", "Lab", 3.0, false),
+                make_space_module("module_station_drydock", "Engine", "BuildSpacecraft", 4.0, false),
+            ],
+            ..Default::default()
+        };
+        let page = page_space_modules(&locale, &sirenix);
+        assert!(
+            page.contains("Laboratory Module"),
+            "Station Lab module missing from Transportable Modules page:\n{page}"
+        );
+        assert!(
+            page.contains("Spacecraft Construction Module"),
+            "Station Drydock module missing from Transportable Modules page:\n{page}"
+        );
+    }
+
+    /// Every rendered module row must carry a stable inline anchor so other
+    /// pages (e.g. the research page's Unlocks column) can link to it.
+    #[test]
+    fn space_modules_page_emits_anchor_per_row() {
+        let locale = space_modules_fixture_locale();
+        let sirenix = Sirenix {
+            space_modules: vec![make_space_module("module_basemining", "Engine", "Mining", 0.2, false)],
+            ..Default::default()
+        };
+        let page = page_space_modules(&locale, &sirenix);
+        assert!(
+            page.contains("<a id=\"module-module-basemining\"></a>"),
+            "module row should carry an inline anchor tag:\n{page}"
+        );
     }
 
     /// Placeholder modules with `specialAbilityFacilityNew == "None"`
@@ -9830,6 +10107,50 @@ mod tests {
         );
     }
 
+    /// Regression test: when the `UnlockFacility` target actually IS a real,
+    /// rendering Transportable Module (e.g. the Space Station core modules),
+    /// the Unlocks cell must link to it — not fall back to a raw/derived
+    /// unlinked label. Reproduces the "Module Station Farm" bug: the research
+    /// node unlocking `module_station_farm` (locale name "Agriculture
+    /// Module") should show a real link to the transportable-modules page.
+    #[test]
+    fn research_unlockfacility_links_to_real_transportable_module() {
+        let mut locale = nav_fixture_locale();
+        locale.cargo.push(NameDesc {
+            id: "module_station_farm".into(),
+            name: "Agriculture Module".into(),
+            description: "Cultivates crops.".into(),
+        });
+        let sirenix = Sirenix {
+            research: vec![make_research(
+                "research_lifesup_1",
+                "UnlockFacility",
+                Some("module_station_farm"),
+            )],
+            space_modules: vec![make_space_module(
+                "module_station_farm",
+                "Engine",
+                "Refiner",
+                0.0,
+                true,
+            )],
+            ..Default::default()
+        };
+        let page = page_research(&locale, &sirenix);
+        assert!(
+            page.contains("Agriculture Module"),
+            "real module name missing from Unlocks cell:\n{page}"
+        );
+        assert!(
+            !page.contains("Module Station Farm"),
+            "raw humanized id leaked instead of the real locale name:\n{page}"
+        );
+        assert!(
+            page.contains("../transportable-modules/#module-module-station-farm"),
+            "Unlocks cell did not link to the module's real transportable-modules anchor:\n{page}"
+        );
+    }
+
     #[test]
     fn fmt_magnitude_abs_preserves_subunit_precision() {
         // Integer round-trips without a decimal point.
@@ -9918,6 +10239,60 @@ mod tests {
         }
     }
 
+    /// Regression test for the "Release Station" family: the game's own
+    /// locale CSV ships the description as the unsubstituted template
+    /// "Releases {0} to the surface" for all 11 members, and hardcodes the
+    /// Uranium member's name as "Uran Release Station" (the internal
+    /// resource short-code) instead of the real resource name ("Fissiles").
+    /// `normalize_deposition_facility_locale` should fix both by deriving
+    /// the resource from the facility's `produces` field.
+    #[test]
+    fn normalize_deposition_facility_locale_substitutes_resource_name() {
+        let mut locale = Locale {
+            celestial_bodies: vec![],
+            spacecraft: vec![],
+            launch_vehicles: vec![],
+            research: vec![],
+            corporations: vec![],
+            contracts: vec![],
+            resources: vec![
+                ResourceEntry { id: "uran".into(), name: "Fissiles".into() },
+                ResourceEntry { id: "volatile".into(), name: "Carbon".into() },
+            ],
+            facilities: vec![
+                Facility {
+                    id: "uran_deposition".into(),
+                    name: "Uran Release Station".into(),
+                    description: "Releases {0} to the surface".into(),
+                },
+                Facility {
+                    id: "carbon_deposition".into(),
+                    name: "Carbon Release Station".into(),
+                    description: "Releases {0} to the surface".into(),
+                },
+            ],
+            habitability_scales: BTreeMap::new(),
+            cargo: vec![],
+        };
+        let mut uran_fac = facility_stat("build_uran_deposition", "Mining");
+        uran_fac.produces = vec![ResourceCost { resource_id: "uran".into(), amount: 0.0 }];
+        let mut carbon_fac = facility_stat("build_carbon_deposition", "Mining");
+        carbon_fac.produces = vec![ResourceCost { resource_id: "volatile".into(), amount: 1.0 }];
+        let sirenix = Sirenix {
+            facilities: vec![uran_fac, carbon_fac],
+            ..Default::default()
+        };
+
+        normalize_deposition_facility_locale(&mut locale, &sirenix);
+
+        let uran = locale.facilities.iter().find(|f| f.id == "uran_deposition").unwrap();
+        assert_eq!(uran.name, "Fissiles Release Station");
+        assert_eq!(uran.description, "Releases Fissiles to the surface");
+        let carbon = locale.facilities.iter().find(|f| f.id == "carbon_deposition").unwrap();
+        assert_eq!(carbon.name, "Carbon Release Station");
+        assert_eq!(carbon.description, "Releases Carbon to the surface");
+    }
+
     #[test]
     fn facilities_page_renders_build_time_column() {
         let locale = facility_fixture_locale();
@@ -9938,6 +10313,57 @@ mod tests {
             .find(|l| l.contains("Research Lab"))
             .expect("Research Lab row present");
         assert!(row.contains("200"), "row should show 200-day build time: {row}");
+    }
+
+    /// Regression test for the Spin-Grav City/Habitat/Complex duplicate-id
+    /// bug: a facility whose placement lists both "Surface" and "Orbit"
+    /// (every current example is a `build_space_*` id, whose siblings are
+    /// all Orbit-only) must render exactly once — as an Orbital module, not
+    /// duplicated into Ground facilities too with the same HTML anchor.
+    #[test]
+    fn facilities_page_dual_placement_facility_renders_once_under_orbital() {
+        let locale = facility_fixture_locale();
+        let mut f = facility_stat("build_habitat", "Habitation");
+        f.placement = "Surface, Orbit".into();
+        let sirenix = Sirenix {
+            facilities: vec![f],
+            ..Default::default()
+        };
+        let page = page_facilities(&locale, &sirenix);
+        let anchor = "<a id=\"facility-habitat\"></a>";
+        assert_eq!(
+            page.matches(anchor).count(),
+            1,
+            "dual-placement facility must render exactly once (invalid duplicate HTML id otherwise):\n{page}"
+        );
+        let ground_part = page.split("## Orbital modules").next().unwrap_or(&page);
+        assert!(
+            !ground_part.contains(anchor),
+            "dual-placement facility leaked into the Ground facilities section:\n{page}"
+        );
+    }
+
+    /// `SpaceStation` is a third placement value (used by the buildable
+    /// station-segment facility) that isn't "Surface" or "Orbit" text — it
+    /// must still route to the Orbital modules section, not the "unknown
+    /// placement defaults to ground" fallback.
+    #[test]
+    fn facilities_page_spacestation_placement_renders_under_orbital() {
+        let locale = facility_fixture_locale();
+        let mut f = facility_stat("build_lab", "SpaceStation");
+        f.placement = "SpaceStation".into();
+        let sirenix = Sirenix {
+            facilities: vec![f],
+            ..Default::default()
+        };
+        let page = page_facilities(&locale, &sirenix);
+        let anchor = "<a id=\"facility-lab\"></a>";
+        let ground_part = page.split("## Orbital modules").next().unwrap_or(&page);
+        assert!(
+            !ground_part.contains(anchor),
+            "SpaceStation-placement facility should not render in the Ground section:\n{page}"
+        );
+        assert_eq!(page.matches(anchor).count(), 1);
     }
 
     #[test]
@@ -12890,12 +13316,11 @@ fn detect_game_version_from_project_settings(path: &Path) -> Option<String> {
     None
 }
 
-/// Look for a Unity `ProjectSettings.asset` near the cache layout that
-/// `extract.sh` produces and return its `bundleVersion`.  The cache lives
-/// at `extract/cache/project/ExportedProject/ProjectSettings/ProjectSettings.asset`
-/// relative to the workspace root, and `gen-pages` is typically invoked
-/// with stats.json at `extract/cache/stats.json` — so we walk up from the
-/// stats path and check the expected sibling layout.
+/// Look for a Unity `ProjectSettings.asset` under the game-source export
+/// directory (`$SOLAR_EXPANSE_GAME_SOURCE`; see `extract.sh`) and return its
+/// `bundleVersion`.  `gen-pages` is typically invoked with stats.json at
+/// `extract/cache/stats.json` — so we walk up from the stats path and check
+/// the expected sibling layout.
 fn auto_detect_game_version(stats_path: &Path) -> Option<String> {
     let cache_dir = stats_path.parent()?;
     let candidate = cache_dir
@@ -12937,7 +13362,7 @@ fn main() -> Result<()> {
         .or_else(|| auto_detect_game_version(&stats_path))
         .unwrap_or_else(|| "unknown".to_string());
 
-    let locale: Locale = serde_json::from_str(&fs::read_to_string(&locale_path)?)
+    let mut locale: Locale = serde_json::from_str(&fs::read_to_string(&locale_path)?)
         .with_context(|| format!("parsing {}", locale_path.display()))?;
     let stats: Stats = serde_json::from_str(&fs::read_to_string(&stats_path)?)
         .with_context(|| format!("parsing {}", stats_path.display()))?;
@@ -12960,6 +13385,7 @@ fn main() -> Result<()> {
         }
         None => TerraformationData::default(),
     };
+    normalize_deposition_facility_locale(&mut locale, &sirenix);
     let ctx = WikiCtx::build(&locale, &stats);
 
     write_file(&wiki_root, "README.md", &page_root())?;

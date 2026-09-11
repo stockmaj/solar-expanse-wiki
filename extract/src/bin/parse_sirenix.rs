@@ -1156,7 +1156,17 @@ fn parse_research(v: &Value) -> Option<Research> {
 
 fn parse_facility(v: &Value, descriptor: &str) -> Option<Facility> {
     let id = v.get("id")?.as_str()?.to_string();
-    if !id.starts_with("build_") {
+    // Almost every GroundFacilityDescriptor/SpaceModuleDescriptor entry uses
+    // the `build_<id>` naming convention. The Space Stations feature added a
+    // second, unprefixed `station_<id>` family (station_modular_construction,
+    // station_rotary_construction, station_rotary_segment) that this filter
+    // used to drop entirely — losing the "Station Modular/Rotary
+    // Construction" facilities and the buildable station-segment facility.
+    // Everything else without either prefix (legacy `NuclearReactor` /
+    // `*Test` placeholder entries, hidden `module_station_*_hide` variants)
+    // has no locale name either, so it's still dropped downstream by the
+    // "no locale name" rule the renderer applies uniformly.
+    if !id.starts_with("build_") && !id.starts_with("station_") {
         return None;
     }
     let lower = id.to_ascii_lowercase();
@@ -3956,6 +3966,37 @@ mod tests {
         let produced_ids: Vec<&str> = f.produces.iter().map(|c| c.resource_id.as_str()).collect();
         assert_eq!(produced_ids, vec!["uran"]);
         assert!(f.consumes.is_empty());
+    }
+
+    /// Regression test for the Space Stations bug where `parse_facility`
+    /// required a `build_` prefix and silently dropped the whole
+    /// `station_<id>` family (station_modular_construction,
+    /// station_rotary_construction, station_rotary_segment), which never
+    /// got that prefix in the game's own data.
+    #[test]
+    fn facility_accepts_bare_station_prefix_id() {
+        let v = serde_json::json!({
+            "id": "station_modular_construction",
+            "facilityType": "SpaceStation",
+            "possiblePlacement": "Orbit",
+        });
+        let f = parse_facility(&v, "Ground").expect("station_ prefixed id must parse");
+        assert_eq!(f.id, "station_modular_construction");
+        assert_eq!(f.facility_type, "SpaceStation");
+    }
+
+    /// Ids that carry neither the `build_` nor `station_` prefix (legacy
+    /// test/placeholder facilities like `NuclearReactor`, `SolarPanel`) stay
+    /// excluded — they have no locale name either, so keeping them out avoids
+    /// ever needing to leak a raw id downstream.
+    #[test]
+    fn facility_rejects_unprefixed_non_station_id() {
+        let v = serde_json::json!({
+            "id": "NuclearReactor",
+            "facilityType": "Module",
+            "possiblePlacement": "Surface",
+        });
+        assert!(parse_facility(&v, "Ground").is_none());
     }
 
     #[test]

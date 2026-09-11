@@ -201,20 +201,32 @@ fn facilities(keys: &BTreeMap<String, String>) -> Vec<Facility> {
     //   build_<id>             → short display name (e.g. "OUTPOST")
     //   build_<id>_Description → long blurb
     //   ToolTip_build_<id>     → tooltip text (fallback when no _Description exists)
+    //
+    // The Space Stations feature added a second family that skips the
+    // `build_` prefix entirely: `station_modular_construction`,
+    // `station_rotary_construction`, `station_rotary_segment` are stored as
+    // bare `station_<id>` / `station_<id>_Description` keys. `station_` isn't
+    // used as a bare-key namespace by anything else in the CSV (every other
+    // category — module_, spacecraft_, lv_, id_resource_, etc. — has its own
+    // prefix), so it's safe to collect alongside `build_`.
     let mut out: Vec<Facility> = Vec::new();
     for (k, v) in keys {
         if k.starts_with("ToolTip_") || k.ends_with("_Description") || k.ends_with("_fluff") {
             continue;
         }
-        let id = match k.strip_prefix("build_") {
-            Some(rest) => rest.to_string(),
-            None => continue,
+        let id = if let Some(rest) = k.strip_prefix("build_") {
+            rest.to_string()
+        } else if k.starts_with("station_") {
+            k.clone()
+        } else {
+            continue;
         };
         if v.is_empty() {
             continue;
         }
         let desc = keys
             .get(&format!("build_{id}_Description"))
+            .or_else(|| keys.get(&format!("{id}_Description")))
             .or_else(|| keys.get(&format!("ToolTip_build_{id}")))
             .cloned()
             .unwrap_or_default();
@@ -309,6 +321,30 @@ mod tests {
         assert_eq!(cat.category, "category");
         assert_eq!(topic.category, "topic");
         assert_eq!(cat.description, "Burn stuff.");
+    }
+
+    /// Space Stations facilities use a bare `station_<id>` key family instead
+    /// of the usual `build_<id>` prefix. Regression test for the bug where
+    /// `facilities()` only recognized `build_` and silently dropped
+    /// `station_modular_construction` / `station_rotary_construction` /
+    /// `station_rotary_segment`, losing their locale names entirely.
+    #[test]
+    fn facilities_includes_bare_station_prefix_entries() {
+        let keys = load(
+            "build_alloymine,EXOTIC ALLOY EXTRACTOR\n\
+             build_alloymine_Description,Extracts alloys.\n\
+             station_modular_construction,Modular Microgravity Station\n\
+             station_modular_construction_Description,A central structural framework.\n",
+        );
+        let facs = facilities(&keys);
+        let build_fac = facs.iter().find(|f| f.id == "alloymine").expect("build_ facility present");
+        assert_eq!(build_fac.name, "EXOTIC ALLOY EXTRACTOR");
+        let station_fac = facs
+            .iter()
+            .find(|f| f.id == "station_modular_construction")
+            .expect("station_ facility present");
+        assert_eq!(station_fac.name, "Modular Microgravity Station");
+        assert_eq!(station_fac.description, "A central structural framework.");
     }
 
     #[test]
