@@ -68,6 +68,27 @@
   });
 })();
 
+// Mobile nav toggle. On narrow viewports the nav is collapsed by default
+// (see wiki.css @media max-width:720px) since every group's dropdown is
+// always expanded there — left open by default it fills the whole screen
+// with no way to reach page content. This just flips it open/closed.
+(function () {
+  function bind() {
+    var btn = document.querySelector('.nav-toggle');
+    var nav = document.getElementById('site-nav');
+    if (!btn || !nav) return;
+    btn.addEventListener('click', function () {
+      var open = nav.classList.toggle('nav-open');
+      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bind);
+  } else {
+    bind();
+  }
+})();
+
 // "Show unreleased" toggle.
 (function () {
   function bind() {

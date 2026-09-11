@@ -81,6 +81,23 @@ html, body {
 .site-header nav > a:hover { color: var(--fg); background: rgba(255,255,255,0.04); }
 .site-header nav > a.active { color: var(--accent); background: rgba(255,179,71,0.08); }
 
+/* Hamburger toggle: desktop never sees it (nav is always visible there).
+ * Shown only inside the max-width:720px block below, which is also where
+ * it starts actually controlling the nav's visibility. */
+.nav-toggle {
+  display: none;
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  font-size: 18px;
+  line-height: 1;
+  padding: 4px 10px;
+  cursor: pointer;
+  margin-left: auto;
+}
+.nav-toggle:hover, .nav-toggle:focus { background: rgba(255,255,255,0.04); outline: none; }
+
 /* ---------- Grouped nav dropdowns ----------
  *
  * Each top-level item is a .nav-group containing a .nav-trigger button
@@ -176,13 +193,23 @@ html, body {
 /* Narrow viewports: dropdowns become full-width inline stacks instead
  * of floating menus, so the nav doesn't overflow off-screen on phones.
  * Each group is shown as its trigger plus an always-visible vertical
- * list of its children. */
+ * list of its children.
+ *
+ * The nav itself is collapsed behind the hamburger toggle by default —
+ * with every group's children always expanded (see .nav-dropdown below),
+ * an always-visible nav is tall enough to fill the whole screen and never
+ * scroll past on a phone. wiki.js toggles the .nav-open class. */
 @media (max-width: 720px) {
+  .nav-toggle { display: inline-flex; align-items: center; justify-content: center; }
   .site-header nav {
+    display: none;
     width: 100%;
     flex-direction: column;
     align-items: stretch;
     gap: 4px;
+  }
+  .site-header nav.nav-open {
+    display: flex;
   }
   .nav-group {
     display: block;

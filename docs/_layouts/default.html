@@ -11,7 +11,8 @@
   <header class="site-header">
     <div class="container">
       <a class="brand" href="{{ '/' | relative_url }}">Solar Expanse Wiki</a>
-      <nav>
+      <button class="nav-toggle" type="button" aria-label="Menu" aria-expanded="false" aria-controls="site-nav">☰</button>
+      <nav id="site-nav">
         {%- assign u = page.url | downcase -%}
 
         {%- comment -%}
